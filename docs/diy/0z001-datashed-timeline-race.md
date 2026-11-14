@@ -61,7 +61,8 @@ Start each *DifferentialEvent*[^][differential-event] with one
 
 Preserve *context*[^][context] for later *CommitMarker*[^][commit-marker] replication.
 
-Use format `101` and pad each complete envelope to a multiple of sixteen bytes.
+Use format `101` and pad each complete envelope to a multiple of sixteen bytes
+to preserve stable, *FlexBuffers-friendly*[^][flexbuffers] alignment.
 Compose append-only chunks, locating
 each *marker's*[^][commit-marker] raw `blob` bytes in its finalized chunk.
 Append a final *range manifest*[^][range-manifest] indexing preceding

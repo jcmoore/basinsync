@@ -810,7 +810,7 @@ try {
     const tailBytes=await footer.Body!.transformToByteArray();assert.equal(tailBytes.length,8);
     const contentLength=new DataView(tailBytes.buffer,tailBytes.byteOffset,tailBytes.byteLength).getUint32(0,true);
     const alignment=2**(tailBytes[4]&31);assert.equal(alignment,16);
-    const span=16+Math.ceil(contentLength/alignment)*alignment;
+    const span=Math.ceil((contentLength+16)/alignment)*alignment;
     const last=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=-${span}`}));
     const manifestBytes=await last.Body!.transformToByteArray(),manifest=previousEnvelope(manifestBytes,manifestBytes.length);
     const query=toObject(new Uint8Array(manifest.content)) as any[];

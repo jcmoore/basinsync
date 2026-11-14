@@ -3,20 +3,20 @@ use anyhow::{Context, Result, ensure};
 
 pub const FLEXBUFFERS: u8 = 5;
 const ALIGNMENT_POWER: u8 = 4;
-const ALIGNMENT: usize = 1 << ALIGNMENT_POWER;
 const FRAME: usize = 8;
 
 fn alignment(descriptor: u8) -> Result<usize> {
-    let power = descriptor & 31;
     ensure!(
-        matches!(power, 3 | 4) && matches!(descriptor >> 5, 0 | 4 | 5),
+        matches!(descriptor >> 5, 0 | 4 | 5),
         "unsupported EnvBuf descriptor"
     );
-    Ok(1 << power)
+    Ok(1usize << (descriptor & 31))
 }
 
-fn padded_length(length: usize, alignment: usize) -> Result<usize> {
+fn frame_length(length: usize, alignment: usize) -> Result<usize> {
     Ok(length
+        .checked_add(FRAME * 2)
+        .context("EnvBuf length overflow")?
         .checked_add(alignment - 1)
         .context("EnvBuf length overflow")?
         / alignment
@@ -33,19 +33,36 @@ pub struct Envelope<'a> {
 }
 
 pub fn append(output: &mut Vec<u8>, content: &[u8], format: u8) -> Result<usize> {
+    append_with_alignment(output, content, format, ALIGNMENT_POWER)
+}
+
+pub fn append_with_alignment(
+    output: &mut Vec<u8>,
+    content: &[u8],
+    format: u8,
+    alignment_power: u8,
+) -> Result<usize> {
     ensure!(
-        output.len().is_multiple_of(ALIGNMENT),
-        "unaligned EnvBuf header"
+        alignment_power <= 31,
+        "EnvBuf alignment power exceeds five bits"
     );
     ensure!(matches!(format, 0 | 4 | 5), "reserved EnvBuf format");
+    let descriptor = (format << 5) | alignment_power;
+    let alignment = alignment(descriptor)?;
+    ensure!(
+        output.len().is_multiple_of(alignment),
+        "unaligned EnvBuf header"
+    );
     let length = u32::try_from(content.len()).context("EnvBuf exceeds u32 content length")?;
-    let descriptor = (format << 5) | ALIGNMENT_POWER;
+    let end = output
+        .len()
+        .checked_add(frame_length(content.len(), alignment)?)
+        .context("EnvBuf length overflow")?;
     output.extend_from_slice(b"enV");
     output.push(descriptor);
     output.extend_from_slice(&length.to_le_bytes());
     output.extend_from_slice(content);
-    let padding = padded_length(content.len(), ALIGNMENT)? - content.len();
-    output.resize(output.len() + padding, 0xee);
+    output.resize(end - FRAME, 0xee);
     output.extend_from_slice(&length.to_le_bytes());
     output.push(descriptor);
     output.extend_from_slice(b"vNE");
@@ -53,7 +70,6 @@ pub fn append(output: &mut Vec<u8>, content: &[u8], format: u8) -> Result<usize>
 }
 
 pub fn at(bytes: &[u8], start: usize) -> Result<Envelope<'_>> {
-    ensure!(start.is_multiple_of(FRAME), "unaligned EnvBuf header");
     let header = bytes
         .get(start..start.checked_add(FRAME).context("EnvBuf offset overflow")?)
         .context("truncated EnvBuf header")?;
@@ -66,12 +82,10 @@ pub fn at(bytes: &[u8], start: usize) -> Result<Envelope<'_>> {
     let content_end = content_start
         .checked_add(length)
         .context("EnvBuf length overflow")?;
-    let footer_start = content_start
-        .checked_add(padded_length(length, alignment)?)
+    let end = start
+        .checked_add(frame_length(length, alignment)?)
         .context("EnvBuf length overflow")?;
-    let end = footer_start
-        .checked_add(FRAME)
-        .context("EnvBuf length overflow")?;
+    let footer_start = end - FRAME;
     let footer = bytes
         .get(footer_start..end)
         .context("truncated EnvBuf footer")?;
@@ -97,20 +111,14 @@ pub fn at(bytes: &[u8], start: usize) -> Result<Envelope<'_>> {
 }
 
 pub fn before(bytes: &[u8], end: usize) -> Result<Envelope<'_>> {
-    ensure!(end.is_multiple_of(FRAME), "unaligned EnvBuf footer");
     let footer = bytes
         .get(end.checked_sub(FRAME).context("truncated EnvBuf footer")?..end)
         .context("truncated EnvBuf footer")?;
     let length = u32::from_le_bytes(footer[..4].try_into()?) as usize;
     let alignment = alignment(footer[4])?;
     ensure!(end.is_multiple_of(alignment), "unaligned EnvBuf footer");
-    let padded = padded_length(length, alignment)?;
     let start = end
-        .checked_sub(
-            padded
-                .checked_add(FRAME * 2)
-                .context("EnvBuf length overflow")?,
-        )
+        .checked_sub(frame_length(length, alignment)?)
         .context("EnvBuf footer length exceeds prefix")?;
     let envelope = at(bytes, start)?;
     ensure!(envelope.end == end, "EnvBuf reverse boundary mismatch");
@@ -194,6 +202,34 @@ mod tests {
         assert_eq!(all(&bytes)?.len(), 2);
         assert_eq!(before(&bytes, 48)?, at(&bytes, 24)?);
         assert_eq!(before(&bytes, 24)?.content, [1]);
+        Ok(())
+    }
+    #[test]
+    fn full_frame_rounds_up_to_its_declared_alignment() -> Result<()> {
+        for power in 0..=10 {
+            let alignment = 1usize << power;
+            let mut bytes = vec![];
+            for length in 0..=128 {
+                let start = bytes.len();
+                let content = vec![0x42; length];
+                let end = append_with_alignment(&mut bytes, &content, FLEXBUFFERS, power)?;
+                assert_eq!(end - start, (length + 16).next_multiple_of(alignment));
+                assert_eq!((end - start) % alignment, 0);
+                assert_eq!(bytes[start + 3] & 31, power);
+                let frame = at(&bytes, start)?;
+                assert_eq!(frame.content, content);
+                assert_eq!(frame, before(&bytes, end)?);
+            }
+            assert_eq!(all(&bytes)?.len(), 129);
+        }
+        assert_eq!(frame_length(0, 1usize << 31)?, 1usize << 31);
+        assert!(append_with_alignment(&mut vec![], &[], FLEXBUFFERS, 32).is_err());
+        // With 32-byte alignment, the framing itself fills half the first block.
+        let mut bytes = vec![];
+        assert_eq!(
+            append_with_alignment(&mut bytes, &[1; 16], FLEXBUFFERS, 5)?,
+            32
+        );
         Ok(())
     }
     proptest! {

@@ -18,6 +18,20 @@ test("EnvBuf still reads power-three frames",()=>{
   const frame=new Uint8Array([0x65,0x6e,0x56,0xa3,1,0,0,0,1,...new Array(7).fill(0xee),1,0,0,0,0xa3,0x76,0x4e,0x45]),bytes=concat([frame,frame]);
   expect(all(bytes).length).toBe(2);expect(before(bytes,48)).toEqual(at(bytes,24));expect(before(bytes,24).content).toEqual(new Uint8Array([1]));
 });
+test("complete EnvBuf sizes round up to the declared alignment, including framing",()=>{
+  for(let power=0;power<=10;power++){
+    const alignment=2**power,chunks=[];
+    for(let length=0;length<=128;length++){
+      const content=new Uint8Array(length).fill(0x42),frame=wrap(content,5,power);
+      expect(frame.length).toBe(Math.ceil((length+16)/alignment)*alignment);
+      expect(frame[3]&31).toBe(power);expect(at(frame,0).content).toEqual(content);chunks.push(frame);
+    }
+    const bytes=concat(chunks),frames=all(bytes);expect(frames.length).toBe(129);
+    for(const frame of frames){expect((frame.end-frame.start)%alignment).toBe(0);expect(before(bytes,frame.end)).toEqual(frame);}
+  }
+  expect(wrap(new Uint8Array(16),5,5).length).toBe(32);
+  for(const power of [-1,1.5,32,NaN])expect(()=>wrap(new Uint8Array(),5,power)).toThrow();
+});
 test("EnvBuf supports aligned forward/reverse walks, nested magic, and padding validation",()=>{
   const contents=[new Uint8Array(),new Uint8Array([1]),new TextEncoder().encode("enV vNE"),new Uint8Array(256).fill(0xee)];
   const bytes=concat(contents.map(c=>wrap(c))),frames=all(bytes);expect(frames.map(f=>f.content)).toEqual(contents);
