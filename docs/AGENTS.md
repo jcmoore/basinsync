@@ -23,7 +23,8 @@ Use `UserHeap` for client-driven `Flow` nodes and `KernelHeap` for server-driven
 # Tutorial dependencies
 
 Tutorial filenames use canonical unsigned *Lexidecimal*[^][lexidecimal] depth prefixes; frontmatter
-lists direct prerequisites, each at a strictly smaller depth. For tutorial graph
+lists direct prerequisites, each at a strictly smaller depth. Tutorial slug
+suffixes must be unique across all depths. For tutorial graph
 edits or audits, use the *tutorial DAG skill*[^][SKILL] and its bundled Node.js linter.
 
 # Documentation links

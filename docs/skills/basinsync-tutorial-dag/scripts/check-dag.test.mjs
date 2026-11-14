@@ -67,6 +67,27 @@ test("graph comparisons do not truncate depths to machine precision", () => {
   });
 });
 
+test("suffixes must be unique across all depths, with both filenames reported", () => {
+  const first = "0z000-shared-topic.md";
+  const second = "0z001-shared-topic.md";
+  fixture({ [first]: frontmatter([]), [second]: frontmatter([first]) }, directory => {
+    const result = lintTutorials(directory);
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0], /duplicate tutorial suffix "shared-topic"/);
+    assert(result.errors[0].includes(first) && result.errors[0].includes(second));
+    const cli = spawnSync(process.execPath, [core, directory], { encoding: "utf8" });
+    assert.equal(cli.status, 1);
+    assert.match(cli.stderr, /duplicate tutorial suffix/);
+  });
+});
+
+test("distinct suffixes may share trailing words", () => {
+  fixture({
+    "0z000-shared-topic.md": frontmatter([]),
+    "0z001-other-shared-topic.md": frontmatter(["0z000-shared-topic.md"]),
+  }, directory => assert.deepEqual(lintTutorials(directory).errors, []));
+});
+
 for (const [description, files, expected] of [
   ["missing target", { [left]: frontmatter([root]) }, /missing prerequisite/],
   ["duplicate prerequisite", { [root]: frontmatter([]), [left]: frontmatter([root, root]) }, /duplicate prerequisite/],

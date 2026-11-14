@@ -50,6 +50,7 @@ function prerequisites(text) {
 export function lintTutorials(directory) {
   const errors = [];
   const graph = new Map();
+  const suffixes = new Map();
   for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
     if (!/\.md$/i.test(entry.name)) continue;
     if (!entry.isFile()) {
@@ -59,8 +60,14 @@ export function lintTutorials(directory) {
     let depth = null;
     let dependencies = [];
     try {
-      const match = /^(0z[0-9a-f]+)-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.exec(entry.name);
+      const match = /^(0z[0-9a-f]+)-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/.exec(entry.name);
       if (!match) throw new Error("expected <unsigned-Lexidecimal-depth>-<lowercase-slug>.md");
+      const previous = suffixes.get(match[2]);
+      if (previous) {
+        errors.push(`${entry.name}: duplicate tutorial suffix "${match[2]}" (also ${previous})`);
+      } else {
+        suffixes.set(match[2], entry.name);
+      }
       depth = decodeDepth(match[1]);
     } catch (error) {
       errors.push(`${entry.name}: ${error.message}`);
