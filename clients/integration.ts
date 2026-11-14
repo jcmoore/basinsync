@@ -809,12 +809,14 @@ try {
     const footer=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:"bytes=-8"}));
     const tailBytes=await footer.Body!.transformToByteArray();assert.equal(tailBytes.length,8);
     const contentLength=new DataView(tailBytes.buffer,tailBytes.byteOffset,tailBytes.byteLength).getUint32(0,true);
-    const span=16+Math.ceil(contentLength/8)*8;
+    const alignment=2**(tailBytes[4]&31);assert.equal(alignment,16);
+    const span=16+Math.ceil(contentLength/alignment)*alignment;
     const last=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=-${span}`}));
     const manifestBytes=await last.Body!.transformToByteArray(),manifest=previousEnvelope(manifestBytes,manifestBytes.length);
     const query=toObject(new Uint8Array(manifest.content)) as any[];
     assert.equal(query[2],"sts/0/databasin/rangemanifest");
-    assert.deepEqual(Object.keys(query[3].envelopes),envelopes(stored).slice(0,-1).map(e=>lex(BigInt(e.end))));
+    const frames=envelopes(stored);for(const frame of frames){assert.equal(frame.start%16,0);assert.equal(frame.end%16,0);}
+    assert.deepEqual(Object.keys(query[3].envelopes),frames.slice(0,-1).map(e=>lex(BigInt(e.end))));
     const current=(await fullStatus(app.url,"public")).latest!;
     assert.equal(current.viewpoint,1n);assert.equal(current.length,target.length);
     assert.equal(current.headers?.Range,`bytes=${range.offset}-${range.offset+range.length-1}`);

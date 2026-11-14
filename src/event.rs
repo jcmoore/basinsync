@@ -497,7 +497,7 @@ fn historical_ranges(bytes: &[u8]) -> Result<Vec<BlobRange>> {
 mod envelope_tests {
     use super::*;
     fn commands() -> Vec<FlowCommand> {
-        [0usize, 1, 7, 8, 255, 256, 65535, 65536]
+        [0usize, 1, 7, 8, 15, 16, 17, 255, 256, 65535, 65536]
             .into_iter()
             .enumerate()
             .map(|(i, length)| {
@@ -530,6 +530,11 @@ mod envelope_tests {
         let bytes = chunks.finish(delta)?;
         let frames = crate::envbuf::all(&bytes)?;
         assert_eq!(frames.len(), commands.len() + 2);
+        assert!(
+            frames
+                .iter()
+                .all(|frame| (frame.end - frame.start).is_multiple_of(16))
+        );
         assert_eq!(
             crate::envbuf::before(&bytes, bytes.len())?,
             *frames.last().unwrap()

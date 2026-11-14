@@ -1,9 +1,27 @@
-//! Eight-byte aligned, bidirectionally traversable EnvBuf frames.
+//! Bidirectionally traversable EnvBuf frames, with a sixteen-byte total-size default.
 use anyhow::{Context, Result, ensure};
 
 pub const FLEXBUFFERS: u8 = 5;
-const ALIGNMENT_POWER: u8 = 3;
+const ALIGNMENT_POWER: u8 = 4;
+const ALIGNMENT: usize = 1 << ALIGNMENT_POWER;
 const FRAME: usize = 8;
+
+fn alignment(descriptor: u8) -> Result<usize> {
+    let power = descriptor & 31;
+    ensure!(
+        matches!(power, 3 | 4) && matches!(descriptor >> 5, 0 | 4 | 5),
+        "unsupported EnvBuf descriptor"
+    );
+    Ok(1 << power)
+}
+
+fn padded_length(length: usize, alignment: usize) -> Result<usize> {
+    Ok(length
+        .checked_add(alignment - 1)
+        .context("EnvBuf length overflow")?
+        / alignment
+        * alignment)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Envelope<'a> {
@@ -16,7 +34,7 @@ pub struct Envelope<'a> {
 
 pub fn append(output: &mut Vec<u8>, content: &[u8], format: u8) -> Result<usize> {
     ensure!(
-        output.len().is_multiple_of(FRAME),
+        output.len().is_multiple_of(ALIGNMENT),
         "unaligned EnvBuf header"
     );
     ensure!(matches!(format, 0 | 4 | 5), "reserved EnvBuf format");
@@ -26,7 +44,8 @@ pub fn append(output: &mut Vec<u8>, content: &[u8], format: u8) -> Result<usize>
     output.push(descriptor);
     output.extend_from_slice(&length.to_le_bytes());
     output.extend_from_slice(content);
-    output.resize(output.len().next_multiple_of(FRAME), 0xee);
+    let padding = padded_length(content.len(), ALIGNMENT)? - content.len();
+    output.resize(output.len() + padding, 0xee);
     output.extend_from_slice(&length.to_le_bytes());
     output.push(descriptor);
     output.extend_from_slice(b"vNE");
@@ -40,20 +59,16 @@ pub fn at(bytes: &[u8], start: usize) -> Result<Envelope<'_>> {
         .context("truncated EnvBuf header")?;
     ensure!(&header[..3] == b"enV", "invalid EnvBuf magic");
     let format = header[3] >> 5;
-    ensure!(
-        header[3] & 31 == ALIGNMENT_POWER && matches!(format, 0 | 4 | 5),
-        "unsupported EnvBuf descriptor"
-    );
+    let alignment = alignment(header[3])?;
+    ensure!(start.is_multiple_of(alignment), "unaligned EnvBuf header");
     let length = u32::from_le_bytes(header[4..8].try_into()?) as usize;
     let content_start = start + FRAME;
     let content_end = content_start
         .checked_add(length)
         .context("EnvBuf length overflow")?;
-    let footer_start = content_end
-        .checked_add(FRAME - 1)
-        .context("EnvBuf length overflow")?
-        / FRAME
-        * FRAME;
+    let footer_start = content_start
+        .checked_add(padded_length(length, alignment)?)
+        .context("EnvBuf length overflow")?;
     let end = footer_start
         .checked_add(FRAME)
         .context("EnvBuf length overflow")?;
@@ -87,11 +102,9 @@ pub fn before(bytes: &[u8], end: usize) -> Result<Envelope<'_>> {
         .get(end.checked_sub(FRAME).context("truncated EnvBuf footer")?..end)
         .context("truncated EnvBuf footer")?;
     let length = u32::from_le_bytes(footer[..4].try_into()?) as usize;
-    let padded = length
-        .checked_add(FRAME - 1)
-        .context("EnvBuf length overflow")?
-        / FRAME
-        * FRAME;
+    let alignment = alignment(footer[4])?;
+    ensure!(end.is_multiple_of(alignment), "unaligned EnvBuf footer");
+    let padded = padded_length(length, alignment)?;
     let start = end
         .checked_sub(
             padded
@@ -127,9 +140,9 @@ mod tests {
             bytes,
             [
                 b"enV".as_slice(),
-                &[0xa3, 1, 0, 0, 0, 1],
-                &[0xee; 7],
-                &[1, 0, 0, 0, 0xa3],
+                &[0xa4, 1, 0, 0, 0, 1],
+                &[0xee; 15],
+                &[1, 0, 0, 0, 0xa4],
                 b"vNE"
             ]
             .concat()
@@ -138,7 +151,7 @@ mod tests {
         append(&mut bytes, b"second command", FLEXBUFFERS)?;
         assert_eq!(at(&bytes, boundary)?, before(&bytes, bytes.len())?);
         assert_eq!(before(&bytes, boundary)?.content, [1]);
-        for offset in [0, 3, 4, 9, 16, 20, 23] {
+        for offset in [0, 3, 4, 9, 24, 28, 31] {
             let mut bad = bytes.clone();
             bad[offset] ^= 1;
             assert!(all(&bad).is_err(), "offset {offset}");
@@ -150,11 +163,44 @@ mod tests {
         }
         Ok(())
     }
+    #[test]
+    fn total_frame_size_is_a_multiple_of_sixteen() -> Result<()> {
+        let mut bytes = vec![];
+        for length in 0..=1024 {
+            let start = bytes.len();
+            let content = vec![0x42; length];
+            let end = append(&mut bytes, &content, [0, 4, 5][length % 3])?;
+            assert_eq!(end - start, 16 + length.next_multiple_of(16));
+            assert_eq!(start % 16, 0);
+            assert_eq!(end % 16, 0);
+            let frame = at(&bytes, start)?;
+            assert_eq!(frame, before(&bytes, end)?);
+            assert_eq!(frame.content, content);
+        }
+        assert!(append(&mut vec![0; 8], &[], FLEXBUFFERS).is_err());
+        Ok(())
+    }
+    #[test]
+    fn reads_existing_power_three_frames() -> Result<()> {
+        let frame = [
+            b"enV".as_slice(),
+            &[0xa3, 1, 0, 0, 0, 1],
+            &[0xee; 7],
+            &[1, 0, 0, 0, 0xa3],
+            b"vNE",
+        ]
+        .concat();
+        let bytes = [frame.clone(), frame].concat();
+        assert_eq!(all(&bytes)?.len(), 2);
+        assert_eq!(before(&bytes, 48)?, at(&bytes, 24)?);
+        assert_eq!(before(&bytes, 24)?.content, [1]);
+        Ok(())
+    }
     proptest! {
         #[test]
         fn roundtrip_chunks(chunks in prop::collection::vec(prop::collection::vec(any::<u8>(),0..2048),0..30)) {
             let mut bytes=vec![];
-            for chunk in &chunks { append(&mut bytes,chunk,FLEXBUFFERS).unwrap(); }
+            for chunk in &chunks { append(&mut bytes,chunk,FLEXBUFFERS).unwrap(); prop_assert_eq!(bytes.len()%16,0); }
             let frames=all(&bytes).unwrap();
             prop_assert_eq!(frames.iter().map(|e|e.content.to_vec()).collect::<Vec<_>>(),chunks.clone());
             let mut end=bytes.len();
