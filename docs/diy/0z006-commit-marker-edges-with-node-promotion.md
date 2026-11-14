@@ -1,3 +1,9 @@
+---
+prerequisites:
+  - 0z003-datashed-backup-recovery.md
+  - 0z005-deep-userheap-support.md
+---
+
 [access-token]: <../glossary/access-token.md>
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-read]: <../glossary/conditional-read.md>
@@ -24,7 +30,7 @@
 [virtual-file-system]: <../glossary/virtual-file-system.md>
 [young-generation]: <../glossary/young-generation.md>
 
-# 0008 — CommitMarker edges with node promotion
+# CommitMarker edges with node promotion
 
 Extend *commit details*[^][epilogue-protocol] with a required `edges` array;
 use `[]` for an empty graph. Use the *reservation API's*[^][userheap-protocol]

@@ -2,11 +2,14 @@
   "name": "basinsync-milestone-two",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=18" },
   "scripts": {
     "test": "bun test clients/*.test.ts",
     "test:integration": "bun clients/integration.ts",
     "stress": "bun clients/stress.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "check:docs": "node docs/skills/basinsync-tutorial-dag/scripts/check-dag.mjs",
+    "test:docs": "node --test docs/skills/basinsync-tutorial-dag/scripts/check-dag.test.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "3.1075.0",

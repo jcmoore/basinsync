@@ -1,3 +1,8 @@
+---
+prerequisites:
+  - 0z003-shallow-userheap-management.md
+---
+
 [commit-marker]: <../glossary/commit-marker.md>
 [development]: <../development.md>
 [dusting]: <../glossary/dusting.md>
@@ -14,7 +19,7 @@
 [virtual-file-system]: <../glossary/virtual-file-system.md>
 [young-generation]: <../glossary/young-generation.md>
 
-# 0006 — Async shallow cleanup
+# Async shallow cleanup
 
 Queue reclamation when committing a *Flow*[^][flow] *Viewpoint*[^][viewpoint],
 leaving object deletion outside the request path. No *CommitMarker*[^][commit-marker]

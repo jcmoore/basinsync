@@ -1,3 +1,8 @@
+---
+prerequisites:
+  - 0z004-async-shallow-cleanup.md
+---
+
 [access-token]: <../glossary/access-token.md>
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-read]: <../glossary/conditional-read.md>
@@ -14,7 +19,7 @@
 [userheap-protocol]: <../userheap-protocol.md>
 [young-generation]: <../glossary/young-generation.md>
 
-# 0007 — Deep UserHeap support
+# Deep UserHeap support
 
 Lift the *reservation API's*[^][userheap-protocol] *zero-height*[^][node-height] and
 empty-edge restrictions. Each edge supplies `{ auth: [height, version, token] }`;

@@ -1,3 +1,7 @@
+---
+prerequisites: []
+---
+
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-read]: <../glossary/conditional-read.md>
 [conditional-write]: <../glossary/conditional-write.md>
@@ -9,7 +13,7 @@
 [sha384]: <../glossary/sha384.md>
 [viewpoint]: <../glossary/viewpoint.md>
 
-# 0001 — Shallow epilogue commits
+# Shallow epilogue commits
 
 Start with an *Epilogue*[^][epilogue] of opaque blobs.
 

@@ -1,3 +1,8 @@
+---
+prerequisites:
+  - 0z000-shallow-epilogue-commits.md
+---
+
 [commit-marker]: <../glossary/commit-marker.md>
 [context]: <../glossary/context.md>
 [datashed]: <../glossary/datashed.md>
@@ -20,7 +25,7 @@
 [upstream]: <../glossary/upstream.md>
 [viewpoint]: <../glossary/viewpoint.md>
 
-# 0002 — Datashed Timeline race
+# Datashed Timeline race
 
 Give the *Datashed*[^][datashed] a shared *Timeline*[^][timeline] for changes across
 *Flows*[^][flow], replacing *Epilogue*[^][epilogue] listings for state recovery

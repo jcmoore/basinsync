@@ -1,3 +1,6 @@
+[SKILL]: <skills/basinsync-tutorial-dag/SKILL.md>
+[lexidecimal]: <glossary/lexidecimal.md>
+
 # Prompt-to-documentation
 
 Document the user's prompt and subsequent clarifications, preserving every stated
@@ -17,13 +20,19 @@ Use `Basin` for the tenancy domain and `Datashed` for the data-state `Reservoir`
 Use `UserHeap` for client-driven `Flow` nodes and `KernelHeap` for server-driven
 `Datashed` nodes.
 
+# Tutorial dependencies
+
+Tutorial filenames use canonical unsigned *Lexidecimal*[^][lexidecimal] depth prefixes; frontmatter
+lists direct prerequisites, each at a strictly smaller depth. For tutorial graph
+edits or audits, use the *tutorial DAG skill*[^][SKILL] and its bundled Node.js linter.
+
 # Documentation links
 
 Use `*multi-word phrase*[^][reference-name]` links throughout `docs/`. Wrap
 the entire keyphrase, whether one word or multiple words, in single asterisks
 for italic text and link only the adjacent `^` marker. Keep the keyphrase itself
 copyable without link navigation; do not use `[keyphrase][reference-name]`. List
-every link definition at the top of its file, before the document body, using descriptive,
+every link definition at the top of its file, after any frontmatter and before the document body, using descriptive,
 stable labels (in sorted order), and angle-bracket destinations. This makes each document's
 relationships easy to inspect without searching its prose.
 

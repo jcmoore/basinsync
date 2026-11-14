@@ -1,6 +1,11 @@
-[0001-shallow-epilogue-commits]: <0001-shallow-epilogue-commits.md>
-[0003-turso-reservoir-vfs]: <0003-turso-reservoir-vfs.md>
+---
+prerequisites:
+  - 0z002-turso-reservoir-vfs.md
+---
+
 [0004-backup-overhead]: <../benchmarks/0004-backup-overhead.md>
+[0z000-shallow-epilogue-commits]: <0z000-shallow-epilogue-commits.md>
+[0z002-turso-reservoir-vfs]: <0z002-turso-reservoir-vfs.md>
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-write]: <../glossary/conditional-write.md>
 [datashed]: <../glossary/datashed.md>
@@ -23,7 +28,7 @@
 [viewpoint]: <../glossary/viewpoint.md>
 [virtual-file-system]: <../glossary/virtual-file-system.md>
 
-# 0004 — Datashed backup and recovery
+# Datashed backup and recovery
 
 *Datasheds*[^][datashed] and *Flows*[^][flow] are *Reservoirs*[^][reservoir], each with
 an *Epilogue*[^][epilogue], *Timeline (Chronologue)*[^][timeline], and
@@ -31,7 +36,7 @@ an *Epilogue*[^][epilogue], *Timeline (Chronologue)*[^][timeline], and
 *Epilogue*[^][epilogue]. Revisit *Prologues*[^][prologue] and the third
 *Reservoir*[^][reservoir] type, the *Jet*[^][jet], later.
 
-Promote *0003's*[^][0003-turso-reservoir-vfs] file-backed copy-on-write
+Promote *Turso Reservoir VFS's*[^][0z002-turso-reservoir-vfs] file-backed copy-on-write
 *VFS*[^][virtual-file-system] into the server. Pin a consistent, checkpointed
 *Milestone*[^][milestone] through backup publication while request preparation
 continues. Use the entire `default.turso` database file as the
@@ -40,7 +45,7 @@ continues. Use the entire `default.turso` database file as the
 
 A separate worker first copies every *Flow*[^][flow] *CommitMarker*[^][commit-marker]
 through that durable *Milestone*[^][milestone] into its
-*Epilogue*[^][epilogue], as in *0001*[^][0001-shallow-epilogue-commits]. Only then
+*Epilogue*[^][epilogue], as in *Shallow epilogue commits*[^][0z000-shallow-epilogue-commits]. Only then
 publish the pinned backup at the next *Datashed*[^][datashed]
 *Viewpoint*[^][viewpoint] using a *conditional PUT*[^][conditional-write].
 Keep one active backup and coalesce pending targets. Bound independent

@@ -1,3 +1,8 @@
+---
+prerequisites:
+  - 0z002-turso-reservoir-vfs.md
+---
+
 [access-token]: <../glossary/access-token.md>
 [commit-marker]: <../glossary/commit-marker.md>
 [context]: <../glossary/context.md>
@@ -17,7 +22,7 @@
 [viewpoint]: <../glossary/viewpoint.md>
 [young-generation]: <../glossary/young-generation.md>
 
-# 0005 — Shallow UserHeap management
+# Shallow UserHeap management
 
 Prepare for *Viewpoints*[^][viewpoint] rooted at a *CommitMarker*[^][commit-marker]
 with a *DAG*[^][dag] of opaque *nodes*[^][node]. Introduce *UserHeap reservations*[^][userheap-reservation]

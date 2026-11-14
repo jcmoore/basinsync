@@ -1,8 +1,8 @@
 [0003-commit-baseline]: <0003-commit-baseline.md>
 [0003-s3-latency]: <0003-s3-latency.md>
-[0003-turso-reservoir-vfs]: <../diy/0003-turso-reservoir-vfs.md>
 [0003-wal-samples]: <data/0003-wal-samples.gz>
 [0003-wal-summary]: <data/0003-wal-summary.json>
+[0z002-turso-reservoir-vfs]: <../diy/0z002-turso-reservoir-vfs.md>
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-write]: <../glossary/conditional-write.md>
 [differential-event]: <../glossary/differential-event.md>
@@ -22,7 +22,7 @@
 
 Historical test/benchmark prototypes extending the
 *baseline*[^][0003-commit-baseline]. Persistent capture and bounded batching have
-since been promoted into the *0003 procedure*[^][0003-turso-reservoir-vfs].
+since been promoted into the *Turso Reservoir VFS procedure*[^][0z002-turso-reservoir-vfs].
 Success follows the corresponding command's durable S3 PUT.
 
 Capture *physical WAL*[^][wal] writes before checkpoint truncation. Validate

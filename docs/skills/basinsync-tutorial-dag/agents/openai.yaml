@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tutorial dependency DAG"
+  short_description: "Audit Lexidecimal tutorial prerequisite graphs"
+  default_prompt: "Use $basinsync-tutorial-dag to update or audit the tutorial dependency graph."
