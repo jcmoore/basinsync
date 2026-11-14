@@ -30,7 +30,7 @@ use cleanup::enqueue_sweeping;
 pub const ID: &str = "default.turso";
 pub const VERSION: &str = "0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88";
 pub const PAGE_SIZE: usize = 16384;
-pub const SCHEMA: &str = "CREATE TABLE watershed (id INTEGER PRIMARY KEY CHECK (id = 1), milestone TEXT NOT NULL); CREATE TABLE flows (id TEXT PRIMARY KEY NOT NULL, viewpoint TEXT NOT NULL); CREATE TABLE marker_ranges (flow TEXT NOT NULL, downstream TEXT NOT NULL, upstream TEXT NOT NULL, blob_offset INTEGER NOT NULL CHECK(blob_offset>=0), content_length INTEGER NOT NULL CHECK(content_length>=0), sha384 TEXT NOT NULL, PRIMARY KEY(flow, downstream)); CREATE INDEX marker_ranges_upstream ON marker_ranges(upstream); CREATE TABLE graph_nodes (id TEXT PRIMARY KEY NOT NULL, content_length INTEGER NOT NULL CHECK(content_length>=0), reserved DATETIME NOT NULL, etag TEXT NOT NULL, promoted DATETIME NOT NULL, revision TEXT NOT NULL, freed DATETIME NOT NULL DEFAULT '', marked DATETIME NOT NULL DEFAULT ''); CREATE INDEX graph_nodes_promotion ON graph_nodes(promoted,marked); CREATE INDEX graph_nodes_freed ON graph_nodes(freed,id); CREATE TABLE sweeping_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX sweeping_tasks_prioritized ON sweeping_tasks(prioritized,flow,viewpoint); CREATE TABLE marking_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, upstream TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX marking_tasks_prioritized ON marking_tasks(prioritized,flow,viewpoint); CREATE TABLE graph_edges (node TEXT NOT NULL, retainer TEXT NOT NULL, PRIMARY KEY(node, retainer), CHECK(retainer<node)); CREATE INDEX graph_edges_retainer ON graph_edges(retainer, node); INSERT INTO watershed VALUES (1, '0');";
+pub const SCHEMA: &str = "CREATE TABLE datashed (id INTEGER PRIMARY KEY CHECK (id = 1), milestone TEXT NOT NULL); CREATE TABLE flows (id TEXT PRIMARY KEY NOT NULL, viewpoint TEXT NOT NULL, revision TEXT NOT NULL); CREATE TABLE marker_ranges (flow TEXT NOT NULL, downstream TEXT NOT NULL, upstream TEXT NOT NULL, blob_offset INTEGER NOT NULL CHECK(blob_offset>=0), content_length INTEGER NOT NULL CHECK(content_length>=0), sha384 TEXT NOT NULL, PRIMARY KEY(flow, downstream)); CREATE INDEX marker_ranges_upstream ON marker_ranges(upstream); CREATE TABLE graph_nodes (id TEXT PRIMARY KEY NOT NULL, content_length INTEGER NOT NULL CHECK(content_length>=0), reserved DATETIME NOT NULL, etag TEXT NOT NULL, promoted DATETIME NOT NULL, revision TEXT NOT NULL, freed DATETIME NOT NULL DEFAULT '', marked DATETIME NOT NULL DEFAULT ''); CREATE INDEX graph_nodes_promotion ON graph_nodes(promoted,marked); CREATE INDEX graph_nodes_freed ON graph_nodes(freed,id); CREATE TABLE sweeping_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX sweeping_tasks_prioritized ON sweeping_tasks(prioritized,flow,viewpoint); CREATE TABLE marking_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, upstream TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX marking_tasks_prioritized ON marking_tasks(prioritized,flow,viewpoint); CREATE TABLE graph_edges (node TEXT NOT NULL, retainer TEXT NOT NULL, PRIMARY KEY(node, retainer), CHECK(retainer<node)); CREATE INDEX graph_edges_retainer ON graph_edges(retainer, node); INSERT INTO datashed VALUES (1, '0');";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Blob(#[serde(with = "serde_bytes")] pub Vec<u8>);
@@ -199,6 +199,31 @@ pub struct Location {
     pub sha384: String,
 }
 
+pub(crate) fn flow_revision(
+    conn: &std::sync::Arc<turso_core::Connection>,
+    flow: &str,
+) -> Result<Option<uuid::Uuid>> {
+    let mut query = conn.prepare("SELECT revision FROM flows WHERE id=?1")?;
+    query.bind_at(
+        NonZeroUsize::new(1).unwrap(),
+        Value::build_text(flow.to_owned()),
+    )?;
+    let mut revision = None;
+    query.run_with_row_callback(|row| {
+        let text: String = row.get(0)?;
+        let uuid = uuid::Uuid::parse_str(&text)
+            .map_err(|_| turso_core::LimboError::InternalError("invalid Flow revision".into()))?;
+        if uuid.get_version_num() != 4 || uuid.to_string() != text {
+            return Err(turso_core::LimboError::InternalError(
+                "noncanonical Flow UUIDv4".into(),
+            ));
+        }
+        revision = Some(uuid);
+        Ok(())
+    })?;
+    Ok(revision)
+}
+
 pub struct State {
     native: Native,
     pub image: Vec<u8>,
@@ -287,6 +312,10 @@ impl State {
         }
     }
 
+    pub fn flow_revision(&self, flow: &str) -> Result<Option<uuid::Uuid>> {
+        flow_revision(&self.native.conn, flow)
+    }
+
     pub fn location(&self, flow: &str, viewpoint: &Viewpoint) -> Result<Option<Location>> {
         let mut query = self.native.conn.prepare("SELECT upstream, blob_offset, content_length, sha384 FROM marker_ranges WHERE flow=?1 AND downstream=?2")?;
         query.bind_at(
@@ -327,14 +356,14 @@ impl State {
         let mut query = self
             .native
             .conn
-            .query("SELECT milestone FROM watershed WHERE id = 1")?
+            .query("SELECT milestone FROM datashed WHERE id = 1")?
             .unwrap();
         ensure!(
             matches!(
                 ready_step(&*self.native.io, || query.step())?,
                 StepResult::Row
             ),
-            "missing Watershed cursor"
+            "missing Datashed cursor"
         );
         let value = query.row().unwrap().get::<String>(0)?;
         ensure!(
@@ -342,7 +371,7 @@ impl State {
                 ready_step(&*self.native.io, || query.step())?,
                 StepResult::Done
             ),
-            "duplicate Watershed cursor"
+            "duplicate Datashed cursor"
         );
         Ok(value)
     }
@@ -413,7 +442,7 @@ impl State {
         conn.execute("BEGIN CONCURRENT")?;
         promotion::retain_markers(native, commands, &upstream)?;
         for (flow, viewpoint) in values {
-            let mut stmt = conn.prepare("INSERT INTO flows (id, viewpoint) VALUES (?1, ?2) ON CONFLICT (id) DO UPDATE SET viewpoint = excluded.viewpoint")?;
+            let mut stmt = conn.prepare("INSERT INTO flows (id, viewpoint, revision) VALUES (?1, ?2, ?3) ON CONFLICT (id) DO UPDATE SET viewpoint = excluded.viewpoint")?;
             stmt.bind_at(
                 NonZeroUsize::new(1).unwrap(),
                 Value::build_text(flow.to_owned()),
@@ -421,6 +450,10 @@ impl State {
             stmt.bind_at(
                 NonZeroUsize::new(2).unwrap(),
                 Value::build_text(viewpoint.to_owned()),
+            )?;
+            stmt.bind_at(
+                NonZeroUsize::new(3).unwrap(),
+                Value::build_text(uuid::Uuid::new_v4().to_string()),
             )?;
             stmt.run_ignore_rows()?;
             enqueue_sweeping(conn, flow, &Viewpoint::parse(viewpoint)?)?;
@@ -443,7 +476,7 @@ impl State {
             }
             stmt.run_ignore_rows()?;
         }
-        let mut stmt = conn.prepare("UPDATE watershed SET milestone = ?1 WHERE id = 1")?;
+        let mut stmt = conn.prepare("UPDATE datashed SET milestone = ?1 WHERE id = 1")?;
         stmt.bind_at(
             NonZeroUsize::new(1).unwrap(),
             Value::build_text(milestone.to_owned()),
@@ -748,9 +781,41 @@ fn validate_log(io: &Arc<dyn IO>, file: Arc<dyn File>, size: usize) -> Result<()
 mod tests {
     use super::*;
     #[test]
+    fn flow_revisions_are_stable_unique_and_recovered_from_frames() -> Result<()> {
+        let genesis = State::genesis()?;
+        let make = |vp: &str| Marker {
+            context: Default::default(),
+            edges: Default::default(),
+            verified: Default::default(),
+            viewpoint: vp.into(),
+            sha384: hash(&[]),
+            blob: vec![],
+        };
+        let (first, delta) = genesis.stage(
+            "1",
+            &BTreeMap::from([("a".into(), make("0")), ("b".into(), make("0"))]),
+            true,
+        )?;
+        let a = first.flow_revision("a")?.unwrap();
+        let b = first.flow_revision("b")?.unwrap();
+        assert_eq!(a.get_version_num(), 4);
+        assert_ne!(a, b);
+        assert_eq!(
+            delta.ingest_logical(&genesis.image)?.flow_revision("a")?,
+            Some(a)
+        );
+        let (next, delta) = first.stage("2", &BTreeMap::from([("a".into(), make("1"))]), false)?;
+        assert_eq!(next.flow_revision("a")?, Some(a));
+        assert_eq!(next.flow_revision("b")?, Some(b));
+        assert_eq!(delta.ingest_logical(&first.image)?.image, next.image);
+        assert_eq!(State::from_image(next.image)?.flow_revision("a")?, Some(a));
+        Ok(())
+    }
+    #[test]
     fn logical_recovery_reproduces_physical_database() -> Result<()> {
         let state = State::genesis()?;
         let marker = Marker {
+            context: Default::default(),
             edges: Default::default(),
             verified: Default::default(),
             viewpoint: "0".into(),
@@ -797,6 +862,7 @@ mod tests {
                             "x".repeat(if n == 1 { 20000 } else { 150 })
                         ),
                         Marker {
+                            context: Default::default(),
                             edges: Default::default(),
                             verified: Default::default(),
                             viewpoint: huge.clone(),
@@ -826,6 +892,7 @@ mod tests {
                 (
                     format!("{n:04}/{}", "x".repeat(200)),
                     Marker {
+                        context: Default::default(),
                         edges: Default::default(),
                         verified: Default::default(),
                         viewpoint: "0".into(),
@@ -837,15 +904,15 @@ mod tests {
             .collect();
         let (mut state, _) = initial.stage("1", &markers, true)?;
         for sql in [
-            "DELETE FROM flows WHERE rowid % 2 = 0; UPDATE watershed SET milestone = '2'",
-            "UPDATE flows SET viewpoint = '340282366920938463463374607431768211456'; UPDATE watershed SET milestone = '3'",
-            "DELETE FROM flows; UPDATE watershed SET milestone = '4'",
-            "INSERT INTO flows VALUES ('reused', '0'); UPDATE watershed SET milestone = '5'",
+            "DELETE FROM flows WHERE rowid % 2 = 0; UPDATE datashed SET milestone = '2'",
+            "UPDATE flows SET viewpoint = '340282366920938463463374607431768211456'; UPDATE datashed SET milestone = '3'",
+            "DELETE FROM flows; UPDATE datashed SET milestone = '4'",
+            "INSERT INTO flows VALUES ('reused', '0', '00000000-0000-4000-8000-000000000001'); UPDATE datashed SET milestone = '5'",
         ] {
             let native = Native::open(&state.image, None)?;
             native.conn.set_portable_logical_changes_enabled(true);
             native.conn.execute(
-                "BEGIN CONCURRENT; INSERT INTO flows VALUES ('abandoned', '999'); ROLLBACK",
+                "BEGIN CONCURRENT; INSERT INTO flows VALUES ('abandoned', '999', '00000000-0000-4000-8000-000000000001'); ROLLBACK",
             )?;
             native.conn.execute("BEGIN CONCURRENT")?;
             native.conn.execute(sql)?;
@@ -870,7 +937,8 @@ mod tests {
                 for id in batch {
                     let flow = format!("{id}/\"/雪/{}", "z".repeat(id as usize));
                     let viewpoint = expected.get(&flow).map_or_else(Viewpoint::zero, Viewpoint::next);
-                    markers.insert(flow.clone(), Marker { edges: Default::default(), verified: Default::default(), viewpoint: viewpoint.decimal(), sha384: hash(&[]), blob: vec![] });
+                    markers.insert(flow.clone(), Marker { context: Default::default(),
+            edges: Default::default(), verified: Default::default(), viewpoint: viewpoint.decimal(), sha384: hash(&[]), blob: vec![] });
                 }
                 for (flow, marker) in &markers { expected.insert(flow.clone(), marker.validate().unwrap()); }
                 let (next, delta) = state.stage(&(n+1).to_string(), &markers, n == 0).unwrap();
@@ -887,6 +955,7 @@ mod tests {
         let markers = BTreeMap::from([(
             "flow".into(),
             Marker {
+                context: Default::default(),
                 edges: Default::default(),
                 verified: Default::default(),
                 viewpoint: "0".into(),

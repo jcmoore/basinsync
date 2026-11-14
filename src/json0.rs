@@ -38,6 +38,32 @@ pub fn deserialize_text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<St
     Ok(wire)
 }
 
+pub fn deserialize_text_map<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<std::collections::BTreeMap<String, String>, D::Error> {
+    #[derive(Deserialize)]
+    struct Text(#[serde(deserialize_with = "deserialize_text")] String);
+    let values = std::collections::BTreeMap::<String, Text>::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .map(|(key, value)| (key, value.0))
+        .collect())
+}
+
+pub fn serialize_text_map<S: Serializer>(
+    values: &std::collections::BTreeMap<String, String>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeMap;
+    #[derive(serde::Serialize)]
+    struct Text<'a>(#[serde(serialize_with = "serialize_text")] &'a str);
+    let mut map = serializer.serialize_map(Some(values.len()))?;
+    for (key, value) in values {
+        map.serialize_entry(key, &Text(value))?;
+    }
+    map.end()
+}
+
 pub fn deserialize_viewpoint<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Viewpoint, D::Error> {

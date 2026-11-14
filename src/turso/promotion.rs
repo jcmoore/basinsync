@@ -56,6 +56,9 @@ pub(super) fn retain_markers(
 }
 impl State {
     pub(crate) fn marking_task(&self, task: &crate::promotion::Task) -> Result<bool> {
+        if self.flow_revision(&task.flow)? != Some(task.revision) {
+            return Ok(false);
+        }
         Ok(!strings(
             &self.native.conn,
             "SELECT viewpoint FROM marking_tasks WHERE flow=?1 AND viewpoint=?2 AND upstream=?3",
@@ -122,12 +125,13 @@ impl State {
             let owner = heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
             execute(
                 conn,
-                "DELETE FROM marking_tasks WHERE flow=?1 AND viewpoint=?2 AND upstream=?4 AND NOT EXISTS(SELECT 1 FROM graph_edges e LEFT JOIN graph_nodes n ON n.id=e.node WHERE e.retainer=?3 AND (n.id IS NULL OR n.promoted=''))",
+                "DELETE FROM marking_tasks WHERE flow=?1 AND viewpoint=?2 AND upstream=?4 AND EXISTS(SELECT 1 FROM flows WHERE id=?1 AND revision=?5) AND NOT EXISTS(SELECT 1 FROM graph_edges e LEFT JOIN graph_nodes n ON n.id=e.node WHERE e.retainer=?3 AND (n.id IS NULL OR n.promoted=''))",
                 &[
                     &task.flow,
                     &task.viewpoint,
                     &owner,
                     &crate::promotion::upstream_key(&task.upstream),
+                    &task.revision.to_string(),
                 ],
             )?;
         }
@@ -140,7 +144,7 @@ impl State {
         }
         execute(
             conn,
-            "UPDATE watershed SET milestone=?1 WHERE id=1",
+            "UPDATE datashed SET milestone=?1 WHERE id=1",
             &[milestone],
         )?;
         conn.execute("COMMIT")?;

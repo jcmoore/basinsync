@@ -2,6 +2,9 @@
 [commit-marker]: <glossary/commit-marker.md>
 [conditional-read]: <glossary/conditional-read.md>
 [conditional-write]: <glossary/conditional-write.md>
+[context]: <glossary/context.md>
+[datashed]: <glossary/datashed.md>
+[datashed-backup]: <datashed-backup.md>
 [differential-event]: <glossary/differential-event.md>
 [diffuse16]: <glossary/diffuse16.md>
 [envbuf]: <glossary/envbuf.md>
@@ -16,14 +19,12 @@
 [timeline]: <glossary/timeline.md>
 [turso-state]: <turso-state.md>
 [viewpoint]: <glossary/viewpoint.md>
-[watershed]: <glossary/watershed.md>
-[watershed-backup]: <watershed-backup.md>
 
-# Watershed Timeline
+# Datashed Timeline
 
-The *Watershed's*[^][watershed] shared *Timeline*[^][timeline] records state changes at
+The *Datashed's*[^][datashed] shared *Timeline*[^][timeline] records state changes at
 `timeline/Diffuse16(milestone)`. *Milestones*[^][milestone] start at one and increase
-without gaps. Before writing, read the latest *Watershed*[^][watershed] *recovery anchor*[^][watershed-backup]
+without gaps. Before writing, read the latest *Datashed*[^][datashed] *recovery anchor*[^][datashed-backup]
 and ingest every subsequent *DifferentialEvent*[^][differential-event]. Its
 recorded *Milestone*[^][milestone] seeds exponential search for the tail.
 Without a *CommitMarker*[^][commit-marker], list a seed in the
@@ -36,7 +37,7 @@ Commitflow tuples begin with `Symbol.species`, using the
 *FlexBuffers*[^][flexbuffers] extension encoding, and carry a `markers` map
 keyed by *Flow*[^][flow] id.
 Each entry contains decimal `viewpoint`, hexadecimal *SHA-384*[^][sha384] in
-`sha384`, binary `blob`, and required `edges` (`[]` for an empty graph) containing derived child *node*[^][node] ids. *Conditional creation*[^][conditional-write] of a
+`sha384`, binary `blob`, *context*[^][context] as `Record<string, string>`, and required `edges` (`[]` for an empty graph) containing derived child *node*[^][node] ids. *Conditional creation*[^][conditional-write] of a
 *DifferentialEvent*[^][differential-event] at the next *Milestone*[^][milestone]
 arbitrates competing writers. Concatenate zero or more *EnvBuf-wrapped*[^][envbuf]
 commitflow tuples, one `sts/0/databasin/ingestturso` tuple, then a

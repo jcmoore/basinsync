@@ -1,5 +1,6 @@
 [conditional-read]: <glossary/conditional-read.md>
 [conditional-write]: <glossary/conditional-write.md>
+[context]: <glossary/context.md>
 [epilogue-protocol]: <epilogue-protocol.md>
 [etag]: <glossary/etag.md>
 [flow]: <glossary/flow.md>
@@ -25,6 +26,7 @@
   nodes: Array<{
     auth: [height: number, version: number, token: Uint8Array];
     length: number;
+    context?: Record<string, string>;
     edges: Array<{ auth: [height: number, version: number, token: Uint8Array] }>;
   }>;
 }
@@ -44,14 +46,16 @@ type Action = { url: string; headers: Record<string, string> };
   results: Record<number, { actions: {
     write: Action | null; preview: Action | null; read: Action;
   } }> | null;
-  timelines: { watershed: { milestone: bigint } };
+  timelines: { datashed: { milestone: bigint } };
 }
 ```
 
 Successful *reservations*[^][heap-reservation] are durable before returning.
 `write` is a *conditional PUT*[^][conditional-write] to the
 *young generation*[^][young-generation], signing `If-None-Match: *` and the
-specified `Content-Length`. `preview` and `read` are
+specified `Content-Length` plus every `x-amz-meta-ctx-${key}` header from that
+*node's*[^][node] *context*[^][context] (default `{}`). The first successful upload
+fixes its metadata; reserving again does not rewrite it. `preview` and `read` are
 *conditional GETs*[^][conditional-read] for that *node*[^][node] in the
 *young*[^][young-generation] and *old*[^][old-generation] generations respectively.
 Both object keys end in `${node_id}/${revision}`, sharing the stored UUIDv4

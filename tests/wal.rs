@@ -2,7 +2,7 @@ use anyhow::Result;
 use basinsync::{
     event::{self, FlowCommand, Marker},
     lexidecimal::Viewpoint,
-    timeline::Watershed,
+    timeline::Datashed,
     turso::{State, wal::Writer},
 };
 use num_bigint::BigUint;
@@ -12,6 +12,7 @@ fn command(flow: &str, vp: &str) -> FlowCommand {
         markers: BTreeMap::from([(
             flow.into(),
             Marker {
+                context: Default::default(),
                 edges: Default::default(),
                 verified: Default::default(),
                 viewpoint: vp.into(),
@@ -24,12 +25,12 @@ fn command(flow: &str, vp: &str) -> FlowCommand {
 
 #[test]
 fn unpublished_state_is_not_readable_and_bootstrap_is_verified() -> Result<()> {
-    let mut state = Watershed::default();
+    let mut state = Datashed::default();
     let prepared = state.prepare_wal(vec![command("f", "0")])?;
     assert!(state.latest("f").is_err());
     assert!(state.prepare_wal(vec![command("f", "1")]).is_err());
     let bytes = prepared.bytes().to_vec();
-    let mut recovered = Watershed::default();
+    let mut recovered = Datashed::default();
     recovered.apply_entry(1u8.into(), &bytes)?;
     assert_eq!(recovered.latest("f")?.unwrap().decimal(), "0");
     let event::Entry::Wal {
@@ -41,7 +42,7 @@ fn unpublished_state_is_not_readable_and_bootstrap_is_verified() -> Result<()> {
         panic!()
     };
     delta.logical.base.as_mut().unwrap().0[0] ^= 1;
-    let mut empty = Watershed::default();
+    let mut empty = Datashed::default();
     assert!(
         empty
             .apply_entry(1u8.into(), &event::encode_wal(commands, *delta)?)
@@ -53,7 +54,7 @@ fn unpublished_state_is_not_readable_and_bootstrap_is_verified() -> Result<()> {
 
 #[test]
 fn legacy_history_can_be_extended_with_wal_batches() -> Result<()> {
-    let mut reader = Watershed::default();
+    let mut reader = Datashed::default();
     let (_, legacy) = reader.prepare(command("f", "0").markers)?;
     let bytes = event::encode(legacy)?;
     reader.apply_entry(1u8.into(), &bytes)?;
@@ -62,7 +63,7 @@ fn legacy_history_can_be_extended_with_wal_batches() -> Result<()> {
         command("f", "2"),
         command("g", "0"),
     ])?;
-    let mut recovered = Watershed::default();
+    let mut recovered = Datashed::default();
     recovered.apply_entry(1u8.into(), &bytes)?;
     recovered.apply_entry(2u8.into(), prepared.bytes())?;
     assert_eq!(recovered.latest("f")?.unwrap().decimal(), "2");
@@ -77,7 +78,7 @@ fn corrupt_frames_lineage_order_and_versions_fail_atomically() -> Result<()> {
     let commands = vec![command("f", "0")];
     let delta = writer.prepare(&0u8.into(), None, &commands)?;
     let first = event::encode_wal(commands, delta)?;
-    let mut reader = Watershed::default();
+    let mut reader = Datashed::default();
     reader.apply_entry(1u8.into(), &first)?;
     let commands = vec![command("f", "1"), command("f", "2")];
     let delta = writer.prepare(&1u8.into(), Some(&event::digest(&first)), &commands)?;
@@ -143,7 +144,7 @@ proptest::proptest! {
     #[test]
     fn persistent_wal_batches_reconstruct_at_every_prefix(batches in proptest::collection::vec(proptest::collection::vec(0u16..64,1..20),2..30)){
         let mut before=State::genesis().unwrap().image;
-        let mut writer=Writer::open(&before).unwrap();let mut reader=Watershed::default();
+        let mut writer=Writer::open(&before).unwrap();let mut reader=Datashed::default();
         let mut latest:BTreeMap<String,Viewpoint>=BTreeMap::new();
         for (index,batch) in batches.into_iter().enumerate(){
             let mut commands=Vec::new();

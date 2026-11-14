@@ -1,4 +1,4 @@
-//! A coalescing background consumer: replicate Flow markers before backing up a Watershed.
+//! A coalescing background consumer: replicate Flow markers before backing up a Datashed.
 use crate::{diffuse16, epilogue, event, lexidecimal::Viewpoint, timeline::Snapshot, turso};
 use anyhow::{Context, Result, ensure};
 use num_bigint::BigUint;
@@ -9,12 +9,12 @@ use tokio::sync::watch;
 /// Publish only after every marker through this immutable, durable snapshot is stored.
 pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
     let previous = epilogue::latest_checkpoint(bucket).await?;
-    // A full-file Watershed marker has no outgoing heap edges of its own.
+    // A full-file Datashed marker has no outgoing heap edges of its own.
     // Repair a sign after a crash before permitting a newer backup.
     if let Some(cp) = &previous {
         epilogue::confirm_promotion_sign(
             bucket,
-            &epilogue::promotion_key(epilogue::WATERSHED_PREFIX, &cp.viewpoint)?,
+            &epilogue::promotion_key(epilogue::DATASHED_PREFIX, &cp.viewpoint)?,
             &cp.milestone,
         )
         .await?;
@@ -25,6 +25,7 @@ pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
     if milestone >= *snapshot.prefix.milestone() {
         return Ok(());
     }
+    let conn = snapshot.view.connect()?;
     let mut parent = previous.as_ref().map(|cp| cp.digest.clone());
     while milestone < *snapshot.prefix.milestone() {
         let next = &milestone + 1u8;
@@ -59,6 +60,7 @@ pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
         }
         let mut copies = tokio::task::JoinSet::new();
         for (flow, markers) in flows {
+            let revision = turso::flow_revision(&conn, &flow)?.context("missing Flow revision")?;
             if copies.len() == 8 {
                 let copy = copies.join_next().await.context("missing Flow copy")?;
                 copy??;
@@ -66,7 +68,7 @@ pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
             let bucket = bucket.clone();
             copies.spawn(async move {
                 for marker in markers {
-                    epilogue::replicate(&bucket, &flow, &marker).await?;
+                    epilogue::replicate(&bucket, &flow, &revision, &marker).await?;
                 }
                 Ok::<_, anyhow::Error>(())
             });
@@ -108,11 +110,11 @@ pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
         .await?;
     epilogue::confirm_promotion_sign(
         bucket,
-        &epilogue::promotion_key(epilogue::WATERSHED_PREFIX, &checkpoint.viewpoint)?,
+        &epilogue::promotion_key(epilogue::DATASHED_PREFIX, &checkpoint.viewpoint)?,
         &checkpoint.milestone,
     )
     .await?;
-    tracing::info!(viewpoint=%checkpoint.viewpoint.decimal(), milestone=%checkpoint.milestone, "Watershed backup published");
+    tracing::info!(viewpoint=%checkpoint.viewpoint.decimal(), milestone=%checkpoint.milestone, "Datashed backup published");
     Ok(())
 }
 
@@ -129,7 +131,7 @@ pub async fn run(
         if let Some(snapshot) = target.filter(|s| s.prefix.milestone() > &completed) {
             match publish(&bucket, &snapshot).await {
                 Ok(()) => completed = snapshot.prefix.milestone().clone(),
-                Err(error) => tracing::warn!(%error, "Watershed backup will retry"),
+                Err(error) => tracing::warn!(%error, "Datashed backup will retry"),
             }
         }
         // Drop retained generations once the pipeline closes. A crash recovers from S3.

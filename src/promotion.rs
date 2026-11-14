@@ -8,6 +8,7 @@ use turso_core::{Connection, Value};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Task {
     pub flow: String,
+    pub revision: uuid::Uuid,
     pub viewpoint: String,
     pub upstream: BigUint,
 }
@@ -77,6 +78,7 @@ pub async fn confirm_signs(
                 let result = async {
                     let key = crate::epilogue::flow_promotion_key(
                         &task.flow,
+                        &task.revision,
                         &Viewpoint::parse(&task.viewpoint)?,
                     )?;
                     crate::epilogue::confirm_promotion_sign(&bucket, &key, &task.upstream).await
@@ -160,6 +162,8 @@ pub fn scan(
             .context("invalid marking upstream")?;
         ensure!(upstream > 0u8.into(), "marking upstream must be positive");
         command.tasks.push(Task {
+            revision: crate::turso::flow_revision(&conn, &flow)?
+                .context("missing Flow revision")?,
             flow,
             viewpoint,
             upstream,
@@ -235,14 +239,55 @@ async fn old_exists(bucket: &s3::Bucket, node: &Node) -> Result<bool> {
         _ => anyhow::bail!("old heap HEAD returned HTTP {status}"),
     }
 }
+async fn source_context(
+    bucket: &s3::Bucket,
+    node: &Node,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut reader = bucket.clone();
+    reader.add_header("if-match", &node.etag);
+    let (head, status) = reader
+        .head_object(heap::key(heap::YOUNG, &node.id, &node.revision))
+        .await?;
+    ensure!(
+        status == 200
+            && head.e_tag.as_deref() == Some(&node.etag)
+            && head.content_length == i64::try_from(node.length).ok(),
+        "young heap metadata differs from allocation"
+    );
+    let context = head
+        .metadata
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(name, value)| {
+            name.to_ascii_lowercase()
+                .strip_prefix("ctx-")
+                .map(|key| (key.to_owned(), value))
+        })
+        .collect();
+    crate::details::context_headers(&context)?
+        .iter()
+        .map(|(name, value)| Ok((name.to_string(), value.to_str()?.to_owned())))
+        .collect::<Result<_>>()
+}
+
 // Bounded-memory fallback for endpoints without destination-conditional COPY, and objects >5 GiB.
-async fn transfer(bucket: &s3::Bucket, node: &Node) -> Result<()> {
+async fn transfer(
+    bucket: &s3::Bucket,
+    node: &Node,
+    context: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
     use tokio::io::AsyncWriteExt;
     let mut reader = bucket.clone();
     reader.add_header("if-match", &node.etag);
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("if-none-match", "*".parse()?);
     headers.insert("x-amz-meta-basinsync-source-etag", node.etag.parse()?);
+    for (name, value) in context {
+        headers.insert(
+            axum::http::HeaderName::from_bytes(name.as_bytes())?,
+            value.parse()?,
+        );
+    }
     let (mut tx, mut rx) = tokio::io::duplex(64 * 1024);
     let source = heap::key(heap::YOUNG, &node.id, &node.revision);
     let produce = async {
@@ -277,8 +322,9 @@ async fn conditional_copy(
     source: &str,
     destination: &str,
     etag: &str,
+    context: &std::collections::BTreeMap<String, String>,
 ) -> Result<u16> {
-    let headers = std::collections::BTreeMap::from([
+    let mut headers = std::collections::BTreeMap::from([
         ("If-None-Match".into(), "*".into()),
         (
             "x-amz-copy-source".into(),
@@ -288,6 +334,7 @@ async fn conditional_copy(
         ("x-amz-metadata-directive".into(), "REPLACE".into()),
         ("x-amz-meta-basinsync-source-etag".into(), etag.into()),
     ]);
+    headers.extend(context.clone());
     let access = crate::range_get::signed_request(bucket, destination, "PUT", headers).await?;
     let mut request = bucket.http_client().put(&access.url).body(Vec::new());
     for (name, value) in access.headers {
@@ -305,21 +352,22 @@ async fn conditional_copy(
 pub async fn promote_one(bucket: &s3::Bucket, node: &Node, allow_transfer: bool) -> Result<()> {
     ensure!(!node.etag.is_empty(), "marked node has no verified ETag");
     if !old_exists(bucket, node).await? {
+        let context = source_context(bucket, node).await?;
         if node.length > 5 * 1024 * 1024 * 1024 {
             ensure!(
                 allow_transfer,
                 "promotion requires multipart COPY; byte transfer is disabled"
             );
             // Ambiguous completion is resolved by HEAD below.
-            if let Err(e) = transfer(bucket, node).await {
+            if let Err(e) = transfer(bucket, node, &context).await {
                 tracing::debug!(%e,"heap transfer completion uncertain");
             }
         } else {
             let source = heap::key(heap::YOUNG, &node.id, &node.revision);
             let destination = heap::key(heap::OLD, &node.id, &node.revision);
-            match conditional_copy(bucket, &source, &destination, &node.etag).await {
+            match conditional_copy(bucket, &source, &destination, &node.etag, &context).await {
                 Ok(400 | 405 | 501) if allow_transfer => {
-                    if let Err(e) = transfer(bucket, node).await {
+                    if let Err(e) = transfer(bucket, node, &context).await {
                         tracing::debug!(%e,"heap transfer completion uncertain");
                     }
                 }

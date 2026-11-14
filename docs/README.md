@@ -1,7 +1,7 @@
 [0001-shallow-epilogue-commits]: <diy/0001-shallow-epilogue-commits.md>
-[0002-watershed-timeline-race]: <diy/0002-watershed-timeline-race.md>
+[0002-datashed-timeline-race]: <diy/0002-datashed-timeline-race.md>
 [0003-turso-reservoir-vfs]: <diy/0003-turso-reservoir-vfs.md>
-[0004-watershed-backup-recovery]: <diy/0004-watershed-backup-recovery.md>
+[0004-datashed-backup-recovery]: <diy/0004-datashed-backup-recovery.md>
 [0005-shallow-heap-management]: <diy/0005-shallow-heap-management.md>
 [0006-async-shallow-cleanup]: <diy/0006-async-shallow-cleanup.md>
 [0007-deep-heap-support]: <diy/0007-deep-heap-support.md>
@@ -18,11 +18,11 @@ reference and glossary entries. Begin with
 *0001 — Shallow epilogue commits*[^][0001-shallow-epilogue-commits].
 
 Coordinate writes and locate payloads with
-*0002 — Watershed Timeline race*[^][0002-watershed-timeline-race].
+*0002 — Datashed Timeline race*[^][0002-datashed-timeline-race].
 
 Then materialize *0003 — Turso Reservoir VFS*[^][0003-turso-reservoir-vfs].
 
-Recover from snapshots with *0004 — Watershed backup and recovery*[^][0004-watershed-backup-recovery].
+Recover from snapshots with *0004 — Datashed backup and recovery*[^][0004-datashed-backup-recovery].
 
 Stage uploads with *0005 — Shallow heap management*[^][0005-shallow-heap-management].
 

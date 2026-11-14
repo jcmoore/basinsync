@@ -347,6 +347,9 @@ impl Writer {
     pub fn latest(&self, flow: &str) -> Result<Option<Viewpoint>> {
         self.state.latest(flow)
     }
+    pub fn flow_revision(&self, flow: &str) -> Result<Option<uuid::Uuid>> {
+        self.state.flow_revision(flow)
+    }
     pub fn location(&self, flow: &str, viewpoint: &Viewpoint) -> Result<Option<super::Location>> {
         self.state.location(flow, viewpoint)
     }

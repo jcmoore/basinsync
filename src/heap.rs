@@ -54,6 +54,8 @@ struct Auth(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WireNode {
+    #[serde(default, deserialize_with = "crate::json0::deserialize_text_map")]
+    context: BTreeMap<String, String>,
     auth: Auth,
     length: u64,
     edges: Vec<WireEdge>,
@@ -132,7 +134,7 @@ impl Request {
         let wire: WireRequest =
             serde_json::from_slice(bytes).map_err(|_| anyhow::anyhow!("invalid heap request"))?;
         event::valid_flow(&wire.flow)?;
-        crate::epilogue::flow_key(&wire.flow, &wire.viewpoint)?;
+        crate::epilogue::check_flow_key(&wire.flow, &wire.viewpoint)?;
         let nodes = wire
             .nodes
             .into_iter()
@@ -140,6 +142,8 @@ impl Request {
                 let wire: WireNode = serde_json::from_value(value).map_err(|_| {
                     invalid("invalid_node", "invalid node fields or authentication")
                 })?;
+                crate::details::context_headers(&wire.context)
+                    .map_err(|_| invalid("invalid_context", "invalid S3 context metadata"))?;
                 let (height, id) = authenticate(wire.auth, limits)?;
                 let edges = authenticate_edges(wire.edges, limits, Some(height))?;
                 if wire.length > i64::MAX as u64 {
@@ -149,6 +153,7 @@ impl Request {
                     ));
                 }
                 Ok(Node {
+                    context: wire.context,
                     id,
                     length: wire.length,
                     edges,
@@ -270,6 +275,9 @@ pub fn retainer(flow: &str, viewpoint: &Viewpoint) -> String {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Node {
+    // Upload context belongs to the capability, not the immutable graph descriptor.
+    #[serde(skip)]
+    pub context: BTreeMap<String, String>,
     pub id: String,
     pub length: u64,
     pub edges: BTreeSet<String>,
@@ -286,6 +294,7 @@ impl Node {
         let height = node_height(&self.id)?;
         for edge in &self.edges {
             Node {
+                context: Default::default(),
                 id: edge.clone(),
                 length: 0,
                 edges: BTreeSet::new(),
@@ -353,6 +362,7 @@ pub struct Allocation {
 impl Allocation {
     fn validate(&self) -> Result<()> {
         Node {
+            context: Default::default(),
             id: self.id.clone(),
             length: self.length,
             edges: self.edges.clone(),
@@ -387,6 +397,7 @@ impl Command {
 }
 
 pub struct Reserved {
+    pub context: BTreeMap<String, String>,
     pub id: String,
     pub revision: String,
     pub length: u64,
@@ -420,7 +431,10 @@ impl Outcome {
             let young = key(YOUNG, &node.id, &node.revision);
             let actions = Actions {
                 write: if node.write {
-                    Some(range_get::presign_write(bucket, &young, node.length).await?)
+                    Some(
+                        range_get::presign_write(bucket, &young, node.length, &node.context)
+                            .await?,
+                    )
                 } else {
                     None
                 },
@@ -459,6 +473,7 @@ mod tests {
         assert!(retainer("雪/flow", &Viewpoint::zero()) < child);
         assert!("M_flow/v.0/e.0" < child.as_str());
         Node {
+            context: Default::default(),
             id: child,
             edges: BTreeSet::new(),
             length: 0,
@@ -498,7 +513,7 @@ mod tests {
         assert_eq!(envelopes.len(), 2);
         assert!(event::blob_ranges(&bytes)?.is_empty());
         assert!(!bytes.windows(secret.len()).any(|w| w == secret));
-        let mut recovered = crate::timeline::Watershed::default();
+        let mut recovered = crate::timeline::Datashed::default();
         recovered.apply_entry(1u8.into(), &bytes)?;
         let state = recovered.database.as_ref().unwrap();
         assert!(!state.image.windows(secret.len()).any(|w| w == secret));
@@ -526,11 +541,12 @@ mod tests {
     fn repeated_heap_histories_have_identical_logical_and_physical_images() -> Result<()> {
         let mut image = crate::turso::State::genesis()?.image;
         let mut writer = crate::turso::wal::Writer::open(&image)?;
-        let mut recovered = crate::timeline::Watershed::default();
+        let mut recovered = crate::timeline::Datashed::default();
         let mut parent = None::<String>;
         for step in 0..40u32 {
             let n = step % 11;
             let node = Node {
+                context: Default::default(),
                 id: node_id(0, 0, format!("history-client-token-{n}").as_bytes()),
                 edges: BTreeSet::new(),
                 length: n as u64,

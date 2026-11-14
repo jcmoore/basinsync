@@ -13,7 +13,7 @@ Keep milestone scope, temporary limitations, and deferred work in the relevant
 `diy/` tutorial; shared references and glossary entries should describe enduring
 concepts and interfaces.
 
-Use `Basin` for the tenancy domain and `Watershed` for the data-state `Reservoir`.
+Use `Basin` for the tenancy domain and `Datashed` for the data-state `Reservoir`.
 
 # Documentation links
 

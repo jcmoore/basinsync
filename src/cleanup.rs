@@ -57,6 +57,7 @@ impl Command {
         let mut ids = std::collections::BTreeSet::new();
         for node in self.erased.iter().chain(&self.detaching) {
             crate::heap::Node {
+                context: Default::default(),
                 id: node.id.clone(),
                 length: 0,
                 edges: Default::default(),

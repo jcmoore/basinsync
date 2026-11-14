@@ -5,7 +5,7 @@ use s3::Bucket;
 use std::{collections::BTreeMap, future::Future};
 
 #[derive(Default)]
-pub struct Watershed {
+pub struct Datashed {
     pub milestone: BigUint,
     pub database: Option<crate::turso::State>,
     pub stopped: bool,
@@ -13,7 +13,21 @@ pub struct Watershed {
     pub head: Option<String>,
 }
 
-impl Watershed {
+impl Datashed {
+    pub fn flow_revision(&self, flow: &str) -> Result<Option<uuid::Uuid>> {
+        if let Some(writer) = &self.writer {
+            ensure!(
+                writer.cursor() == &self.milestone,
+                "unpublished database state"
+            );
+            writer.flow_revision(flow)
+        } else {
+            self.database
+                .as_ref()
+                .map_or(Ok(None), |db| db.flow_revision(flow))
+        }
+    }
+
     pub fn latest(&self, flow: &str) -> Result<Option<Viewpoint>> {
         if let Some(writer) = &self.writer {
             ensure!(
@@ -175,7 +189,7 @@ pub struct Snapshot {
 }
 
 pub struct Stager {
-    state: Watershed,
+    state: Datashed,
 }
 impl Stager {
     pub fn prefix(&self) -> Prefix {
@@ -295,7 +309,7 @@ impl Stager {
         self.state.head = Some(prepared.digest.clone());
         Ok(Some(prepared))
     }
-    pub fn into_settled(self, published: &Prefix) -> Result<Watershed> {
+    pub fn into_settled(self, published: &Prefix) -> Result<Datashed> {
         ensure!(
             self.prefix() == *published,
             "unpublished preparation remains"
@@ -347,7 +361,7 @@ impl Prepared {
         })
     }
 }
-impl Watershed {
+impl Datashed {
     pub fn prefix(&self) -> Prefix {
         Prefix {
             milestone: self.milestone.clone(),
@@ -560,7 +574,7 @@ pub async fn exists(bucket: &Bucket, milestone: &BigUint) -> Result<bool> {
     crate::object_read::exists(bucket, &diffuse16::key(milestone)?).await
 }
 
-async fn replay(bucket: &Bucket, state: &mut Watershed, tail: BigUint) -> Result<()> {
+async fn replay(bucket: &Bucket, state: &mut Datashed, tail: BigUint) -> Result<()> {
     while state.milestone < tail {
         let milestone = &state.milestone + 1u8;
         let response = crate::object_read::if_present(bucket)?
@@ -584,7 +598,7 @@ pub async fn check_write_base(bucket: &Bucket, prefix: &Prefix) -> Result<()> {
     if let Some(checkpoint) = crate::epilogue::latest_checkpoint(bucket).await? {
         ensure!(
             checkpoint.milestone <= prefix.milestone,
-            "Watershed backup advanced beyond writer"
+            "Datashed backup advanced beyond writer"
         );
         if checkpoint.milestone == prefix.milestone {
             ensure!(
@@ -600,14 +614,14 @@ pub async fn check_write_base(bucket: &Bucket, prefix: &Prefix) -> Result<()> {
     Ok(())
 }
 
-pub async fn recover(bucket: &Bucket) -> Result<Watershed> {
-    let mut state = Watershed::default();
+pub async fn recover(bucket: &Bucket) -> Result<Datashed> {
+    let mut state = Datashed::default();
     refresh(bucket, &mut state).await?;
     Ok(state)
 }
 
 /// Avoid snapshot discovery when a read's settled prefix is still current.
-pub async fn refresh_if_advanced(bucket: &Bucket, state: &mut Watershed) -> Result<()> {
+pub async fn refresh_if_advanced(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
     let next = &state.milestone + 1u8;
     if exists(bucket, &next).await? {
         refresh(bucket, state).await?;
@@ -615,7 +629,7 @@ pub async fn refresh_if_advanced(bucket: &Bucket, state: &mut Watershed) -> Resu
     Ok(())
 }
 
-pub async fn refresh(bucket: &Bucket, state: &mut Watershed) -> Result<()> {
+pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
     if let Some(checkpoint) = crate::epilogue::latest_checkpoint(bucket).await? {
         if checkpoint.milestone > state.milestone {
             *state = checkpoint.load(bucket).await?;
@@ -626,7 +640,7 @@ pub async fn refresh(bucket: &Bucket, state: &mut Watershed) -> Result<()> {
             );
         }
     }
-    // A Watershed Epilogue supplies the seed directly; no Timeline listing is needed.
+    // A Datashed Epilogue supplies the seed directly; no Timeline listing is needed.
     // Genesis has no anchor yet, so discover a seed with one minimum-sized LIST.
     let seed = if state.milestone == 0u8.into() {
         let (page, status) = bucket
@@ -653,6 +667,7 @@ mod tests {
     fn marker(viewpoint: &str) -> event::Marker {
         use sha2::{Digest, Sha384};
         event::Marker {
+            context: Default::default(),
             edges: Default::default(),
             verified: Default::default(),
             viewpoint: viewpoint.into(),
@@ -663,24 +678,24 @@ mod tests {
 
     #[test]
     fn snapshots_reject_unpublished_preparation() -> Result<()> {
-        let mut watershed = Watershed::default();
-        let first = watershed.prepare_wal(vec![event::FlowCommand {
+        let mut datashed = Datashed::default();
+        let first = datashed.prepare_wal(vec![event::FlowCommand {
             markers: BTreeMap::from([("flow".into(), marker("0"))]),
         }])?;
-        watershed.milestone = first.milestone.clone();
-        watershed.head = Some(first.digest.clone());
-        assert!(watershed.snapshot()?.is_some());
-        let _unpublished = watershed.prepare_wal(vec![event::FlowCommand {
+        datashed.milestone = first.milestone.clone();
+        datashed.head = Some(first.digest.clone());
+        assert!(datashed.snapshot()?.is_some());
+        let _unpublished = datashed.prepare_wal(vec![event::FlowCommand {
             markers: BTreeMap::from([("flow".into(), marker("1"))]),
         }])?;
-        assert!(watershed.snapshot().is_err());
+        assert!(datashed.snapshot().is_err());
         Ok(())
     }
 
     #[test]
     fn pinned_backup_prefixes_recover_the_same_physical_state_as_genesis_replay() -> Result<()> {
-        let mut producer = Watershed::default().into_stager();
-        let mut full = Watershed::default();
+        let mut producer = Datashed::default().into_stager();
+        let mut full = Datashed::default();
         let mut entries = Vec::new();
         let mut checkpoints = Vec::new();
         for n in 0..48u32 {
@@ -710,7 +725,7 @@ mod tests {
             let (file, digest) = snapshot.view.export()?;
             assert_eq!(std::fs::read(file.path())?, image);
             assert_eq!(digest, event::digest(&image));
-            let mut recovered = Watershed {
+            let mut recovered = Datashed {
                 milestone: snapshot.prefix.milestone.clone(),
                 head: snapshot.prefix.digest.clone(),
                 database: Some(crate::turso::State::from_image(image)?),
@@ -731,8 +746,8 @@ mod tests {
 
     #[test]
     fn staged_batches_link_before_publication_and_settle_only_at_the_same_prefix() -> Result<()> {
-        let committed = Watershed::default().prefix();
-        let mut stager = Watershed::default().into_stager();
+        let committed = Datashed::default().prefix();
+        let mut stager = Datashed::default().into_stager();
         let first = stager.prepare(vec![event::FlowCommand {
             markers: BTreeMap::from([("flow".into(), marker("0"))]),
         }])?;
@@ -742,7 +757,7 @@ mod tests {
         }])?;
         assert_eq!(second.parent, Some(event::digest(first.bytes())));
         assert_eq!(second.milestone(), &BigUint::from(2u8));
-        let mut recovered = Watershed::default();
+        let mut recovered = Datashed::default();
         recovered.apply_entry(1u8.into(), first.bytes())?;
         assert_ne!(stager.prefix(), recovered.prefix());
         recovered.apply_entry(2u8.into(), second.bytes())?;
@@ -754,7 +769,7 @@ mod tests {
 
     #[test]
     fn replay_applies_frames_atomically_and_preserves_big_counters() -> Result<()> {
-        let mut state = Watershed::default();
+        let mut state = Datashed::default();
         assert!(
             state
                 .prepare(BTreeMap::from([

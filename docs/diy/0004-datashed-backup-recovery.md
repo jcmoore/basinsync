@@ -3,6 +3,9 @@
 [0004-backup-overhead]: <../benchmarks/0004-backup-overhead.md>
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-write]: <../glossary/conditional-write.md>
+[datashed]: <../glossary/datashed.md>
+[datashed-backup]: <../datashed-backup.md>
+[datashed-timeline]: <../datashed-timeline.md>
 [development]: <../development.md>
 [differential-event]: <../glossary/differential-event.md>
 [epilogue]: <../glossary/epilogue.md>
@@ -19,15 +22,12 @@
 [timeline-eviction]: <../glossary/timeline-eviction.md>
 [viewpoint]: <../glossary/viewpoint.md>
 [virtual-file-system]: <../glossary/virtual-file-system.md>
-[watershed]: <../glossary/watershed.md>
-[watershed-backup]: <../watershed-backup.md>
-[watershed-timeline]: <../watershed-timeline.md>
 
-# 0004 — Watershed backup and recovery
+# 0004 — Datashed backup and recovery
 
-*Watersheds*[^][watershed] and *Flows*[^][flow] are *Reservoirs*[^][reservoir], each with
+*Datasheds*[^][datashed] and *Flows*[^][flow] are *Reservoirs*[^][reservoir], each with
 an *Epilogue*[^][epilogue], *Timeline (Chronologue)*[^][timeline], and
-*Prologue*[^][prologue]. Give the *Watershed*[^][watershed] its own
+*Prologue*[^][prologue]. Give the *Datashed*[^][datashed] its own
 *Epilogue*[^][epilogue]. Revisit *Prologues*[^][prologue] and the third
 *Reservoir*[^][reservoir] type, the *Jet*[^][jet], later.
 
@@ -35,13 +35,13 @@ Promote *0003's*[^][0003-turso-reservoir-vfs] file-backed copy-on-write
 *VFS*[^][virtual-file-system] into the server. Pin a consistent, checkpointed
 *Milestone*[^][milestone] through backup publication while request preparation
 continues. Use the entire `default.turso` database file as the
-*Watershed*[^][watershed] *CommitMarker*[^][commit-marker]; follow the
-*key and metadata contract*[^][watershed-backup].
+*Datashed*[^][datashed] *CommitMarker*[^][commit-marker]; follow the
+*key and metadata contract*[^][datashed-backup].
 
 A separate worker first copies every *Flow*[^][flow] *CommitMarker*[^][commit-marker]
 through that durable *Milestone*[^][milestone] into its
 *Epilogue*[^][epilogue], as in *0001*[^][0001-shallow-epilogue-commits]. Only then
-publish the pinned backup at the next *Watershed*[^][watershed]
+publish the pinned backup at the next *Datashed*[^][datashed]
 *Viewpoint*[^][viewpoint] using a *conditional PUT*[^][conditional-write].
 Keep one active backup and coalesce pending targets. Bound independent
 *Flow*[^][flow] copies to eight concurrent workers, preserving each
@@ -53,14 +53,14 @@ whole-object URL; otherwise retain the *Timeline*[^][timeline]
 *Range GET*[^][range-get]. Test URL selection and copied contents directly.
 
 Before writing the *Timeline*[^][timeline], read the latest
-*Watershed*[^][watershed] *Viewpoint*[^][viewpoint] and corresponding
+*Datashed*[^][datashed] *Viewpoint*[^][viewpoint] and corresponding
 *Milestone*[^][milestone]. Load its snapshot when needed and successfully ingest
 all subsequent *DifferentialEvents*[^][differential-event]. Use that
 *Milestone*[^][milestone] as the exponential-search seed. With no backup, recover
 from the beginning. Preserve ordered publication across the two-batch pipeline.
-For status, honor the *probe freshness window*[^][watershed-timeline]; when due,
+For status, honor the *probe freshness window*[^][datashed-timeline]; when due,
 probe the next *Milestone*[^][milestone] first. Discover a newer
-*Watershed*[^][watershed] backup and refresh only when that successor exists.
+*Datashed*[^][datashed] backup and refresh only when that successor exists.
 
 Test pinned-image equality against full frame replay, snapshot-plus-suffix
 recovery, delayed and multipart uploads, concurrent backup workers, interrupted copies, lost

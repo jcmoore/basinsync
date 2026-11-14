@@ -182,14 +182,14 @@ impl Preparation {
             message = queue.recv() => Ok(message),
         }
     }
-    async fn refreshed(&mut self, before_write: bool) -> Result<timeline::Watershed> {
+    async fn refreshed(&mut self, before_write: bool) -> Result<timeline::Datashed> {
         let (reply, complete) = oneshot::channel();
         self.output
             .send(Publication::Barrier(reply))
             .await
             .map_err(|_| anyhow::anyhow!("publication stopped"))?;
         let prefix = complete.await.context("publication barrier stopped")??;
-        let mut watershed = self
+        let mut datashed = self
             .stager
             .take()
             .context("missing preparation state")?
@@ -197,26 +197,26 @@ impl Preparation {
         // Count freshness from before the IO, so a slow probe cannot extend it.
         let started = tokio::time::Instant::now();
         if before_write {
-            timeline::refresh(&self.bucket, &mut watershed).await?;
+            timeline::refresh(&self.bucket, &mut datashed).await?;
             self.last_probe = Some(started);
         } else if self
             .last_probe
             .is_none_or(|last| started.duration_since(last) >= self.status_probe_max_age)
         {
-            timeline::refresh_if_advanced(&self.bucket, &mut watershed).await?;
+            timeline::refresh_if_advanced(&self.bucket, &mut datashed).await?;
             self.last_probe = Some(started);
         }
         let (reply, complete) = oneshot::channel();
-        let snapshot = watershed.snapshot()?;
+        let snapshot = datashed.snapshot()?;
         self.output
-            .send(Publication::Refresh(watershed.prefix(), snapshot, reply))
+            .send(Publication::Refresh(datashed.prefix(), snapshot, reply))
             .await
             .map_err(|_| anyhow::anyhow!("publication stopped"))?;
         anyhow::ensure!(
-            complete.await.context("publication refresh stopped")?? == watershed.prefix(),
+            complete.await.context("publication refresh stopped")?? == datashed.prefix(),
             "refresh acknowledgement mismatch"
         );
-        Ok(watershed)
+        Ok(datashed)
     }
     async fn write_stager(&mut self) -> Result<timeline::Stager> {
         let settled = self
@@ -226,8 +226,8 @@ impl Preparation {
             .prefix()
             == *self.published.borrow();
         if settled {
-            let watershed = self.refreshed(true).await?;
-            self.stager = Some(watershed.into_stager());
+            let datashed = self.refreshed(true).await?;
+            self.stager = Some(datashed.into_stager());
         }
         self.stager.take().context("missing preparation state")
     }
@@ -338,12 +338,15 @@ impl Preparation {
                         .map_err(|_| anyhow::anyhow!("publication stopped"))?;
                 }
                 Message::Status { flow, reply } => {
-                    let watershed = self.refreshed(false).await?;
-                    let latest = if let Some(viewpoint) = watershed.latest(&flow)? {
-                        let mut location = watershed.location(&flow, &viewpoint)?;
+                    let datashed = self.refreshed(false).await?;
+                    let latest = if let Some(viewpoint) = datashed.latest(&flow)? {
+                        let revision = datashed
+                            .flow_revision(&flow)?
+                            .context("missing Flow revision")?;
+                        let mut location = datashed.location(&flow, &viewpoint)?;
                         // Only retained image-delta fixtures lack an indexed location.
                         if location.is_none() {
-                            let mut milestone = watershed.milestone.clone();
+                            let mut milestone = datashed.milestone.clone();
                             while milestone > 0u8.into() {
                                 let bytes = basinsync::object_read::if_present(&self.bucket)?
                                     .get_object(diffuse16::key(&milestone)?)
@@ -373,6 +376,7 @@ impl Preparation {
                         } else if basinsync::epilogue::matches_marker(
                             &self.bucket,
                             &flow,
+                            &revision,
                             &viewpoint,
                             &location,
                         )
@@ -381,7 +385,7 @@ impl Preparation {
                             Some(
                                 basinsync::range_get::presign_whole(
                                     &self.bucket,
-                                    &basinsync::epilogue::flow_key(&flow, &viewpoint)?,
+                                    &basinsync::epilogue::flow_key(&flow, &revision, &viewpoint)?,
                                 )
                                 .await?,
                             )
@@ -404,8 +408,8 @@ impl Preparation {
                     } else {
                         None
                     };
-                    let response = observed(Ok(EpilogueStatus { latest }), &watershed.prefix());
-                    self.stager = Some(watershed.into_stager());
+                    let response = observed(Ok(EpilogueStatus { latest }), &datashed.prefix());
+                    self.stager = Some(datashed.into_stager());
                     let _ = reply.send(response);
                 }
                 Message::Commit(first) => {

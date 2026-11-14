@@ -18,7 +18,7 @@ import { stress } from "./stress";
 // Cursor cases below assert positions; full capability
 // responses and their byte ranges are exercised separately.
 function payload<T extends {timelines:Timelines}>(value:T){
-  assert(typeof value.timelines?.watershed?.milestone==="bigint"&&value.timelines.watershed.milestone>=0n,"every API response carries its durable Watershed prefix");
+  assert(typeof value.timelines?.datashed?.milestone==="bigint"&&value.timelines.datashed.milestone>=0n,"every API response carries its durable Datashed prefix");
   const {timelines,...body}=value;return body;
 }
 function positions(value:Awaited<ReturnType<typeof fullStatus>>){return {...payload(value),latest:value.latest?{viewpoint:value.latest.viewpoint}:null};}
@@ -134,14 +134,14 @@ async function mismatch(r: Response, next: bigint) {
   assert.equal(r.status,409);
   const body = await r.text();
   const response=parse<ViewpointMismatch>(body);
-  assert.deepEqual(JSON.parse(body),{next:{viewpoint:`0x${next.toString(16)}`},timelines:{watershed:{milestone:`0x${response.timelines.watershed.milestone.toString(16)}`}}});
+  assert.deepEqual(JSON.parse(body),{next:{viewpoint:`0x${next.toString(16)}`},timelines:{datashed:{milestone:`0x${response.timelines.datashed.milestone.toString(16)}`}}});
   assert.deepEqual(payload(response),{next:{viewpoint:next}});
 }
 async function get(bucket: string, milestone: bigint) {
   const r = await s3.send(new GetObjectCommand({Bucket:bucket,Key:key(milestone)}));
   return r.Body!.transformToByteArray();
 }
-const marker = (blob: Uint8Array, viewpoint="0"): Marker => ({blob,viewpoint,sha384:sha384(blob),edges:[]});
+const marker = (blob: Uint8Array, viewpoint="0"): Marker => ({blob,viewpoint,sha384:sha384(blob),edges:[],context:{}});
 async function seed(bucket: string, milestone: bigint, payload: Uint8Array) {
   await s3.send(new PutObjectCommand({Bucket:bucket,Key:key(milestone),Body:payload}));
 }
@@ -149,13 +149,33 @@ async function badStartup(bucket: string) {
   assert.equal(await timeout(serverProcess(bucket,endpoint,"127.0.0.1:0").exited),1);
 }
 
-function isWatershedPut(request:Request){const path=new URL(request.url).pathname;return request.method==="PUT"&&path.includes("/epilogue/0y")&&!path.includes("/flows/");}
-const signKey=(flow:string,vp:bigint)=>`flows/0x${Buffer.from(flow).toString("hex")}/epilogue/${lex(vp)}`;
+function isDatashedPut(request:Request){const path=new URL(request.url).pathname;return request.method==="PUT"&&path.includes("/epilogue/0y")&&!path.includes("/flows/");}
+async function flowRevisions(b:string):Promise<Record<string,string>> {
+  const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"timeline/"}));let image:Uint8Array|undefined;
+  for(const m of (list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1)){
+    const d=deltasAt(await get(b,m)).turso["default.turso"]!;
+    image??=new Uint8Array(d.logical.base!);
+    if("segments" in d.physical)image=ingestWal(image,d.physical.segments);
+    else{const next=new Uint8Array(d.physical.size);next.set(image.subarray(0,next.length));for(const p of d.physical.pages)next.set(p.data,(p.number-1)*16384);image=next;}
+  }
+  assert(image);const path=`${artifacts}/revisions-${serial++}.turso`;writeFileSync(path,image);
+  const p=spawn([`${root}/target/debug/examples/frame-fixture`,"--revisions",path],{cwd:root,stdout:"pipe",stderr:"inherit"});
+  const revisions=await new Response(p.stdout).json() as Record<string,string>;assert.equal(await p.exited,0);
+  for(const revision of Object.values(revisions))assert.match(revision,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  return revisions;
+}
+const revisions=new Map<string,string>();
+async function flowPrefix(b:string,flow:string){
+  const cacheKey=JSON.stringify([b,flow]);let revision=revisions.get(cacheKey);
+  if(!revision){revision=(await flowRevisions(b))[flow];assert(revision);revisions.set(cacheKey,revision);}
+  return `flows/0x${Buffer.from(flow).toString("hex")}/${revision}/epilogue/`;
+}
+async function signKey(b:string,flow:string,vp:bigint){return `${await flowPrefix(b,flow)}${lex(vp)}`;}
 async function exists(b:string,key:string){try{await s3.send(new HeadObjectCommand({Bucket:b,Key:key,IfMatch:"*"}));return true;}catch(e){if([404,412].includes((e as {$metadata: {httpStatusCode:number}}).$metadata.httpStatusCode))return false;throw e;}}
-const flowKey=(flow:string,vp:bigint)=>`flows/0x${Buffer.from(flow).toString("hex")}/${epilogueKey(vp)}`;
+async function flowKey(b:string,flow:string,vp:bigint){return `${await flowPrefix(b,flow)}${epilogueKey(vp).slice("epilogue/".length)}`;}
 async function flowBlob(bucket:string,flow:string,viewpoint:bigint):Promise<Uint8Array|null>{
   try{
-    const response=await s3.send(new GetObjectCommand({Bucket:bucket,Key:flowKey(flow,viewpoint)}));
+    const response=await s3.send(new GetObjectCommand({Bucket:bucket,Key:await flowKey(bucket,flow,viewpoint)}));
     return await response.Body!.transformToByteArray();
   }catch(error){
     if((error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode===404)return null;
@@ -167,7 +187,7 @@ async function eventually<T>(read:()=>Promise<T>,done:(value:T)=>boolean):Promis
   while(Date.now()<deadline){try{const value=await read();if(done(value))return value;last=value;}catch(error){last=error;}await Bun.sleep(10);}
   throw new Error(`condition not reached: ${JSON.stringify(last)}; ${artifacts}`);
 }
-async function watershedBackup(bucket:string){
+async function datashedBackup(bucket:string){
   const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/",MaxKeys:1}));
   const key=list.Contents?.[0]?.Key;if(!key)return null;
   const response=await s3.send(new GetObjectCommand({Bucket:bucket,Key:key}));
@@ -185,7 +205,7 @@ try {
   });
   await ready(fs,async()=>{await s3.send(new CreateBucketCommand({Bucket:"readiness"}));});
   const b = await bucket();
-  // Flow Epilogue contents must never become a source of Watershed state.
+  // Flow Epilogue contents must never become a source of Datashed state.
   await s3.send(new PutObjectCommand({Bucket:b,Key:"flows/unrelated/epilogue/0",Body:bytes("legacy, not a Timeline")}));
   const trace: {method:string;url:URL}[] = [];
   const traced = relay((r,response)=>{ trace.push({method:r.method,url:new URL(r.url)}); return response; });
@@ -316,7 +336,7 @@ try {
   assert.equal(startup.filter(r=>r.method==="GET"&&r.url.searchParams.get("prefix")==="timeline/").length,1);
   assert.equal(startup.filter(r=>r.method==="GET"&&r.url.pathname.includes("/timeline/")).length,eventCount,"replay the entire Timeline");
   for(const [flow,v] of replayed) assert.deepEqual(await epilogueStatus(writer.url,flow),{latest:{viewpoint:v}});
-  assert(trace.some(r=>r.url.searchParams.get("prefix")==="epilogue/"),"read the Watershed recovery anchor before writing");
+  assert(trace.some(r=>r.url.searchParams.get("prefix")==="epilogue/"),"read the Datashed recovery anchor before writing");
   await accepted(writer.url,flowA,bytes("after recovery"),2n);
   await stop(writer.process);await stop(observer.process);
   console.log(`put of success: ${total} markers across ${eventCount} gapless Milestones; independent TS WAL ingestion, full replay, and minimum-key seed search`);
@@ -377,7 +397,7 @@ try {
     const results=await Promise.all(requests);
     for(let i=0;i<results.length;i++){
       const receipt=parse<CommitResponse|ApiError>(await results[i].clone().text());
-      assert.equal(receipt.timelines.watershed.milestone,fail?0n:(i<4?1n:2n),"stamp each batch only after its own publication");
+      assert.equal(receipt.timelines.datashed.milestone,fail?0n:(i<4?1n:2n),"stamp each batch only after its own publication");
       await status(results[i],fail?503:201);
     }
     assert.equal(peak,1,"Timeline uploads remain ordered");
@@ -430,7 +450,7 @@ try {
     const results=await Promise.all(requests);
     for(let i=0;i<results.length;i++){
       const receipt=parse<CommitResponse|ApiError>(await results[i].clone().text());
-      assert.equal(receipt.timelines.watershed.milestone,fault==="none"?BigInt(i+1):0n,"never report a speculative or uncertain batch as durable");
+      assert.equal(receipt.timelines.datashed.milestone,fault==="none"?BigInt(i+1):0n,"never report a speculative or uncertain batch as durable");
       await status(results[i],fault==="none"?201:503);
     }
     assert.equal(peak,1,"only one conditional publication may be active");
@@ -580,13 +600,13 @@ try {
   await status(await commit(recovered.url,"f",a,1n),201);
   await stop(recovered.process);
   console.log("put of success: JS-to-Rust replay, malformed-event rejection, and ambiguous Timeline PUT recovery without retries");
-  // A delayed Watershed upload retains an exact old image while primary writes keep succeeding.
+  // A delayed Datashed upload retains an exact old image while primary writes keep succeeding.
   {
     const b=await bucket(), gate=Promise.withResolvers<void>(), entered=Promise.withResolvers<void>();
     const submitted:{milestone:bigint;blob:Uint8Array;metadata:Record<string,string>}[]=[];
     let active=0,peak=0;
-    const proxy=relay((request,response)=>{if(isWatershedPut(request)){active--;}return response;},async request=>{
-      if(!isWatershedPut(request))return;
+    const proxy=relay((request,response)=>{if(isDatashedPut(request)){active--;}return response;},async request=>{
+      if(!isDatashedPut(request))return;
       assert.equal(request.headers.get("if-none-match"),"*");active++;peak=Math.max(peak,active);
       const metadata=Object.fromEntries([...request.headers].filter(([name])=>name.startsWith("x-amz-meta-")).map(([name,value])=>[name.slice(11),value]));
       submitted.push({milestone:BigInt(metadata.milestone),blob:new Uint8Array(await request.clone().arrayBuffer()),metadata});
@@ -596,14 +616,14 @@ try {
     const app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0"});
     const flow="0/雪/../";
     await status(await commit(app.url,flow,a,0n),201);await timeout(entered.promise);
-    assert.equal((await watershedBackup(b)),null,"no backup before its PUT completes");
+    assert.equal((await datashedBackup(b)),null,"no backup before its PUT completes");
     assert.deepEqual(await flowBlob(b,flow,0n),a);
     assert.deepEqual(await latestBlob((await fullStatus(app.url,flow)).latest!),a);
     for(let n=0;n<12;n++)await status(await commit(app.url,`growth-${n}-${"x".repeat(140)}`,bytes(`payload-${n}`),0n),201);
     await status(await commit(app.url,flow,bytes("next"),1n),201);
     assert.equal(active,1);assert.equal(submitted.length,1,"coalesce targets while an upload is blocked");
     gate.resolve();
-    const checkpoint=await eventually(()=>watershedBackup(b),cp=>cp?.milestone===14n);
+    const checkpoint=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===14n);
     assert(checkpoint);assert.equal(peak,1);
     assert.deepEqual(submitted.map(s=>s.milestone),[1n,14n]);
     let image:Uint8Array=new Uint8Array();
@@ -617,7 +637,7 @@ try {
     const inspected=await inspectImage(checkpoint.blob);
     assert.equal(inspected.milestone,"14");assert.equal(inspected.flows[flow],"1");
     assert.equal(checkpoint.metadata["turso-version"],"0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88");
-    assert.equal(checkpoint.key,epilogueKey(1n),"Watershed Viewpoints count backups independently of Milestones");
+    assert.equal(checkpoint.key,epilogueKey(1n),"Datashed Viewpoints count backups independently of Milestones");
     await stop(app.process);
     // Keep a suffix after the snapshot; restart must never GET the older prefix.
     assert.equal((await epilogueStatus(observer.url,flow)).latest?.viewpoint,1n,"an already running observer adopts the latest backup");
@@ -649,36 +669,36 @@ try {
   }
   console.log("put of success: pinned full-file backups, nonblocking coalesced uploads, exact TS WAL equivalence, snapshot-plus-suffix recovery, and corrupt-anchor rejection");
 
-  // Flow copies gate Watershed backup, while requests and status remain independent.
-  for(const fault of ["blocked","lost-flow-reply","lost-backup-reply","conflict"]){
+  // Flow copies gate Datashed backup, while requests and status remain independent.
+  for(const fault of ["blocked","lost-flow-reply","lost-backup-reply","conflict","context-conflict"]){
     const b=await bucket(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let copies=0,backups=0,lost=false;
-    if(fault==="conflict")await s3.send(new PutObjectCommand({Bucket:b,Key:flowKey("copy",0n),Body:bytes("conflict")}));
     const proxy=relay(async(request,response)=>{
-      const lose=fault==="lost-flow-reply"&&request.method==="PUT"&&new URL(request.url).pathname.includes("/flows/")||fault==="lost-backup-reply"&&isWatershedPut(request);
+      const lose=fault==="lost-flow-reply"&&request.method==="PUT"&&new URL(request.url).pathname.includes("/flows/")||fault==="lost-backup-reply"&&isDatashedPut(request);
       if(lose&&!lost){lost=true;await response.arrayBuffer();return new Response("reply lost",{status:503});}return response;
     },async request=>{
-      if(isWatershedPut(request))backups++;
+      if(isDatashedPut(request))backups++;
       if(request.method==="PUT"&&new URL(request.url).pathname.includes("/flows/")){
+        if((fault==="conflict"||fault==="context-conflict")&&copies===0)await s3.send(new PutObjectCommand({Bucket:b,Key:new URL(request.url).pathname.slice(b.length+2),Body:fault==="conflict"?bytes("conflict"):a,Metadata:fault==="context-conflict"?{"ctx-owner":"wrong"}:{}}));
         copies++;entered.resolve();if(fault==="blocked")await gate.promise;
       }
     });
     const app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0"});
     await status(await commit(app.url,"copy",a,0n),201);await timeout(entered.promise);
     if(fault==="blocked"){
-      assert.equal(backups,0);assert.equal(await watershedBackup(b),null);
+      assert.equal(backups,0);assert.equal(await datashedBackup(b),null);
       assert.equal(await flowBlob(b,"copy",0n),null);
       await status(await commit(app.url,"copy",bytes("second"),1n),201);
       app.process.kill("SIGKILL");await app.process.exited;gate.resolve();
       const restarted=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-      await eventually(()=>watershedBackup(b),cp=>cp?.milestone===2n);
+      await eventually(()=>datashedBackup(b),cp=>cp?.milestone===2n);
       assert.deepEqual(await flowBlob(b,"copy",0n),a);
       assert.deepEqual(await flowBlob(b,"copy",1n),bytes("second"));await stop(restarted.process);
-    }else if(fault==="conflict"){
-      await Bun.sleep(80);assert.equal(backups,0);assert.equal(await watershedBackup(b),null);
+    }else if(fault==="conflict"||fault==="context-conflict"){
+      await Bun.sleep(80);assert.equal(backups,0);assert.equal(await datashedBackup(b),null);
       assert.equal((await epilogueStatus(app.url,"copy")).latest?.viewpoint,0n);assert.deepEqual(await latestBlob((await fullStatus(app.url,"copy")).latest!),a,"a conflicting stored marker must not replace latest contents");await stop(app.process);
     }else{
-      const checkpoint=await eventually(()=>watershedBackup(b),cp=>cp?.milestone===1n);assert(checkpoint);
+      const checkpoint=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===1n);assert(checkpoint);
       await Bun.sleep(50);assert.equal(checkpoint.key,epilogueKey(0n));assert.equal(copies,1);assert.equal(backups,1);
       await stop(app.process);
     }
@@ -695,14 +715,14 @@ try {
     }
     for(const response of await Promise.all(requests))await status(response,201);await stop(source.process);
     const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let active=0,peak=0,finished=0,ordered=-1,backups=0;
-    const proxy=relay((request,response)=>{
+    const proxy=relay(async(request,response)=>{
       if(request.method==="PUT"&&new URL(request.url).pathname.includes("/flows/")){
         active--;finished++;
-        for(let n=0;n<4;n++)if(new URL(request.url).pathname.endsWith(`/${flowKey("ordered-copy",BigInt(n))}`)){assert.equal(ordered,n-1);ordered=n;}
+        for(let n=0;n<4;n++)if(new URL(request.url).pathname.endsWith(`/${await flowKey(b,"ordered-copy",BigInt(n))}`)){assert.equal(ordered,n-1);ordered=n;}
       }
       return response;
     },async request=>{
-      if(isWatershedPut(request)){assert(finished>=16,"all markers precede the first backup");backups++;}
+      if(isDatashedPut(request)){assert(finished>=16,"all markers precede the first backup");backups++;}
       if(request.method==="PUT"&&new URL(request.url).pathname.includes("/flows/")){
         active++;peak=Math.max(peak,active);if(active===8)entered.resolve();await gate.promise;
       }
@@ -711,20 +731,20 @@ try {
     assert.equal(active,8);assert.equal(backups,0);
     await status(await commit(app.url,"foreground",a,0n),201);
     assert.equal(await flowBlob(b,"ordered-copy",0n),null);
-    gate.resolve();await eventually(()=>watershedBackup(b),cp=>cp?.milestone===2n);
+    gate.resolve();await eventually(()=>datashedBackup(b),cp=>cp?.milestone===2n);
     assert.equal(peak,8);assert.equal(finished,17);assert.equal(ordered,3);await stop(app.process);
   }
   console.log("put of success: bounded independent Flow copies preserve per-Flow order and Milestone barriers without blocking requests");
 
-  // Backup workers race on Watershed Viewpoints and adopt the winning immutable snapshot.
+  // Backup workers race on Datashed Viewpoints and adopt the winning immutable snapshot.
   {
     const b=await bucket(),source=await server(b);
     for(let i=0;i<3;i++)await status(await commit(source.url,"race-copy",bytes(String(i)),BigInt(i)),201);
     await stop(source.process);
     const gate=Promise.withResolvers<void>();let arrived=0;
-    const proxy=relay((_,response)=>response,async request=>{if(isWatershedPut(request)){if(++arrived===2)gate.resolve();await gate.promise;}});
+    const proxy=relay((_,response)=>response,async request=>{if(isDatashedPut(request)){if(++arrived===2)gate.resolve();await gate.promise;}});
     const apps=await Promise.all([server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"}),server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"})]);
-    const checkpoint=await eventually(()=>watershedBackup(b),cp=>cp?.milestone===3n);assert(checkpoint);await Bun.sleep(80);
+    const checkpoint=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===3n);assert(checkpoint);await Bun.sleep(80);
     assert.equal(checkpoint.key,epilogueKey(0n));assert.equal(arrived,2);
     const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"epilogue/0y"}));assert.equal(objects.KeyCount,1);
     for(let n=0;n<3;n++)assert.deepEqual(await flowBlob(b,"race-copy",BigInt(n)),bytes(String(n)));
@@ -736,21 +756,21 @@ try {
     await status(await commit(source.url,"monotonic",a,0n),201);await stop(source.process);
     const low=Promise.withResolvers<void>(),high=Promise.withResolvers<void>(),lowEntered=Promise.withResolvers<void>(),highEntered=Promise.withResolvers<void>();
     const proxy=relay((_,response)=>response,async request=>{
-      if(!isWatershedPut(request))return;
+      if(!isDatashedPut(request))return;
       const m=BigInt(request.headers.get("x-amz-meta-milestone")!);
       if(m===1n){lowEntered.resolve();await low.promise;}else{highEntered.resolve();await high.promise;}
     });
     const lowApp=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await timeout(lowEntered.promise);
     const producer=await server(b);await status(await commit(producer.url,"monotonic",bytes("second"),1n),201);await stop(producer.process);
     const highApp=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await timeout(highEntered.promise);
-    (winner===1n?low:high).resolve();await eventually(()=>watershedBackup(b),cp=>cp?.milestone===winner);
+    (winner===1n?low:high).resolve();await eventually(()=>datashedBackup(b),cp=>cp?.milestone===winner);
     (winner===1n?high:low).resolve();
-    const checkpoint=await eventually(()=>watershedBackup(b),cp=>cp?.milestone===2n);assert(checkpoint);await Bun.sleep(40);
+    const checkpoint=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===2n);assert(checkpoint);await Bun.sleep(40);
     assert.equal(checkpoint.key,epilogueKey(winner===1n?1n:0n));
     const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"epilogue/0y"}));assert.equal(list.KeyCount,winner===1n?2:1);
     await stop(lowApp.process);await stop(highApp.process);
   }
-  console.log("put of success: competing backup workers retain a gapless Watershed Epilogue");
+  console.log("put of success: competing backup workers retain a gapless Datashed Epilogue");
   // Full database images cross the multipart threshold without weakening first-writer wins.
   {
     const b=await bucket();
@@ -764,14 +784,14 @@ try {
       return response;
     });
     const app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-    const cp=await eventually(()=>watershedBackup(b),cp=>cp?.milestone===1n);assert(cp);assert(cp.blob.length>8*1024*1024);await eventually(async()=>completed,n=>n===1);assert.equal(completed,1,JSON.stringify(operations));
+    const cp=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===1n);assert(cp);assert(cp.blob.length>8*1024*1024);await eventually(async()=>completed,n=>n===1);assert.equal(completed,1,JSON.stringify(operations));
     assert.equal(cp.metadata.sha384,sha384(cp.blob));assert.equal((await inspectImage(cp.blob)).flows.large,"0");
     const upload=await s3.send(new CreateMultipartUploadCommand({Bucket:b,Key:cp.key}));
     try{
       const part=await s3.send(new UploadPartCommand({Bucket:b,Key:cp.key,UploadId:upload.UploadId!,PartNumber:1,Body:a}));
       await assert.rejects(()=>s3.send(new CompleteMultipartUploadCommand({Bucket:b,Key:cp.key,UploadId:upload.UploadId!,IfNoneMatch:"*",MultipartUpload:{Parts:[{PartNumber:1,ETag:part.ETag}]}})),(error:unknown)=>(error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode===412);
     }finally{await s3.send(new AbortMultipartUploadCommand({Bucket:b,Key:cp.key,UploadId:upload.UploadId!}));}
-    assert.equal((await watershedBackup(b))?.metadata.sha384,cp.metadata.sha384);
+    assert.equal((await datashedBackup(b))?.metadata.sha384,cp.metadata.sha384);
     await status(await commit(app.url,"large",bytes("suffix"),1n),201);await stop(app.process);
     const restored=await server(b);assert.equal((await epilogueStatus(restored.url,"large")).latest?.viewpoint,1n);await stop(restored.process);
   }
@@ -820,12 +840,12 @@ try {
     gate.resolve();
     await eventually(()=>flowBlob(b,"public",1n),blob=>blob!==null);
     const complete=await eventually(()=>fullStatus(copying.url,"public"),s=>!!s.latest?.url&&!s.latest.headers?.Range);
-    assert(new URL(complete.latest!.url!).pathname.endsWith(`/${flowKey("public",1n)}`));
+    assert(new URL(complete.latest!.url!).pathname.endsWith(`/${await flowKey(b,"public",1n)}`));
     assert.deepEqual(complete.latest!.headers,{"If-Match":"*"});assert.deepEqual(await latestBlob(complete.latest!),target);
     assert.equal(new URL(complete.latest!.url!).searchParams.get("X-Amz-SignedHeaders"),"host;if-match");
     const unguarded=await fetch(complete.latest!.url!);assert(unguarded.status>=400,"a missing signed condition must fail authentication");await unguarded.arrayBuffer();
     assert(!("url" in (await fullStatus(copying.url,"empty")).latest!));
-    const checkpoint=await eventually(()=>watershedBackup(b),cp=>cp?.milestone===1n);assert(checkpoint);
+    const checkpoint=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===1n);assert(checkpoint);
     const path=`${artifacts}/ranges-backup.turso`;writeFileSync(path,checkpoint.blob);
     for(const item of ranges){
       const inspect=spawn([`${root}/target/debug/examples/frame-fixture`,"--locate",path,item.flow,item.marker.viewpoint],{cwd:root,stdout:"pipe",stderr:"inherit"});
@@ -839,7 +859,7 @@ try {
   }
   console.log("put of success: signed blob-only Range capabilities, empty markers, downstream URL reuse, persistent locations, and snapshot-plus-suffix recovery");
   // Current observers need no LIST; a positive successor probe discovers the
-  // Watershed anchor before replay. Flow marker selection never lists its Epilogue.
+  // Datashed anchor before replay. Flow marker selection never lists its Epilogue.
   {
     const b=await bucket(),reads:{method:string;url:URL}[]=[];
     const proxy=relay((request,response)=>{reads.push({method:request.method,url:new URL(request.url)});return response;});
@@ -850,7 +870,7 @@ try {
       const lists=reads.filter(r=>r.url.searchParams.has("list-type"));
       assert(!lists.some(r=>r.url.searchParams.get("prefix")?.startsWith("flows/")),"never list a Flow Epilogue");
       if(advanced){
-        assert(lists.some(r=>r.url.searchParams.get("prefix")==="epilogue/"),"discover the latest Watershed anchor after a positive probe");
+        assert(lists.some(r=>r.url.searchParams.get("prefix")==="epilogue/"),"discover the latest Datashed anchor after a positive probe");
         assert.equal(reads[0].method,"HEAD");assert(reads[0].url.pathname.includes("/timeline/"));
       }else assert.equal(lists.length,0,"an absent successor avoids all LIST operations");
       return payload(state);
@@ -870,7 +890,7 @@ try {
     await status(await commit(writer.url,"known",bytes("fourth"),3n),201);
     await stop(writer.process);
     const copying=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-    await eventually(()=>watershedBackup(b),cp=>cp?.milestone===5n);
+    await eventually(()=>datashedBackup(b),cp=>cp?.milestone===5n);
     assert.deepEqual(await flowBlob(b,"known",3n),bytes("fourth"));
     const stored=(await checkedStatus("known",true)).latest!;
     assert.equal(stored.viewpoint,3n);assert.deepEqual(stored.headers,{"If-Match":"*"});
@@ -884,7 +904,7 @@ try {
     await stop(copying.process);await stop(observer.process);
   }
   console.log("put of success: latest-only status probes successors, discovers newer snapshots only when behind, and never lists Flow Epilogues");
-  // Probe freshness is Watershed-wide; status cache hits never extend the window.
+  // Probe freshness is Datashed-wide; status cache hits never extend the window.
   {
     const b=await bucket(),reads:{method:string;url:URL}[]=[];
     const proxy=relay((request,response)=>{reads.push({method:request.method,url:new URL(request.url)});return response;});
@@ -893,23 +913,23 @@ try {
     function probes(){return reads.filter(r=>r.method==="HEAD"&&r.url.pathname.includes("/timeline/"));}
     reads.length=0;
     const initial=await fullStatus(observer.url,"external");
-    assert.equal(initial.timelines.watershed.milestone,0n);assert.deepEqual(payload(initial),{latest:null});
+    assert.equal(initial.timelines.datashed.milestone,0n);assert.deepEqual(payload(initial),{latest:null});
     assert.equal(probes().length,1,"first status probes immediately");
     const written=await commit(writer.url,"external",a,0n);
     const receipt=parse<CommitResponse>(await written.clone().text());
-    assert.equal(receipt.timelines.watershed.milestone,1n);await status(written,201);
+    assert.equal(receipt.timelines.datashed.milestone,1n);await status(written,201);
     reads.length=0;
     const stale=await fullStatus(observer.url,"external");
     assert.deepEqual(payload(stale),{latest:null});
-    assert(stale.timelines.watershed.milestone<receipt.timelines.watershed.milestone,"a different instance exposes its older causal prefix");
+    assert(stale.timelines.datashed.milestone<receipt.timelines.datashed.milestone,"a different instance exposes its older causal prefix");
     assert.deepEqual(payload(await fullStatus(observer.url,"another-flow")),{latest:null});
-    assert.equal(reads.length,0,"all Flows reuse the recent Watershed check");
+    assert.equal(reads.length,0,"all Flows reuse the recent Datashed check");
     await Bun.sleep(1600);
     assert.deepEqual(payload(await fullStatus(observer.url,"external")),{latest:null});
     assert.equal(reads.length,0,"cache hits do not probe");
     await Bun.sleep(1600);
     const refreshed=await fullStatus(observer.url,"external");
-    assert.equal(refreshed.timelines.watershed.milestone,1n);
+    assert.equal(refreshed.timelines.datashed.milestone,1n);
     const caughtUp=refreshed.latest!;
     assert.equal(caughtUp.viewpoint,0n);assert(probes().length>0,"expiry probes and refreshes despite intervening cache hits");
     assert.deepEqual(await latestBlob(caughtUp),a);
@@ -917,20 +937,20 @@ try {
     // A write must refresh even while status would accept the old check.
     reads.length=0;
     const localWrite=await commit(observer.url,"local",a,0n);
-    assert.equal(parse<CommitResponse>(await localWrite.clone().text()).timelines.watershed.milestone,3n);
+    assert.equal(parse<CommitResponse>(await localWrite.clone().text()).timelines.datashed.milestone,3n);
     await status(localWrite,201);
-    assert(reads.some(r=>r.url.searchParams.get("prefix")==="epilogue/"),"writes always discover the Watershed anchor");
+    assert(reads.some(r=>r.url.searchParams.get("prefix")==="epilogue/"),"writes always discover the Datashed anchor");
     reads.length=0;
     const local=await fullStatus(observer.url,"local");
-    assert.equal(local.timelines.watershed.milestone,3n);
+    assert.equal(local.timelines.datashed.milestone,3n);
     assert.equal(local.latest?.viewpoint,0n,"own acknowledged writes remain visible");
     assert.equal((await fullStatus(observer.url,"external")).latest?.viewpoint,1n,"write refresh also advances status state");
     assert.equal(probes().length,0,"a successful write refresh renews the check");
     const conflict=await commit(observer.url,"local",a,0n);
-    assert.equal(parse<ViewpointMismatch>(await conflict.clone().text()).timelines.watershed.milestone,3n);
+    assert.equal(parse<ViewpointMismatch>(await conflict.clone().text()).timelines.datashed.milestone,3n);
     await mismatch(conflict,1n);
     const invalid=await fetch(`${observer.url}/api/v0/epilogue/status`);
-    assert.equal(parse<ApiError>(await invalid.clone().text()).timelines.watershed.milestone,3n);
+    assert.equal(parse<ApiError>(await invalid.clone().text()).timelines.datashed.milestone,3n);
     await status(invalid,400);
     await stop(writer.process);await stop(observer.process);
   }
@@ -982,7 +1002,7 @@ try {
     }
     const input=[node(),{...node(),auth:[129,0,secret] as HeapNode["auth"]},{...node(),auth:[0,1,secret] as HeapNode["auth"]},{...node(),edges:["target"]} as unknown as HeapNode,node(oversize),node(),node(secret,8),node(emptySecret,0)];
     const response=await reserved(await reserveHeap(app.url,flow,0n,input));
-    assert.equal(response.timelines.watershed.milestone,1n);
+    assert.equal(response.timelines.datashed.milestone,1n);
     assert.deepEqual(Object.keys(response.results!),["0","5","7"]);
     assert.deepEqual(Object.keys(response.errors!),["1","2","3","4","6"]);
     assert.deepEqual(Object.values(response.errors!).map(e=>e.code),["height_limit","unsupported_version","invalid_node","token_limit","length_collision"]);
@@ -1021,18 +1041,18 @@ try {
     await mismatch(await reserveHeap(app.url,flow,2n,[node()]),1n);
     await reserved(await reserveHeap(app.url,flow,1n,[node()]));
     const invalid=await reserved(await reserveHeap(app.url,flow,1n,[{...node(),auth:[0,0,"client-only-malformed-auth-secret"]} as unknown as HeapNode]));
-    assert.equal(invalid.results,null);assert.equal(invalid.errors![0].code,"invalid_node");assert.equal(invalid.timelines.watershed.milestone,5n);
-    const empty=await reserved(await reserveHeap(app.url,flow,1n,[]));assert.equal(empty.errors,null);assert.equal(empty.results,null);assert.equal(empty.timelines.watershed.milestone,5n);
+    assert.equal(invalid.results,null);assert.equal(invalid.errors![0].code,"invalid_node");assert.equal(invalid.timelines.datashed.milestone,5n);
+    const empty=await reserved(await reserveHeap(app.url,flow,1n,[]));assert.equal(empty.errors,null);assert.equal(empty.results,null);assert.equal(empty.timelines.datashed.milestone,5n);
     await stop(app.process);
     const copying=await server(b,endpoint,{BASINSYNC_DATA_DIR:stateDir,BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-    const cp=await eventually(()=>watershedBackup(b),value=>value?.milestone===5n);assert(cp);
+    const cp=await eventually(()=>datashedBackup(b),value=>value?.milestone===5n);assert(cp);
     for(let m=2n;m<=5n;m++)image=ingestWal(image,(deltasAt(await get(b,m)).turso["default.turso"] as WalDelta).physical.segments);
     assert.deepEqual(cp.blob,image,"reservations and markers share physical recovery and snapshotting");
     assert.deepEqual(await inspectHeap(cp.blob,secret),original,"retries retain original node metadata");
     assert((await inspectHeap(cp.blob,secret,"another-flow")).retained);assert((await inspectHeap(cp.blob,secret,flow,1n)).retained);
     await stop(copying.process);
     const restored=await server(b,endpoint,{BASINSYNC_DATA_DIR:stateDir});
-    const replayed=await reserved(await reserveHeap(restored.url,flow,1n,[node()]));assert.equal(replayed.errors,null);assert.equal(replayed.timelines.watershed.milestone,6n);
+    const replayed=await reserved(await reserveHeap(restored.url,flow,1n,[node()]));assert.equal(replayed.errors,null);assert.equal(replayed.timelines.datashed.milestone,6n);
     await stop(restored.process);
     const secrets=[secret,emptySecret,oversize,bytes("client-only-malformed-auth-secret")];
     function assertNoTokens(contents:Uint8Array){const value=Buffer.from(contents);for(const token of secrets){assert(!value.includes(token),"raw token persisted");assert(!value.includes(Buffer.from(stringify(token).slice(1,-1))),"JSON0 token persisted");}}
@@ -1059,13 +1079,13 @@ try {
     assert.equal(done,false,"do not release actions before reservation durability");assert.equal(puts,1,"prepared successor must not upload early");
     gate.resolve();const first=await reservation;
     if(fault==="none"){
-      await status(first.clone(),200);assert.equal(parse<HeapResponse>(await first.text()).timelines.watershed.milestone,1n);
-      const second=await following;await status(second.clone(),201);assert.equal(parse<CommitResponse>(await second.text()).timelines.watershed.milestone,2n);await stop(app.process);
+      await status(first.clone(),200);assert.equal(parse<HeapResponse>(await first.text()).timelines.datashed.milestone,1n);
+      const second=await following;await status(second.clone(),201);assert.equal(parse<CommitResponse>(await second.text()).timelines.datashed.milestone,2n);await stop(app.process);
     }else{
-      const error=parse<ApiError>(await first.clone().text());assert.equal(error.timelines.watershed.milestone,0n);assert(!("results" in error));await status(first,503);
+      const error=parse<ApiError>(await first.clone().text());assert.equal(error.timelines.datashed.milestone,0n);assert(!("results" in error));await status(first,503);
       await status(await following,503);assert.equal(await timeout(app.process.exited),1);assert.equal(puts,1);
       const restored=await server(b);const retry=await reserveHeap(restored.url,"pipelined-heap",0n,[input]);await status(retry.clone(),200);
-      assert.equal(parse<HeapResponse>(await retry.text()).timelines.watershed.milestone,fault==="after"?2n:1n);await stop(restored.process);
+      assert.equal(parse<HeapResponse>(await retry.text()).timelines.datashed.milestone,fault==="after"?2n:1n);await stop(restored.process);
     }
   }
   // Concurrent reservers arbitrate with the same conditional Timeline append.
@@ -1098,8 +1118,8 @@ try {
     const put=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("same")});assert(put.ok,await put.text());
     const shared=await reserve(app.url,"shared");assert.equal(new URL(shared.results![0].actions.preview!.url).pathname,new URL(actions.preview.url).pathname);
     const firstCommit=await commit(app.url,"first",bytes("marker"),0n);await status(firstCommit.clone(),201);
-    const firstMilestone=parse<CommitResponse>(await firstCommit.text()).timelines.watershed.milestone;
-    await eventually(()=>fullStatus(app.url,"first"),response=>response.timelines.watershed.milestone>firstMilestone);
+    const firstMilestone=parse<CommitResponse>(await firstCommit.text()).timelines.datashed.milestone;
+    await eventually(()=>fullStatus(app.url,"first"),response=>response.timelines.datashed.milestone>firstMilestone);
     assert(!held,"shared retainers keep the node live");
     await status(await commit(app.url,"shared",bytes("marker"),0n),201);
     await timeout(entered.promise);
@@ -1118,8 +1138,8 @@ try {
     const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"heap/young/"}));assert.equal(objects.KeyCount,2);assert(objects.Contents!.some(o=>o.Key===oldKey));
     const restored=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     const again=await reserve(restored.url,"reuse");assert.equal(new URL(again.results![0].actions.preview!.url).pathname,new URL(next.preview.url).pathname);
-    const target=again.timelines.watershed.milestone;
-    const cp=await eventually(()=>watershedBackup(b),cp=>cp?.milestone===target);assert(cp);
+    const target=again.timelines.datashed.milestone;
+    const cp=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===target);assert(cp);
     let image:Uint8Array|undefined;
     for(let m=1n;m<=target;m++){const delta=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;image=ingestWal(image??delta.logical.base!,delta.physical.segments);}
     assert.deepEqual(cp.blob,image,"cleanup and revision reuse survive physical replay and snapshot recovery");
@@ -1220,8 +1240,8 @@ try {
     assert(checkedDeletion,"parent object deletion follows durable outbound edge removal");
     assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"heap/young/"}))).KeyCount,0);
     await stop(cleaner.process);
-    const restored=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"}),tip=(await fullStatus(restored.url,"deep")).timelines.watershed.milestone;
-    const cp=await eventually(()=>watershedBackup(b),cp=>cp?.milestone===tip);assert(cp);assert.deepEqual(await inspect(cp.blob),{graph_nodes:0,graph_edges:0,sweeping_tasks:0,marking_tasks:0});await stop(restored.process);
+    const restored=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"}),tip=(await fullStatus(restored.url,"deep")).timelines.datashed.milestone;
+    const cp=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===tip);assert(cp);assert.deepEqual(await inspect(cp.blob),{graph_nodes:0,graph_edges:0,sweeping_tasks:0,marking_tasks:0});await stop(restored.process);
     for await(const page of paginateListObjectsV2({client:s3},{Bucket:b}))for(const object of page.Contents??[]){const r=await s3.send(new GetObjectCommand({Bucket:b,Key:object.Key!}));const body=Buffer.from(await r.Body!.transformToByteArray());assert(!body.includes(bytes("deep-node-auth-private-")),"child access tokens never reach storage");}
   }
   {
@@ -1273,12 +1293,12 @@ try {
     });
     let app=await server(b,proxy.url,{BASINSYNC_NODE_MAX_DEGREE:"1"});
     const auth=(h:number,s:string):HeapNode["auth"]=>[h,0,bytes(`marker-edge-private-${s}`)];
-    const leaf:HeapNode={auth:auth(0,"leaf"),length:1,edges:[]};
+    const leaf:HeapNode={auth:auth(0,"leaf"),length:1,edges:[],context:{kind:"leaf",tag:"0x-context"}};
     const orphan:HeapNode={auth:auth(0,"orphan"),length:1,edges:[]};
     const reserve=async(flow:string,nodes:HeapNode[],vp=0n)=>{const r=await reserveHeap(app.url,flow,vp,nodes);await status(r.clone(),200);return parse<HeapResponse>(await r.text());};
     const upload=async(action:NonNullable<HeapResponse["results"]>[number]["actions"]["write"],body=bytes("x"))=>{assert(action);const r=await fetch(action.url,{method:"PUT",headers:action.headers,body});assert(r.ok,await r.text());};
     const leaves=await reserve("graph",[leaf,orphan]);await upload(leaves.results![0].actions.write);await upload(leaves.results![1].actions.write);
-    const parent:HeapNode={auth:auth(1,"parent"),length:1,edges:[{auth:leaf.auth}]};
+    const parent:HeapNode={auth:auth(1,"parent"),length:1,edges:[{auth:leaf.auth}],context:{kind:"parent"}};
     const parentActions=(await reserve("graph",[parent])).results![0].actions;assert(parentActions.preview);
     const parentId=new URL(parentActions.preview.url).pathname.split("/heap/young/")[1]!.split("/").slice(0,-1).join("/");
     const missing=await commit(app.url,"graph",bytes("marker"),0n,undefined,[{auth:parent.auth}]);await status(missing.clone(),422);assert.equal(parse<ApiError>(await missing.text()).error,"child_missing");
@@ -1302,15 +1322,17 @@ try {
     app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_MARK_BATCH_SIZE:"1",BASINSYNC_SWEEP_EDGE_BATCH_SIZE:"1",BASINSYNC_ERASE_BATCH_SIZE:"1",BASINSYNC_ERASE_CONCURRENCY:"1"});
     await timeout(entered.promise);
     const parentMarked=await inspect(parentId,owner);assert(parentMarked.marked);assert.equal(parentMarked.promoted,"");assert.equal(parentMarked.freed,"");
-    assert.equal(await exists(b,signKey("graph",0n)),false,"no sign before the entire graph is promoted");
+    assert.equal(await exists(b,await signKey(b,"graph",0n)),false,"no sign before the entire graph is promoted");
     await timeout(status(await commit(app.url,"foreground",bytes("responsive"),0n),201),3000);
     await s3.send(new CopyObjectCommand({Bucket:b,Key:rootPath.slice(b.length+2),CopySource:rootYoung.slice(1),CopySourceIfMatch:parentMarked.etag,IfNoneMatch:"*"}));
     gate.resolve();holdCopies=false;
     await eventually(()=>inspect(parentId,owner),r=>!!r.promoted);
-    await eventually(()=>exists(b,signKey("graph",0n)),Boolean);
+    await eventually(async()=>exists(b,await signKey(b,"graph",0n)),Boolean);
     assert(deleteFailed&&!ambiguous);assert.equal(copyCount,1,"retry after DELETE failure HEADs the old copy instead of copying again");
     for(const actions of [leaves.results![0].actions,parentActions]){
       const r=await fetch(actions.read.url,{headers:actions.read.headers});assert.equal(r.status,200);assert.deepEqual(new Uint8Array(await r.arrayBuffer()),bytes("x"));
+      const expected=actions===parentActions?{kind:"parent"}:{kind:"leaf",tag:"0x-context"};
+      for(const [key,value] of Object.entries(expected))assert.equal(r.headers.get(`x-amz-meta-ctx-${key}`),value);
       const y=await fetch(actions.preview!.url,{headers:actions.preview!.headers});assert([404,412].includes(y.status));await y.arrayBuffer();
     }
     await eventually(async()=>{const r=await fetch(leaves.results![1].actions.preview!.url,{headers:leaves.results![1].actions.preview!.headers});await r.arrayBuffer();return r.status;},s=>s===404||s===412);
@@ -1321,8 +1343,8 @@ try {
     const node=(await inspect(parentId,owner));assert(node.promoted&&node.marked&&!node.freed);
     await stop(app.process);
     app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-    const tip=(await fullStatus(app.url,"graph")).timelines.watershed.milestone;
-    const cp=await eventually(()=>watershedBackup(b),v=>!!v&&v.milestone>=tip);assert(cp);
+    const tip=(await fullStatus(app.url,"graph")).timelines.datashed.milestone;
+    const cp=await eventually(()=>datashedBackup(b),v=>!!v&&v.milestone>=tip);assert(cp);
     const restored=await inspect(parentId,owner,cp.blob);assert(restored.retained&&restored.marked&&restored.promoted);
     await stop(app.process);
     assert(copies.length>=2,"both parent and child promoted");
@@ -1340,7 +1362,7 @@ try {
     });
     let app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
     const data=new Uint8Array(9*1024*1024+3);data.fill(42);data[0]=7;data[data.length-1]=19;
-    const input:HeapNode={auth:[0,0,bytes("promotion-fallback-private")],length:data.length,edges:[]};
+    const input:HeapNode={auth:[0,0,bytes("promotion-fallback-private")],length:data.length,edges:[],context:{kind:"multipart",tag:"0#species"}};
     const r=await reserveHeap(app.url,"f",0n,[input]);await status(r.clone(),200);const actions=parse<HeapResponse>(await r.text()).results![0].actions;assert(actions.write&&actions.preview);
     const p=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:data});assert(p.ok);
     await status(await commit(app.url,"f",bytes("marker"),0n,undefined,[{auth:input.auth}]),201);
@@ -1355,6 +1377,7 @@ try {
     await eventually(async()=>{const r=await reserveHeap(app.url,"f",1n,[input]);await status(r.clone(),200);return parse<HeapResponse>(await r.text());},r=>r.results?.[0]?.actions.preview===null);
     assert.equal(copyAttempts,before,"restart resumes deletion from verified old object");
     const old=await fetch(actions.read.url,{headers:actions.read.headers});assert.equal(old.status,200);assert.deepEqual(new Uint8Array(await old.arrayBuffer()),data);
+    assert.equal(old.headers.get("x-amz-meta-ctx-kind"),"multipart");assert.equal(old.headers.get("x-amz-meta-ctx-tag"),"0#species");
     await stop(app.process);
   }
   {
@@ -1379,7 +1402,7 @@ try {
   console.log("put of success: authenticated marker edges, postorder marking, retained DAGs, bounded promotion, conditional COPY and streaming fallback, foreground progress, and retry/restart/snapshot recovery");
 
   {
-    const b=await bucket(),flow="sign/0x",target=signKey(flow,0n),attempted=Promise.withResolvers<void>();
+    const b=await bucket(),flow="sign/0x",attempted=Promise.withResolvers<void>();let target="";
     let stored=false,confirm=false,puts=0;let mismatch=Promise.withResolvers<void>();
     async function counts(){
       const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"timeline/"}));let image:Uint8Array|undefined;
@@ -1405,6 +1428,7 @@ try {
     let app=await server(b,proxy.url);
     await status(await commit(app.url,flow,new Uint8Array(),0n),201);
     await status(await commit(app.url,flow,bytes("second"),1n),201);
+    target=await signKey(b,flow,0n);
     assert.equal((await counts()).marking_tasks,2,"empty graphs also queue marking tasks");
     await stop(app.process);
     app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
@@ -1423,22 +1447,93 @@ try {
     await eventually(counts,r=>r.marking_tasks===0&&r.sweeping_tasks===0);
     assert.equal(puts,before,"restart confirms an existing sign without rewriting it");
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:target}))).Metadata!.upstream,"1");
-    assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:signKey(flow,1n)}))).Metadata!.upstream,"2");
-    assert(await exists(b,signKey("foreground-sign",0n)));
-    const tip=(await fullStatus(app.url,flow)).timelines.watershed.milestone;
-    const cp=await eventually(()=>watershedBackup(b),cp=>!!cp&&cp.milestone>=tip);assert(cp);
+    assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:await signKey(b,flow,1n)}))).Metadata!.upstream,"2");
+    assert(await exists(b,await signKey(b,"foreground-sign",0n)));
+    const tip=(await fullStatus(app.url,flow)).timelines.datashed.milestone;
+    const cp=await eventually(()=>datashedBackup(b),cp=>!!cp&&cp.milestone>=tip);assert(cp);
     const cpViewpoint=~unlex(cp.key.slice("epilogue/".length));const cpSign=`epilogue/${lex(cpViewpoint)}`;
     await eventually(()=>exists(b,cpSign),Boolean);
     await eventually(()=>flowBlob(b,flow,1n),v=>!!v);await stop(app.process);
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:cpSign}))).Metadata!.upstream,cp.milestone.toString());
-    const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:`flows/0x${Buffer.from(flow).toString("hex")}/epilogue/`}));
-    assert.deepEqual(objects.Contents!.map(o=>o.Key),[flowKey(flow,0n),flowKey(flow,1n),signKey(flow,0n),signKey(flow,1n)].sort());
+    const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:await flowPrefix(b,flow)}));
+    assert.deepEqual(objects.Contents!.map(o=>o.Key),[await flowKey(b,flow,0n),await flowKey(b,flow,1n),await signKey(b,flow,0n),await signKey(b,flow,1n)].sort());
     await s3.send(new DeleteObjectCommand({Bucket:b,Key:cpSign}));
     app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-    await eventually(()=>exists(b,cpSign),Boolean);assert.equal((await watershedBackup(b))!.key,cp.key,"backup restart repairs its sign without creating a new marker");
+    await eventually(()=>exists(b,cpSign),Boolean);assert.equal((await datashedBackup(b))!.key,cp.key,"backup restart repairs its sign without creating a new marker");
     assert.deepEqual(await epilogueStatus(app.url,flow),{latest:{viewpoint:1n}});await stop(app.process);
   }
   console.log("put of success: uncomplemented PromotionSigns, empty graphs, retained tasks until S3 confirmation, ambiguous sign PUTs, restart repair, and mixed-key Epilogue recovery");
+
+  {
+    const b=await bucket(),flow="context/0-flow",body=bytes("context marker");
+    let app=await server(b);
+    const context={Kind:"0x-literal",owner:"alice",empty:"", "0-key":"0"};
+    for(const invalid of [{"bad name":"x"},{a:"x\r\ny"},{A:"one",a:"two"},{big:"x".repeat(2048)}] as Record<string,string>[]){
+      await status(await commit(app.url,flow,body,0n,undefined,[],invalid),400);
+      assert.equal((await fullStatus(app.url,flow)).latest,null);
+    }
+    await status(await commit(app.url,flow,body,0n,undefined,[],context),201);
+    const initial=(await flowRevisions(b))[flow]!;
+    const first=markerAt(await get(b,1n),flow);assert.deepEqual(first.context,context);
+    await stop(app.process);
+    app=await server(b);
+    await status(await commit(app.url,flow,bytes("second"),1n,undefined,[],{owner:"bob"}),201);
+    assert.equal((await flowRevisions(b))[flow],initial,"replay preserves the Flow allocation UUID");
+    await stop(app.process);
+    let lost=false;
+    const proxy=relay(async(request,response)=>{
+      if(!lost&&request.method==="PUT"&&new URL(request.url).pathname.includes("/flows/")&&response.ok){lost=true;await response.arrayBuffer();return new Response("lost marker reply",{status:503});}
+      return response;
+    });
+    app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
+    const cp=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===2n);assert(cp);assert(lost);
+    const firstKey=await flowKey(b,flow,0n),secondKey=await flowKey(b,flow,1n);
+    assert(firstKey.includes(`/${initial}/epilogue/`));
+    const stored=await s3.send(new GetObjectCommand({Bucket:b,Key:firstKey}));
+    assert.deepEqual(await stored.Body!.transformToByteArray(),body);
+    assert.deepEqual(stored.Metadata,{sha384:sha384(body),"ctx-kind":"0x-literal","ctx-owner":"alice","ctx-empty":"","ctx-0-key":"0"});
+    const latest=await fullStatus(app.url,flow);assert(new URL(latest.latest!.url!).pathname.endsWith(`/${secondKey}`));
+    assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:secondKey}))).Metadata!["ctx-owner"],"bob");
+    await stop(app.process);
+    // Recover from only the backup; the next commit keeps its existing namespace.
+    for(const object of (await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"timeline/"}))).Contents??[])await s3.send(new DeleteObjectCommand({Bucket:b,Key:object.Key!}));
+    app=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
+    assert.deepEqual(await latestBlob((await fullStatus(app.url,flow)).latest!),bytes("second"));
+    await status(await commit(app.url,flow,bytes("third"),2n,undefined,[],{owner:"carol"}),201);
+    await eventually(()=>datashedBackup(b),cp=>cp?.milestone===3n);
+    const thirdKey=`flows/0x${Buffer.from(flow).toString("hex")}/${initial}/${epilogueKey(2n)}`;
+    assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:thirdKey}))).Metadata!["ctx-owner"],"carol");
+    await stop(app.process);
+  }
+  console.log("put of success: JSON0 context validation, Timeline metadata retention, ambiguous replication, revision-scoped keys, and snapshot-only Flow recovery");
+
+  {
+    const b=await bucket(),app=await server(b),flow="reservation-context";
+    const node:HeapNode={auth:[0,0,bytes("context-node-private-token")],length:1,edges:[],context:{Kind:"0x-literal",owner:"alice",empty:""}};
+    const input=[node,{...node,context:{owner:"bob"}},{...node,context:{"bad name":"x"}}];
+    const r=await reserveHeap(app.url,flow,0n,input);await status(r.clone(),200);const result=parse<HeapResponse>(await r.text());
+    assert.deepEqual(Object.keys(result.results!),["0","1"]);assert.equal(result.errors![2].code,"invalid_context");
+    const actions=result.results![0].actions,other=result.results![1].actions;assert(actions.write&&actions.preview&&other.write);
+    assert.equal(actions.write.headers["x-amz-meta-ctx-kind"],"0x-literal","JSON0 must not decode header text as a bigint");
+    const signed=new URL(actions.write.url).searchParams.get("X-Amz-SignedHeaders")!;
+    for(const name of ["kind","owner","empty"])assert(signed.split(";").includes(`x-amz-meta-ctx-${name}`));
+    const omitted={...actions.write.headers};delete omitted["x-amz-meta-ctx-owner"];
+    for(const headers of [omitted,{...actions.write.headers,"x-amz-meta-ctx-owner":"mallory"}]){
+      const bad:Response=await fetch(actions.write.url,{method:"PUT",headers,body:bytes("x")});assert(bad.status>=400);await bad.arrayBuffer();
+    }
+    const uploaded=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("x")});assert(uploaded.ok,await uploaded.text());
+    const collision=await fetch(other.write.url,{method:"PUT",headers:other.write.headers,body:bytes("x")});assert.equal(collision.status,412);await collision.arrayBuffer();
+    const preview=await fetch(actions.preview.url,{headers:actions.preview.headers});assert.equal(preview.status,200);await preview.arrayBuffer();
+    assert.equal(preview.headers.get("x-amz-meta-ctx-kind"),"0x-literal");assert.equal(preview.headers.get("x-amz-meta-ctx-owner"),"alice");
+    await stop(app.process);
+    const restored=await server(b);
+    const again=await reserveHeap(restored.url,flow,0n,[{...node,context:{owner:"carol"}}]);await status(again.clone(),200);
+    const next=parse<HeapResponse>(await again.text()).results![0].actions.write!;
+    const duplicate=await fetch(next.url,{method:"PUT",headers:next.headers,body:bytes("x")});assert.equal(duplicate.status,412);await duplicate.arrayBuffer();
+    const head=await s3.send(new HeadObjectCommand({Bucket:b,Key:new URL(next.url).pathname.slice(b.length+2)}));assert.equal(head.Metadata!["ctx-owner"],"alice");
+    await stop(restored.process);
+  }
+  console.log("put of success: per-node context validation, JSON0 header strings, signed metadata tamper rejection, and first-writer metadata across reservation retries");
 
   console.log(`Integration passed. Logs: ${artifacts}`);
 } finally {

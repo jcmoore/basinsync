@@ -82,7 +82,7 @@ struct TimelinePosition {
 
 #[derive(Clone, Serialize)]
 struct Timelines {
-    watershed: TimelinePosition,
+    datashed: TimelinePosition,
 }
 
 #[derive(Serialize)]
@@ -100,7 +100,7 @@ type ApiReply<T> = Result<ApiResponse<T>, ApiFailure>;
 
 fn observed<T>(result: Result<T, Failure>, prefix: &timeline::Prefix) -> ApiReply<T> {
     let timelines = Timelines {
-        watershed: TimelinePosition {
+        datashed: TimelinePosition {
             milestone: prefix.milestone().clone(),
         },
     };
@@ -170,16 +170,18 @@ impl Commit {
             );
         }
         let CommitDetails {
+            context,
             flow,
             viewpoint,
             sha384,
             edges,
         } = serde_json::from_slice(&details.ok_or_else(|| Failure::bad("missing details"))?)
             .map_err(|_| Failure::bad("invalid commit details"))?;
+        basinsync::details::context_headers(&context).map_err(Failure::bad)?;
         let edges = heap::authenticate_edges(edges, limits, None)
             .map_err(|e| Failure::new(StatusCode::UNPROCESSABLE_ENTITY, e.code, e.message))?;
         event::valid_flow(&flow).map_err(Failure::bad)?;
-        basinsync::epilogue::flow_key(&flow, &viewpoint).map_err(Failure::bad)?;
+        basinsync::epilogue::check_flow_key(&flow, &viewpoint).map_err(Failure::bad)?;
         let blob = blob.ok_or_else(|| Failure::bad("missing blob"))?;
         let digest = Sha384::digest(&blob);
         if sha384.as_slice() != &digest[..] {
@@ -193,6 +195,7 @@ impl Commit {
             proofs: Default::default(),
             flow,
             marker: Marker {
+                context,
                 edges,
                 verified: Default::default(),
                 viewpoint: viewpoint.decimal(),
@@ -350,7 +353,7 @@ struct Worker {
     maintenance: mpsc::Sender<Message>,
     cleanup: server_pipeline::CleanupConfig,
     bucket: Box<Bucket>,
-    state: timeline::Watershed,
+    state: timeline::Datashed,
     batch_max: usize,
     batch_wait: Duration,
     backup_interval: Duration,
@@ -370,7 +373,8 @@ async fn epilogue_status(
         let Query(query) =
             query.map_err(|error| Failure::new(error.status(), "invalid_query", error))?;
         event::valid_flow(&query.flow).map_err(Failure::bad)?;
-        basinsync::epilogue::flow_key(&query.flow, &Viewpoint::zero()).map_err(Failure::bad)?;
+        basinsync::epilogue::check_flow_key(&query.flow, &Viewpoint::zero())
+            .map_err(Failure::bad)?;
         let (reply, result) = oneshot::channel();
         app.queue
             .send(Message::Status {
@@ -481,7 +485,7 @@ async fn main() -> Result<()> {
         .with_request_timeout(Duration::from_secs(10))?;
     let state = timeline::recover(&bucket)
         .await
-        .context("recover Watershed Timeline")?;
+        .context("recover Datashed Timeline")?;
     let (published, published_rx) = watch::channel(state.prefix());
     let next = &state.milestone + 1u8;
     diffuse16::key(&next)?;
@@ -634,7 +638,7 @@ mod tests {
     #[test]
     fn responses_use_json0_bigints_and_escape_literal_strings() {
         let viewpoint = Viewpoint::parse("340282366920938463463374607431768211456").unwrap();
-        let prefix = timeline::Watershed {
+        let prefix = timeline::Datashed {
             milestone: "340282366920938463463374607431768211457".parse().unwrap(),
             ..Default::default()
         }
@@ -655,7 +659,7 @@ mod tests {
             serde_json::to_value(status).unwrap(),
             serde_json::json!({
                 "latest": {"viewpoint": "0x100000000000000000000000000000000", "length": 0},
-                "timelines": {"watershed": {"milestone": "0x100000000000000000000000000000001"}},
+                "timelines": {"datashed": {"milestone": "0x100000000000000000000000000000001"}},
             })
         );
         assert_eq!(
@@ -671,7 +675,7 @@ mod tests {
                 .unwrap()
             )
             .unwrap(),
-            serde_json::json!({"error": "00x_literal", "message": "00$message", "timelines": {"watershed": {"milestone": "0x100000000000000000000000000000001"}}})
+            serde_json::json!({"error": "00x_literal", "message": "00$message", "timelines": {"datashed": {"milestone": "0x100000000000000000000000000000001"}}})
         );
     }
 }

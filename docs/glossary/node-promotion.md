@@ -1,5 +1,6 @@
 [conditional-read]: <conditional-read.md>
 [conditional-write]: <conditional-write.md>
+[context]: <context.md>
 [etag]: <etag.md>
 [node]: <node.md>
 [old-generation]: <old-generation.md>
@@ -18,7 +19,8 @@ compatibility fallback, rather than a response to transient COPY failures.
 Promote children before their parent. Verify an existing destination by *conditional HEAD*[^][conditional-read], or
 *conditionally create*[^][conditional-write] it from the young object.
 Verify its length and original *ETag*[^][etag] before deleting young; record
-`promoted` afterward. Preserve the original *ETag*[^][etag] in object metadata
-when transfer changes the destination's *ETag*[^][etag].
+`promoted` afterward. Preserve *context*[^][context] through COPY and transfer.
+When transfer changes the destination's *ETag*[^][etag], retain the original
+*ETag*[^][etag] in object metadata.
 The `(promoted, marked)` index queues work with `promoted = '' AND marked > ''`;
 interrupted work resumes from these durable columns.

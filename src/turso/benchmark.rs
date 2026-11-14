@@ -82,6 +82,7 @@ fn commits() -> Result<()> {
         let markers = BTreeMap::from([(
             flow,
             Marker {
+                context: Default::default(),
                 edges: Default::default(),
                 verified: Default::default(),
                 viewpoint,
@@ -211,6 +212,7 @@ fn seed() -> Result<()> {
             (
                 format!("flow-{i:06}"),
                 Marker {
+                    context: Default::default(),
                     edges: Default::default(),
                     verified: Default::default(),
                     viewpoint: "0".into(),

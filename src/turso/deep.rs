@@ -4,14 +4,14 @@ use std::collections::BTreeSet;
 
 struct World {
     writer: timeline::Stager,
-    replay: timeline::Watershed,
+    replay: timeline::Datashed,
     snapshot: Option<timeline::Snapshot>,
 }
 impl World {
     fn new() -> Self {
         Self {
-            writer: timeline::Watershed::default().into_stager(),
-            replay: timeline::Watershed::default(),
+            writer: timeline::Datashed::default().into_stager(),
+            replay: timeline::Datashed::default(),
             snapshot: None,
         }
     }
@@ -67,6 +67,7 @@ impl World {
             markers: BTreeMap::from([(
                 flow.into(),
                 event::Marker {
+                    context: Default::default(),
                     edges: Default::default(),
                     verified: Default::default(),
                     viewpoint: "0".into(),
@@ -105,6 +106,7 @@ impl World {
 }
 fn node(height: u64, token: u8, edges: &[&heap::Node]) -> heap::Node {
     heap::Node {
+        context: Default::default(),
         id: heap::node_id(height, 0, &[token]),
         length: 1,
         edges: edges.iter().map(|n| n.id.clone()).collect(),
@@ -239,6 +241,7 @@ fn child_verification_is_bound_to_the_current_live_revision() -> Result<()> {
 fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Result<()> {
     let mut w = World::new();
     let leaf = |name: &str| heap::Node {
+        context: Default::default(),
         id: heap::node_id(0, 0, name.as_bytes()),
         length: 1,
         edges: BTreeSet::new(),
@@ -252,6 +255,7 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
             .is_empty()
     );
     let parent = heap::Node {
+        context: Default::default(),
         id: heap::node_id(1, 0, b"marked-parent"),
         length: 1,
         edges: BTreeSet::from([a.id.clone(), b.id.clone()]),
@@ -259,6 +263,7 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
     w.reserve("graph", vec![parent.clone()])?;
     let middle = parent;
     let parent = heap::Node {
+        context: Default::default(),
         id: heap::node_id(2, 0, b"marked-root"),
         length: 1,
         edges: BTreeSet::from([middle.id.clone(), b.id.clone()]),
@@ -275,6 +280,7 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
         markers: BTreeMap::from([(
             "graph".into(),
             event::Marker {
+                context: Default::default(),
                 viewpoint: "0".into(),
                 sha384: event::digest(&[]),
                 blob: vec![],
@@ -290,6 +296,7 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
     // An out-of-order proposal cannot mark a parent before its children, nor remove its task.
     let row = w.db().heap_node(&parent.id)?.unwrap();
     let task = crate::promotion::Task {
+        revision: w.db().flow_revision("graph")?.unwrap(),
         upstream: w.writer.prefix().milestone().clone(),
         flow: "graph".into(),
         viewpoint: "0".into(),
@@ -404,6 +411,7 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
         markers: BTreeMap::from([(
             "other".into(),
             event::Marker {
+                context: Default::default(),
                 viewpoint: "0".into(),
                 sha384: event::digest(&[]),
                 blob: vec![],
@@ -439,6 +447,7 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
     );
     w.commit("empty")?;
     let empty = crate::promotion::Task {
+        revision: w.db().flow_revision("empty")?.unwrap(),
         upstream: w.writer.prefix().milestone().clone(),
         flow: "empty".into(),
         viewpoint: "0".into(),

@@ -1,4 +1,4 @@
-[0002-watershed-timeline-race]: <0002-watershed-timeline-race.md>
+[0002-datashed-timeline-race]: <0002-datashed-timeline-race.md>
 [0003-commit-baseline]: <../benchmarks/0003-commit-baseline.md>
 [0003-disk-shadow]: <../benchmarks/0003-disk-shadow.md>
 [0003-s3-latency]: <../benchmarks/0003-s3-latency.md>
@@ -7,6 +7,8 @@
 [0003-zset-experiments]: <../benchmarks/0003-zset-experiments.md>
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-write]: <../glossary/conditional-write.md>
+[datashed]: <../glossary/datashed.md>
+[datashed-timeline]: <../datashed-timeline.md>
 [development]: <../development.md>
 [differential-event]: <../glossary/differential-event.md>
 [downstream]: <../glossary/downstream.md>
@@ -22,6 +24,7 @@
 [mvcc]: <../glossary/mvcc.md>
 [physical-frame]: <../glossary/physical-frame.md>
 [range-manifest]: <../glossary/range-manifest.md>
+[revision]: <../glossary/revision.md>
 [timeline]: <../glossary/timeline.md>
 [turso]: <../glossary/turso.md>
 [turso-state]: <../turso-state.md>
@@ -29,13 +32,11 @@
 [viewpoint]: <../glossary/viewpoint.md>
 [virtual-file-system]: <../glossary/virtual-file-system.md>
 [wal]: <../glossary/wal.md>
-[watershed]: <../glossary/watershed.md>
-[watershed-timeline]: <../watershed-timeline.md>
 [z-set]: <../glossary/z-set.md>
 
 # 0003 — Turso Reservoir VFS
 
-Materialize the *Watershed's*[^][watershed] *Timeline*[^][timeline] in *Turso*[^][turso]
+Materialize the *Datashed's*[^][datashed] *Timeline*[^][timeline] in *Turso*[^][turso]
 with 16 KiB pages, *MVCC*[^][mvcc], and portable logical changes. Store the applied
 *Milestone*[^][milestone] and each *Flow's*[^][flow] latest
 *Viewpoint*[^][viewpoint] as decimal text:
@@ -43,13 +44,14 @@ with 16 KiB pages, *MVCC*[^][mvcc], and portable logical changes. Store the appl
 ```sql
 PRAGMA page_size = 16384;
 PRAGMA journal_mode = mvcc;
-CREATE TABLE watershed (
+CREATE TABLE datashed (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   milestone TEXT NOT NULL
 );
 CREATE TABLE flows (
   id TEXT PRIMARY KEY NOT NULL,
-  viewpoint TEXT NOT NULL
+  viewpoint TEXT NOT NULL,
+  revision TEXT NOT NULL
 );
 CREATE TABLE marker_ranges (
   flow TEXT NOT NULL,
@@ -61,10 +63,14 @@ CREATE TABLE marker_ranges (
   PRIMARY KEY (flow, downstream)
 );
 CREATE INDEX marker_ranges_upstream ON marker_ranges(upstream);
-INSERT INTO watershed VALUES (1, '0');
+INSERT INTO datashed VALUES (1, '0');
 ```
 
-Materialize *0002's*[^][0002-watershed-timeline-race] blob locations in `marker_ranges`
+Assign each new *Flow*[^][flow] a UUIDv4 *revision*[^][revision] in its first commit
+transaction; retain it on later commits and recover it from captured frames.
+Use `flows/0x<UTF-8 hex id>/<revision>/` as its S3 namespace.
+
+Materialize *0002's*[^][0002-datashed-timeline-race] blob locations in `marker_ranges`
 in the commit transaction. Its *upstream*[^][upstream] *Milestones*[^][milestone]
 and *downstream*[^][downstream] *Viewpoints*[^][viewpoint] use positive
 *Lexidecimal*[^][lexidecimal] text. Preserve locations for intermediate
@@ -106,7 +112,7 @@ Use the *frame contract*[^][turso-state] and version
 `0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88`.
 One *DifferentialEvent*[^][differential-event] occupies one
 *Milestone*[^][milestone], regardless of request count. Increasing in-flight
-limits must preserve *causal publication order*[^][watershed-timeline];
+limits must preserve *causal publication order*[^][datashed-timeline];
 acknowledge all successful requests only after their event's
 *conditional PUT*[^][conditional-write] succeeds. On failure or an ambiguous
 reply, reject queued work and terminate. Status requests wait behind outstanding
@@ -119,7 +125,7 @@ request data per batch. A larger individual request forms its own batch.
 admission and the queue remain bounded, with room for two full batches
 (64 requests at the default size).
 
-Recover the complete history as in *0002*[^][0002-watershed-timeline-race], ingesting
+Recover the complete history as in *0002*[^][0002-datashed-timeline-race], ingesting
 *physical frames*[^][physical-frame] instead of rerunning commit SQL. Check
 versions, native framing, initial-image identity, predecessor linkage, and
 cursors; verify affected rows. Earlier image-delta entries remain readable, and

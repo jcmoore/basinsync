@@ -11,6 +11,7 @@ use url::{Position, Url};
 pub struct Access {
     #[serde(serialize_with = "crate::json0::serialize_text")]
     pub url: String,
+    #[serde(serialize_with = "crate::json0::serialize_text_map")]
     pub headers: BTreeMap<String, String>,
 }
 
@@ -45,17 +46,20 @@ async fn signed_get(
     signed_request(bucket, key, "GET", access_headers).await
 }
 
-pub async fn presign_write(bucket: &Bucket, key: &str, length: u64) -> Result<Access> {
-    signed_request(
-        bucket,
-        key,
-        "PUT",
-        BTreeMap::from([
-            ("If-None-Match".into(), "*".into()),
-            ("Content-Length".into(), length.to_string()),
-        ]),
-    )
-    .await
+pub async fn presign_write(
+    bucket: &Bucket,
+    key: &str,
+    length: u64,
+    context: &BTreeMap<String, String>,
+) -> Result<Access> {
+    let mut headers = BTreeMap::from([
+        ("If-None-Match".into(), "*".into()),
+        ("Content-Length".into(), length.to_string()),
+    ]);
+    for (name, value) in &crate::details::context_headers(context)? {
+        headers.insert(name.to_string(), value.to_str()?.to_owned());
+    }
+    signed_request(bucket, key, "PUT", headers).await
 }
 
 // Sort by header name, not by the concatenated `name:value`: prefix names such
@@ -167,6 +171,21 @@ pub(crate) async fn signed_request(
 #[cfg(test)]
 mod canonical_tests {
     use super::*;
+    #[test]
+    fn capability_headers_keep_json0_looking_values_as_text() {
+        let value = serde_json::to_value(Access {
+            url: "https://example.com/key".into(),
+            headers: BTreeMap::from([
+                ("x-amz-meta-ctx-bigint".into(), "0x1".into()),
+                ("x-amz-meta-ctx-symbol".into(), "0#species".into()),
+                ("Content-Length".into(), "0".into()),
+            ]),
+        })
+        .unwrap();
+        assert_eq!(value["headers"]["x-amz-meta-ctx-bigint"], "00x1");
+        assert_eq!(value["headers"]["x-amz-meta-ctx-symbol"], "00#species");
+        assert_eq!(value["headers"]["Content-Length"], "0");
+    }
     #[test]
     fn prefix_header_names_follow_signed_header_order() {
         let headers = HeaderMap::from_iter([

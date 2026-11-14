@@ -1,4 +1,4 @@
-//! Reservoir object namespaces and durable Watershed recovery anchors.
+//! Reservoir object namespaces and durable Datashed recovery anchors.
 use crate::{event, lexidecimal::Viewpoint, turso};
 use anyhow::{Context, Result, ensure};
 use axum::http::{HeaderMap, HeaderValue};
@@ -6,24 +6,28 @@ use num_bigint::BigUint;
 use s3::Bucket;
 use std::collections::HashMap;
 
-pub const WATERSHED_PREFIX: &str = "epilogue/";
+pub const DATASHED_PREFIX: &str = "epilogue/";
 
-pub fn flow_prefix(flow: &str) -> String {
+pub fn flow_prefix(flow: &str, revision: &uuid::Uuid) -> String {
     // A reversible, path-safe encoding; no restrictions on leading zeroes or '/'.
     let id: String = flow.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
-    format!("flows/0x{id}/epilogue/")
+    format!("flows/0x{id}/{revision}/epilogue/")
 }
-pub fn flow_key(flow: &str, viewpoint: &Viewpoint) -> Result<String> {
+pub fn flow_key(flow: &str, revision: &uuid::Uuid, viewpoint: &Viewpoint) -> Result<String> {
     let key = format!(
         "{}{}",
-        flow_prefix(flow),
-        viewpoint.key()?.strip_prefix(WATERSHED_PREFIX).unwrap()
+        flow_prefix(flow, revision),
+        viewpoint.key()?.strip_prefix(DATASHED_PREFIX).unwrap()
     );
     ensure!(
         key.len() <= 1024,
         "Flow CommitMarker key exceeds S3's key size limit"
     );
     Ok(key)
+}
+/// Validate an incoming Flow namespace before its revision has been allocated.
+pub fn check_flow_key(flow: &str, viewpoint: &Viewpoint) -> Result<()> {
+    flow_key(flow, &uuid::Uuid::nil(), viewpoint).map(|_| ())
 }
 pub fn promotion_key(prefix: &str, viewpoint: &Viewpoint) -> Result<String> {
     let key = format!("{prefix}{}", viewpoint.lexidecimal());
@@ -33,8 +37,12 @@ pub fn promotion_key(prefix: &str, viewpoint: &Viewpoint) -> Result<String> {
     );
     Ok(key)
 }
-pub fn flow_promotion_key(flow: &str, viewpoint: &Viewpoint) -> Result<String> {
-    promotion_key(&flow_prefix(flow), viewpoint)
+pub fn flow_promotion_key(
+    flow: &str,
+    revision: &uuid::Uuid,
+    viewpoint: &Viewpoint,
+) -> Result<String> {
+    promotion_key(&flow_prefix(flow, revision), viewpoint)
 }
 /// A sign is an immutable, empty object; confirmation also resolves ambiguous PUT replies.
 pub async fn confirm_promotion_sign(bucket: &Bucket, key: &str, upstream: &BigUint) -> Result<()> {
@@ -99,7 +107,7 @@ pub async fn latest_key(bucket: &Bucket, prefix: &str) -> Result<Option<(String,
         crate::lexidecimal::decode(suffix)?;
         return Ok(None);
     }
-    let viewpoint = Viewpoint::from_key(&format!("{WATERSHED_PREFIX}{suffix}"))?;
+    let viewpoint = Viewpoint::from_key(&format!("{DATASHED_PREFIX}{suffix}"))?;
     Ok(Some((object.key.clone(), viewpoint)))
 }
 
@@ -160,7 +168,7 @@ impl Checkpoint {
         }
         Ok(headers)
     }
-    pub async fn load(&self, bucket: &Bucket) -> Result<crate::timeline::Watershed> {
+    pub async fn load(&self, bucket: &Bucket) -> Result<crate::timeline::Datashed> {
         let response = crate::object_read::if_present(bucket)?
             .get_object(self.viewpoint.key()?)
             .await?;
@@ -187,7 +195,7 @@ impl Checkpoint {
             database.milestone()? == self.milestone.to_string(),
             "backup database Milestone mismatch"
         );
-        Ok(crate::timeline::Watershed {
+        Ok(crate::timeline::Datashed {
             milestone: self.milestone.clone(),
             head: Some(self.digest.clone()),
             database: Some(database),
@@ -197,7 +205,7 @@ impl Checkpoint {
 }
 
 pub async fn latest_checkpoint(bucket: &Bucket) -> Result<Option<Checkpoint>> {
-    let Some((key, viewpoint)) = latest_key(bucket, WATERSHED_PREFIX).await? else {
+    let Some((key, viewpoint)) = latest_key(bucket, DATASHED_PREFIX).await? else {
         return Ok(None);
     };
     let (head, status) = crate::object_read::if_present(bucket)?
@@ -213,11 +221,17 @@ pub async fn latest_checkpoint(bucket: &Bucket) -> Result<Option<Checkpoint>> {
     Ok(Some(Checkpoint::from_headers(viewpoint, &headers)?))
 }
 
-pub async fn replicate(bucket: &Bucket, flow: &str, marker: &event::Marker) -> Result<()> {
+pub async fn replicate(
+    bucket: &Bucket,
+    flow: &str,
+    revision: &uuid::Uuid,
+    marker: &event::Marker,
+) -> Result<()> {
     let viewpoint = marker.validate()?;
-    let key = flow_key(flow, &viewpoint)?;
+    let key = flow_key(flow, revision, &viewpoint)?;
     let mut headers = conditional_headers();
     headers.insert("x-amz-meta-sha384", marker.sha384.parse()?);
+    headers.extend(crate::details::context_headers(&marker.context)?);
     let result = bucket
         .put_object_with_headers(&key, &marker.blob, Some(headers))
         .await;
@@ -236,6 +250,29 @@ pub async fn replicate(bucket: &Bucket, flow: &str, marker: &event::Marker) -> R
                 existing.as_slice() == marker.blob,
                 "conflicting stored Flow CommitMarker"
             );
+            let actual: std::collections::BTreeMap<_, _> = existing
+                .headers()
+                .into_iter()
+                .filter_map(|(key, value)| {
+                    key.to_ascii_lowercase()
+                        .strip_prefix("x-amz-meta-ctx-")
+                        .map(|suffix| (suffix.to_owned(), value.trim().to_owned()))
+                })
+                .collect();
+            let expected: std::collections::BTreeMap<_, _> =
+                crate::details::context_headers(&marker.context)?
+                    .iter()
+                    .map(|(key, value)| {
+                        (
+                            key.as_str()
+                                .strip_prefix("x-amz-meta-ctx-")
+                                .unwrap()
+                                .to_owned(),
+                            value.to_str().unwrap().trim().to_owned(),
+                        )
+                    })
+                    .collect();
+            ensure!(actual == expected, "conflicting stored Flow context");
         }
     }
     Ok(())
@@ -244,11 +281,12 @@ pub async fn replicate(bucket: &Bucket, flow: &str, marker: &event::Marker) -> R
 pub async fn matches_marker(
     bucket: &Bucket,
     flow: &str,
+    revision: &uuid::Uuid,
     viewpoint: &Viewpoint,
     location: &turso::Location,
 ) -> Result<bool> {
     let (head, status) = crate::object_read::if_present(bucket)?
-        .head_object(flow_key(flow, viewpoint)?)
+        .head_object(flow_key(flow, revision, viewpoint)?)
         .await?;
     ensure!(
         matches!(status, 200 | 404 | 412),
@@ -269,34 +307,36 @@ mod tests {
     use super::*;
     #[test]
     fn reservoir_keys_are_disjoint_and_flow_ids_are_unambiguous() -> Result<()> {
+        let revision = uuid::Uuid::new_v4();
         let vp = Viewpoint::zero();
         let ids = ["", "0", "0x1", "/", "../", "雪", "__proto__"];
         let mut keys = std::collections::BTreeSet::new();
         for flow in ids {
-            let key = flow_key(flow, &vp)?;
-            assert!(!key.starts_with(WATERSHED_PREFIX));
+            let key = flow_key(flow, &revision, &vp)?;
+            assert!(!key.starts_with(DATASHED_PREFIX));
             assert!(keys.insert(key));
         }
-        assert!(flow_key(&"x".repeat(600), &vp).is_err());
+        assert!(flow_key(&"x".repeat(600), &revision, &vp).is_err());
         Ok(())
     }
     #[test]
     fn promotion_signs_use_uncomplemented_keys_after_every_marker() -> Result<()> {
+        let revision = uuid::Uuid::new_v4();
         let values = ["0", "1", "16", "340282366920938463463374607431768211456"];
         let mut markers = Vec::new();
         let mut signs = Vec::new();
         for value in values {
             let vp = Viewpoint::parse(value)?;
-            let marker = flow_key("f/雪", &vp)?;
-            let sign = flow_promotion_key("f/雪", &vp)?;
+            let marker = flow_key("f/雪", &revision, &vp)?;
+            let sign = flow_promotion_key("f/雪", &revision, &vp)?;
             assert!(sign.ends_with(&vp.lexidecimal()));
             assert!(marker < sign);
-            assert!(Viewpoint::from_key(&promotion_key(WATERSHED_PREFIX, &vp)?).is_err());
+            assert!(Viewpoint::from_key(&promotion_key(DATASHED_PREFIX, &vp)?).is_err());
             markers.push(marker);
             signs.push(sign);
         }
         assert!(markers.iter().all(|m| signs.iter().all(|s| m < s)));
-        assert!(flow_promotion_key(&"x".repeat(600), &Viewpoint::zero()).is_err());
+        assert!(flow_promotion_key(&"x".repeat(600), &revision, &Viewpoint::zero()).is_err());
         Ok(())
     }
     #[test]

@@ -357,15 +357,15 @@ fn application_feed(
     read: bool,
 ) -> Result<Feed> {
     let mut feed = Feed::default();
-    let watershed = schema.values().find(|t| t.name == "watershed").unwrap();
+    let datashed = schema.values().find(|t| t.name == "datashed").unwrap();
     let flows = schema.values().find(|t| t.name == "flows").unwrap();
     feed.add(
-        watershed,
+        datashed,
         vec![Cell::Integer(1), Cell::Text(writer.cursor.to_string())],
         -1,
     );
     feed.add(
-        watershed,
+        datashed,
         vec![
             Cell::Integer(1),
             Cell::Text((&writer.cursor + 1u8).to_string()),
@@ -432,6 +432,17 @@ fn append_task_feed(
     schema: &Tables,
     feed: &mut Feed,
 ) -> Result<()> {
+    // Allocation UUIDs are nondeterministic; retain the independent row/value
+    // oracle and fill only that generated column from the committed allocation.
+    if let Some(flows) = feed.tables.get_mut("flows") {
+        for row in &mut flows.rows {
+            let Cell::Text(flow) = &row.row[0] else {
+                unreachable!()
+            };
+            row.row
+                .push(Cell::Text(writer.flow_revision(flow)?.unwrap().to_string()));
+        }
+    }
     for name in ["sweeping_tasks", "marking_tasks"] {
         let table = schema.values().find(|t| t.name == name).unwrap();
         let mut seen = std::collections::BTreeSet::new();
@@ -656,6 +667,7 @@ fn seed(flows: usize, cdc: bool) -> Result<Vec<u8>> {
             (
                 format!("flow-{n:06}"),
                 Marker {
+                    context: Default::default(),
                     edges: Default::default(),
                     verified: Default::default(),
                     viewpoint: "0".into(),
@@ -682,6 +694,7 @@ fn input(index: usize, batch: usize, flows: usize, blob: &[u8]) -> Vec<FlowComma
             markers: BTreeMap::from([(
                 format!("flow-{:06}", n % flows),
                 Marker {
+                    context: Default::default(),
                     edges: Default::default(),
                     verified: Default::default(),
                     viewpoint: (n / flows + 1).to_string(),

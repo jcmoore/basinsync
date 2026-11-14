@@ -1,6 +1,7 @@
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-read]: <../glossary/conditional-read.md>
 [conditional-write]: <../glossary/conditional-write.md>
+[context]: <../glossary/context.md>
 [development]: <../development.md>
 [epilogue]: <../glossary/epilogue.md>
 [epilogue-protocol]: <../epilogue-protocol.md>
@@ -16,7 +17,9 @@ Start with an *Epilogue*[^][epilogue] of opaque blobs.
    bucket's lowest *Epilogue*[^][epilogue] key, starting at zero when empty.
 2. Accept `PUT /api/v0/epilogue`: a raw `blob` part and *JSON0*[^][json0]
    `details` containing a bigint *viewpoint*[^][viewpoint] and byte-array
-   *SHA-384*[^][sha384]. Reject a wrong *viewpoint*[^][viewpoint] or
+   *SHA-384*[^][sha384], plus optional `context: Record<string, string>`.
+   Attach *context*[^][context] as `x-amz-meta-ctx-` metadata on the stored
+   *marker*[^][commit-marker]. Reject a wrong *viewpoint*[^][viewpoint] or
    *digest*[^][sha384]; otherwise *conditionally create*[^][conditional-write]
    its *marker*[^][commit-marker]. Advance after success; return an error and
    terminate after write failure.

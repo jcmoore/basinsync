@@ -281,6 +281,7 @@ fn wal_capture_reconstructs_without_database_diff() -> Result<()> {
         let markers = BTreeMap::from([(
             format!("flow-{}", n % 4),
             Marker {
+                context: Default::default(),
                 edges: Default::default(),
                 verified: Default::default(),
                 viewpoint: (n / 4).to_string(),
@@ -546,6 +547,7 @@ fn wal_growth_deletion_rollback_and_corruption() -> Result<()> {
                     "雪".repeat(if n == 1 { 10000 } else { 100 })
                 ),
                 Marker {
+                    context: Default::default(),
                     edges: Default::default(),
                     verified: Default::default(),
                     viewpoint: "0".into(),
@@ -568,18 +570,18 @@ fn wal_growth_deletion_rollback_and_corruption() -> Result<()> {
     for sql in [
         "DELETE FROM flows WHERE rowid % 2 = 0",
         "DELETE FROM flows",
-        "INSERT INTO flows VALUES ('reuse', '340282366920938463463374607431768211456')",
+        "INSERT INTO flows VALUES ('reuse', '340282366920938463463374607431768211456', '00000000-0000-4000-8000-000000000001')",
     ] {
         let native = &live.state.native;
         native
             .conn
-            .execute("BEGIN CONCURRENT; INSERT INTO flows VALUES ('abandoned','999'); ROLLBACK")?;
+            .execute("BEGIN CONCURRENT; INSERT INTO flows VALUES ('abandoned', '999', '00000000-0000-4000-8000-000000000001'); ROLLBACK")?;
         let next = (before_cursor.parse::<u64>()? + 1).to_string();
         native.conn.execute("BEGIN CONCURRENT")?;
         native.conn.execute(sql)?;
         native
             .conn
-            .execute(format!("UPDATE watershed SET milestone='{next}'"))?;
+            .execute(format!("UPDATE datashed SET milestone='{next}'"))?;
         native.conn.execute("COMMIT")?;
         let delta = live.capture(next.clone())?;
         let physical = delta.physical.ingest(&image, &before_cursor)?;
@@ -625,7 +627,8 @@ proptest::proptest! {
             for id in batch {
                 let flow=format!("{id}/雪");
                 let vp=live.state.latest(&flow).unwrap().map_or_else(Viewpoint::zero,|v|v.next());
-                markers.insert(flow,Marker { edges: Default::default(), verified: Default::default(),viewpoint:vp.decimal(),sha384:hash(&[]),blob:vec![]});
+                markers.insert(flow,Marker { context: Default::default(),
+            edges: Default::default(), verified: Default::default(),viewpoint:vp.decimal(),sha384:hash(&[]),blob:vec![]});
             }
             let delta=live.commit(&markers).unwrap();
             let wire=encode_wal(markers,delta.clone()).unwrap();
@@ -770,6 +773,7 @@ fn input(index: usize, batch: usize, flows: usize, blob: &[u8]) -> BTreeMap<Stri
             (
                 format!("flow-{:06}", n % flows),
                 Marker {
+                    context: Default::default(),
                     edges: Default::default(),
                     verified: Default::default(),
                     viewpoint: (n / flows + 1).to_string(),
@@ -843,7 +847,7 @@ fn measure() -> Result<()> {
                 input(n, 1, if kind == "wal-vector" { 1 } else { flows }, &blob),
             )?);
         }
-        let mut watershed = crate::timeline::Watershed {
+        let mut datashed = crate::timeline::Datashed {
             milestone: 1u8.into(),
             database: Some(State::from_image(initial.clone())?),
             stopped: false,
@@ -854,7 +858,7 @@ fn measure() -> Result<()> {
         for (n, bytes) in events.iter().enumerate() {
             let start = Instant::now();
             if kind == "image-verify" {
-                watershed.apply((n + 2).into(), crate::event::decode(bytes)?)?;
+                datashed.apply((n + 2).into(), crate::event::decode(bytes)?)?;
             } else if kind == "wal-vector" {
                 state = recover_vector(&state, bytes)?;
             } else if mode == "recover-sparse" {
@@ -867,7 +871,7 @@ fn measure() -> Result<()> {
             }
         }
         let image = if kind == "image-verify" {
-            watershed.database.unwrap().image
+            datashed.database.unwrap().image
         } else {
             state.image
         };
@@ -952,6 +956,7 @@ fn measure() -> Result<()> {
                         (
                             "flow-000000".into(),
                             Marker {
+                                context: Default::default(),
                                 edges: Default::default(),
                                 verified: Default::default(),
                                 viewpoint: (n + 1).to_string(),
@@ -1135,6 +1140,7 @@ async fn actual_frames_recover_after_stored_batch_reply_is_lost() -> Result<()> 
     let seed_markers = BTreeMap::from([(
         "a".into(),
         Marker {
+            context: Default::default(),
             edges: Default::default(),
             verified: Default::default(),
             viewpoint: "0".into(),
@@ -1151,6 +1157,7 @@ async fn actual_frames_recover_after_stored_batch_reply_is_lost() -> Result<()> 
         let markers = BTreeMap::from([(
             "a".into(),
             Marker {
+                context: Default::default(),
                 edges: Default::default(),
                 verified: Default::default(),
                 viewpoint: (milestone - 1).to_string(),
@@ -1388,6 +1395,7 @@ fn ordered_same_flow_commands_materialize_atomically_and_recover() -> Result<()>
                 (
                     "hot".into(),
                     Marker {
+                        context: Default::default(),
                         edges: Default::default(),
                         verified: Default::default(),
                         viewpoint: (batch * 32 + offset).to_string(),
@@ -1437,6 +1445,7 @@ fn ordered_same_flow_commands_materialize_atomically_and_recover() -> Result<()>
         (
             "hot".into(),
             Marker {
+                context: Default::default(),
                 edges: Default::default(),
                 verified: Default::default(),
                 viewpoint: "320".into(),
@@ -1447,6 +1456,7 @@ fn ordered_same_flow_commands_materialize_atomically_and_recover() -> Result<()>
         (
             "hot".into(),
             Marker {
+                context: Default::default(),
                 edges: Default::default(),
                 verified: Default::default(),
                 viewpoint: "322".into(),

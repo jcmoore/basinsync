@@ -177,7 +177,7 @@ impl State {
         }
         execute(
             conn,
-            "UPDATE watershed SET milestone=?1 WHERE id=1",
+            "UPDATE datashed SET milestone=?1 WHERE id=1",
             &[milestone],
         )?;
         conn.execute("COMMIT")?;
@@ -302,6 +302,7 @@ mod tests {
                 .iter()
                 .map(|n| {
                     Ok(heap::Node {
+                        context: Default::default(),
                         id: heap::node_id(0, 0, &[*n]),
                         length: 1,
                         edges: Default::default(),
@@ -315,6 +316,7 @@ mod tests {
             markers: BTreeMap::from([(
                 flow.into(),
                 event::Marker {
+                    context: Default::default(),
                     edges: Default::default(),
                     verified: Default::default(),
                     viewpoint: viewpoint.into(),
@@ -339,7 +341,7 @@ mod tests {
             viewpoint: viewpoint.into(),
         }
     }
-    fn apply(state: &mut timeline::Watershed, prepared: timeline::Prepared) -> Result<()> {
+    fn apply(state: &mut timeline::Datashed, prepared: timeline::Prepared) -> Result<()> {
         let event::Entry::Wal { delta, .. } = event::decode_entry(prepared.bytes())? else {
             unreachable!()
         };
@@ -356,8 +358,8 @@ mod tests {
     }
     #[test]
     fn queued_sweeps_are_bounded_retain_shared_nodes_and_survive_replay() -> Result<()> {
-        let mut writer = timeline::Watershed::default().into_stager();
-        let mut replay = timeline::Watershed::default();
+        let mut writer = timeline::Datashed::default().into_stager();
+        let mut replay = timeline::Datashed::default();
         let request = reserve("f", &[1, 2, 3]);
         let (prepared, _) = writer.prepare_heap(&request)?;
         apply(&mut replay, prepared.unwrap())?;
@@ -445,8 +447,8 @@ mod tests {
     }
     #[test]
     fn cleanup_frames_match_internal_operation_and_preserve_snapshot() -> Result<()> {
-        let mut writer = timeline::Watershed::default().into_stager();
-        let mut replay = timeline::Watershed::default();
+        let mut writer = timeline::Datashed::default().into_stager();
+        let mut replay = timeline::Datashed::default();
         let (prepared, _) = writer.prepare_heap(&reserve("f", &[9]))?;
         apply(&mut replay, prepared.unwrap())?;
         let prepared = writer.prepare(vec![commit("f", "0")])?;

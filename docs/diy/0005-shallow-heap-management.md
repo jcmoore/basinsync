@@ -1,6 +1,8 @@
 [access-token]: <../glossary/access-token.md>
 [commit-marker]: <../glossary/commit-marker.md>
+[context]: <../glossary/context.md>
 [dag]: <../glossary/dag.md>
+[datashed]: <../glossary/datashed.md>
 [development]: <../development.md>
 [flow]: <../glossary/flow.md>
 [heap-protocol]: <../heap-protocol.md>
@@ -12,20 +14,24 @@
 [timeline]: <../glossary/timeline.md>
 [turso]: <../glossary/turso.md>
 [viewpoint]: <../glossary/viewpoint.md>
-[watershed]: <../glossary/watershed.md>
 [young-generation]: <../glossary/young-generation.md>
 
 # 0005 — Shallow heap management
 
 Prepare for *Viewpoints*[^][viewpoint] rooted at a *CommitMarker*[^][commit-marker]
 with a *DAG*[^][dag] of opaque *nodes*[^][node]. Introduce *heap reservations*[^][heap-reservation]
-so clients can upload before publication, while the *Watershed*[^][watershed]
+so clients can upload before publication, while the *Datashed*[^][datashed]
 counts incoming edges for eventual collection.
 
 Implement the *staging endpoint*[^][heap-protocol]. Require the *Flow's*[^][flow]
 singular expected next *Viewpoint*[^][viewpoint]. Accept only *height*[^][node-height]
 zero, version zero, and empty edge lists. Configure `BASINSYNC_HEAP_MAX_HEIGHT`
 (128) and `BASINSYNC_HEAP_MAX_TOKEN_BYTES` (64).
+
+Each submitted *node*[^][node] may include `context: Record<string, string>`
+(default `{}`). Validate its *context*[^][context] and bind `x-amz-meta-ctx-` headers
+into its write action; clients must send the returned headers unchanged. The
+first successful PUT fixes metadata; later reservations cannot rewrite it.
 
 Expand `default.turso`:
 
@@ -58,6 +64,7 @@ through the existing *Turso*[^][turso] frame-ingestion command. Return actions
 only after durable, ordered publication; recover through captured frames.
 
 Test indexed errors, collisions, duplicate retainers, signed lengths and headers,
+*context*[^][context] validation and tampering,
 first-writer uploads, zero lengths, races, pipeline failures, snapshot recovery,
 and token non-persistence. Run the *development checks*[^][development].
 

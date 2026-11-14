@@ -1,7 +1,7 @@
 use anyhow::Result;
 use basinsync::{
     event::{self, Marker},
-    timeline::Watershed,
+    timeline::Datashed,
 };
 use std::{
     collections::BTreeMap,
@@ -11,12 +11,28 @@ use std::{
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     if args.get(1).is_some_and(|arg| {
-        arg == "--inspect" || arg == "--locate" || arg == "--heap" || arg == "--graph"
+        arg == "--revisions"
+            || arg == "--inspect"
+            || arg == "--locate"
+            || arg == "--heap"
+            || arg == "--graph"
     }) {
         let state = basinsync::turso::State::from_image(std::fs::read(
             args.get(2)
                 .ok_or_else(|| anyhow::anyhow!("missing database path"))?,
         )?)?;
+        if args[1] == "--revisions" {
+            let revisions: BTreeMap<_, _> = state
+                .flows()?
+                .into_keys()
+                .map(|flow| {
+                    let revision = state.flow_revision(&flow)?.unwrap().to_string();
+                    Ok((flow, revision))
+                })
+                .collect::<Result<_>>()?;
+            serde_json::to_writer(io::stdout(), &revisions)?;
+            return Ok(());
+        }
         if args[1] == "--graph" {
             serde_json::to_writer(io::stdout(), &state.heap_counts()?)?;
             return Ok(());
@@ -100,7 +116,7 @@ fn main() -> Result<()> {
             },
         }
     } else {
-        Watershed::default().prepare(markers)?.1
+        Datashed::default().prepare(markers)?.1
     };
     io::stdout().write_all(&event::encode(command)?)?;
     Ok(())

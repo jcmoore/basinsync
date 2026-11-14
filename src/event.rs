@@ -13,6 +13,8 @@ pub const COMMIT_FLOW: &str = "sts/0/databasin/commitflow";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Marker {
+    #[serde(default)]
+    pub context: BTreeMap<String, String>,
     pub edges: std::collections::BTreeSet<String>,
     #[serde(skip)]
     pub verified: BTreeMap<String, crate::heap::Child>,
@@ -24,9 +26,11 @@ pub struct Marker {
 
 impl Marker {
     pub fn validate(&self) -> Result<Viewpoint> {
+        crate::details::context_headers(&self.context)?;
         let viewpoint = Viewpoint::parse(&self.viewpoint)?;
         for id in &self.edges {
             crate::heap::Node {
+                context: Default::default(),
                 id: id.clone(),
                 length: 0,
                 edges: Default::default(),
@@ -91,7 +95,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommitFlow> {
     let command = tuple.index(2)?.get_str()?;
     ensure!(
         namespace == NAMESPACE && command == COMMIT_FLOW,
-        "unknown Watershed command"
+        "unknown Datashed command"
     );
     let payload = CommitFlow::deserialize(tuple.index(3)?)?;
     ensure!(
@@ -113,13 +117,14 @@ mod tests {
     fn unary_batch_and_binary_blob() {
         let blob = vec![0, 255, 0, 128];
         let marker = Marker {
+            context: Default::default(),
             edges: Default::default(),
             verified: Default::default(),
             viewpoint: "0".into(),
             sha384: format!("{:x}", Sha384::digest(&blob)),
             blob: blob.clone(),
         };
-        let state = crate::timeline::Watershed::default();
+        let state = crate::timeline::Datashed::default();
         let (_, command) = state
             .prepare(BTreeMap::from([("雪/flow".into(), marker)]))
             .unwrap();
@@ -501,6 +506,7 @@ mod envelope_tests {
                     markers: BTreeMap::from([(
                         format!("{i}-雪"),
                         Marker {
+                            context: Default::default(),
                             edges: Default::default(),
                             verified: Default::default(),
                             viewpoint: "0".into(),
@@ -541,7 +547,7 @@ mod envelope_tests {
             assert_eq!(&bytes[start..start + location.length as usize], original);
             assert_eq!(digest(original), location.sha384);
         }
-        let mut recovered = crate::timeline::Watershed::default();
+        let mut recovered = crate::timeline::Datashed::default();
         recovered.apply_entry(1u8.into(), &bytes)?;
         assert_eq!(recovered.database.unwrap().image, writer.image()?);
         Ok(())
@@ -582,7 +588,7 @@ mod envelope_tests {
                 crate::turso::wal::Writer::open(&crate::turso::State::genesis()?.image)?;
             let delta = writer.prepare_with_ranges(&0u8.into(), None, &commands, &locations)?;
             let bytes = encode_wal(commands, delta)?;
-            let mut recovered = crate::timeline::Watershed::default();
+            let mut recovered = crate::timeline::Datashed::default();
             let error = recovered.apply_entry(1u8.into(), &bytes).err().unwrap();
             assert!(error.to_string().contains("marker location"), "{error:?}");
             assert_eq!(recovered.milestone, num_bigint::BigUint::from(0u8));

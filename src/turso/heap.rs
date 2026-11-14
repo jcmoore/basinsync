@@ -254,6 +254,7 @@ impl State {
             outcome.results.insert(
                 index,
                 Reserved {
+                    context: node.context.clone(),
                     id: node.id.clone(),
                     revision: current.revision.clone(),
                     length: node.length,
@@ -362,7 +363,7 @@ impl State {
                 edge.run_ignore_rows()?;
             }
         }
-        let mut cursor = conn.prepare("UPDATE watershed SET milestone=?1 WHERE id=1")?;
+        let mut cursor = conn.prepare("UPDATE datashed SET milestone=?1 WHERE id=1")?;
         cursor.bind_at(
             NonZeroUsize::new(1).unwrap(),
             Value::build_text(milestone.to_owned()),
