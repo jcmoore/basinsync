@@ -14,6 +14,8 @@ Keep milestone scope, temporary limitations, and deferred work in the relevant
 concepts and interfaces.
 
 Use `Basin` for the tenancy domain and `Datashed` for the data-state `Reservoir`.
+Use `UserHeap` for client-driven `Flow` nodes and `KernelHeap` for server-driven
+`Datashed` nodes.
 
 # Documentation links
 

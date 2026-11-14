@@ -2,7 +2,6 @@
 [development]: <../development.md>
 [dusting]: <../glossary/dusting.md>
 [flow]: <../glossary/flow.md>
-[heap-reservation]: <../glossary/heap-reservation.md>
 [node]: <../glossary/node.md>
 [old-generation]: <../glossary/old-generation.md>
 [retainer]: <../glossary/retainer.md>
@@ -10,6 +9,7 @@
 [sweeping-task]: <../glossary/sweeping-task.md>
 [timeline]: <../glossary/timeline.md>
 [turso]: <../glossary/turso.md>
+[userheap-reservation]: <../glossary/userheap-reservation.md>
 [viewpoint]: <../glossary/viewpoint.md>
 [virtual-file-system]: <../glossary/virtual-file-system.md>
 [young-generation]: <../glossary/young-generation.md>
@@ -21,8 +21,8 @@ leaving object deletion outside the request path. No *CommitMarker*[^][commit-ma
 edges exist yet, so every staged *node*[^][node] eventually becomes unretained.
 
 Add a random UUIDv4 *revision*[^][revision] to each new `graph_nodes` row;
-existing allocations retain theirs. Use `heap/young/${node_id}/${revision}`
-and `heap/old/${node_id}/${revision}` for *young*[^][young-generation] and
+existing allocations retain theirs. Use `userheap/young/${node_id}/${revision}`
+and `userheap/old/${node_id}/${revision}` for *young*[^][young-generation] and
 *old*[^][old-generation] generation keys. Reusing a reclaimed id creates a fresh
 revision: delayed DELETEs and acknowledgments must target the old *revision*[^][revision] only.
 These keys disclose neither *Flow*[^][flow], *Viewpoint*[^][viewpoint], nor *Timeline*[^][timeline] position.
@@ -48,7 +48,7 @@ A separate worker reads consistent *VFS snapshots*[^][virtual-file-system] while
 For a bounded task batch, transactionally remove the tasks and their `A_` staging
 *retainer*[^][retainer] edges. Mark a *node*[^][node] `freed` with the current time only
 when no *retainers*[^][retainer] remain. Bound edges processed too; retain unfinished tasks.
-Reject *reservations*[^][heap-reservation] of freed *nodes*[^][node] until reclamation completes.
+Reject *reservations*[^][userheap-reservation] of freed *nodes*[^][node] until reclamation completes.
 
 Journal these *Turso*[^][turso] mutations as captured frames in `ingestturso`
 through the ordered *Timeline*[^][timeline].

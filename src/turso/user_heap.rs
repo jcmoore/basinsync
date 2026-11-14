@@ -1,8 +1,11 @@
 use super::*;
-use crate::heap::{Allocation, Child, Command, NodeError, Outcome, Request, Reserved, retainer};
+use crate::user_heap::{
+    Allocation, Child, Command, NodeError, Outcome, Request, Reserved, retainer,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HeapNode {
+pub struct UserHeapNode {
+    pub context: BTreeMap<String, String>,
     pub revision: String,
     pub freed: String,
     pub length: u64,
@@ -14,8 +17,8 @@ pub struct HeapNode {
 }
 
 impl State {
-    pub fn heap_node(&self, id: &str) -> Result<Option<HeapNode>> {
-        let mut query=self.native.conn.prepare("SELECT content_length,reserved,etag,promoted,julianday(promoted) IS NOT NULL,revision,freed,marked FROM graph_nodes WHERE id=?1")?;
+    pub fn user_heap_node(&self, id: &str) -> Result<Option<UserHeapNode>> {
+        let mut query=self.native.conn.prepare("SELECT content_length,reserved,etag,promoted,julianday(promoted) IS NOT NULL,revision,freed,marked,context FROM graph_nodes WHERE id=?1")?;
         query.bind_at(
             NonZeroUsize::new(1).unwrap(),
             Value::build_text(id.to_owned()),
@@ -23,7 +26,8 @@ impl State {
         match ready_step(&*self.native.io, || query.step())? {
             StepResult::Row => {
                 let row = query.row().unwrap();
-                Ok(Some(HeapNode {
+                Ok(Some(UserHeapNode {
+                    context: serde_json::from_str(&row.get::<String>(8)?)?,
                     length: u64::try_from(row.get::<i64>(0)?)?,
                     revision: row.get(5)?,
                     freed: row.get(6)?,
@@ -35,10 +39,10 @@ impl State {
                 }))
             }
             StepResult::Done => Ok(None),
-            other => anyhow::bail!("unexpected heap lookup: {other:?}"),
+            other => anyhow::bail!("unexpected user_heap lookup: {other:?}"),
         }
     }
-    pub fn heap_edge(&self, node: &str, retainer: &str) -> Result<bool> {
+    pub fn user_heap_edge(&self, node: &str, retainer: &str) -> Result<bool> {
         let mut query = self
             .native
             .conn
@@ -56,7 +60,7 @@ impl State {
             StepResult::Row
         ))
     }
-    pub fn heap_counts(&self) -> Result<BTreeMap<String, u64>> {
+    pub fn user_heap_counts(&self) -> Result<BTreeMap<String, u64>> {
         let mut counts = BTreeMap::new();
         for table in [
             "graph_nodes",
@@ -74,7 +78,7 @@ impl State {
         }
         Ok(counts)
     }
-    pub fn heap_children(&self, id: &str) -> Result<std::collections::BTreeSet<String>> {
+    pub fn user_heap_children(&self, id: &str) -> Result<std::collections::BTreeSet<String>> {
         let mut query = self
             .native
             .conn
@@ -90,9 +94,9 @@ impl State {
         })?;
         Ok(children)
     }
-    pub(crate) fn inspect_heap(&self, request: &mut Request) -> Result<()> {
+    pub(crate) fn inspect_user_heap(&self, request: &mut Request) -> Result<()> {
         for parent in request.nodes.iter().filter_map(|n| n.as_ref().ok()) {
-            if self.heap_node(&parent.id)?.is_some() {
+            if self.user_heap_node(&parent.id)?.is_some() {
                 continue;
             }
             self.inspect_children(&parent.edges, &mut request.proofs)?;
@@ -102,13 +106,13 @@ impl State {
     pub(crate) fn inspect_children(
         &self,
         edges: &std::collections::BTreeSet<String>,
-        proofs: &mut crate::heap::Proofs,
+        proofs: &mut crate::user_heap::Proofs,
     ) -> Result<()> {
         for id in edges {
             if proofs.contains_key(id) {
                 continue;
             }
-            let proof = match self.heap_node(id)? {
+            let proof = match self.user_heap_node(id)? {
                 Some(row) if row.freed.is_empty() => Ok(Child {
                     revision: row.revision,
                     length: row.length,
@@ -130,7 +134,7 @@ impl State {
     pub(crate) fn check_children(
         &self,
         edges: &std::collections::BTreeSet<String>,
-        proofs: &crate::heap::Proofs,
+        proofs: &crate::user_heap::Proofs,
     ) -> Result<Option<NodeError>> {
         for id in edges {
             let proof = match proofs.get(id) {
@@ -143,7 +147,7 @@ impl State {
                     }));
                 }
             };
-            if !self.heap_node(id)?.is_some_and(|row| {
+            if !self.user_heap_node(id)?.is_some_and(|row| {
                 row.freed.is_empty()
                     && row.revision == proof.revision
                     && row.length == proof.length
@@ -158,10 +162,11 @@ impl State {
         }
         Ok(None)
     }
-    pub(super) fn plan_heap(&self, request: &Request) -> Result<(Option<Command>, Outcome)> {
+    pub(super) fn plan_user_heap(&self, request: &Request) -> Result<(Option<Command>, Outcome)> {
         let reserved = crate::cleanup::now()?;
         let mut outcome = Outcome::default();
-        let mut planned = BTreeMap::<String, (HeapNode, std::collections::BTreeSet<String>)>::new();
+        let mut planned =
+            BTreeMap::<String, (UserHeapNode, std::collections::BTreeSet<String>)>::new();
         let mut nodes = BTreeMap::<String, Allocation>::new();
         let mut children = BTreeMap::new();
         for (index, node) in request.nodes.iter().enumerate() {
@@ -174,8 +179,8 @@ impl State {
             };
             let current = if let Some(current) = planned.get(&node.id) {
                 Some(current.clone())
-            } else if let Some(row) = self.heap_node(&node.id)? {
-                Some((row, self.heap_children(&node.id)?))
+            } else if let Some(row) = self.user_heap_node(&node.id)? {
+                Some((row, self.user_heap_children(&node.id)?))
             } else {
                 None
             };
@@ -195,6 +200,11 @@ impl State {
                     Some(NodeError {
                         code: "edges_collision",
                         message: "node already has different children",
+                    })
+                } else if row.context != node.context {
+                    Some(NodeError {
+                        code: "context_collision",
+                        message: "node already has different context",
                     })
                 } else {
                     None
@@ -216,7 +226,7 @@ impl State {
                             break;
                         }
                     };
-                    match self.heap_node(id)? {
+                    match self.user_heap_node(id)? {
                         Some(row)
                             if row.freed.is_empty()
                                 && row.revision == proof.revision
@@ -241,7 +251,8 @@ impl State {
                 outcome.errors.insert(index, error);
                 continue;
             }
-            let current = current.map(|(row, _)| row).unwrap_or_else(|| HeapNode {
+            let current = current.map(|(row, _)| row).unwrap_or_else(|| UserHeapNode {
+                context: node.context.clone(),
                 revision: uuid::Uuid::new_v4().to_string(),
                 freed: String::new(),
                 length: node.length,
@@ -265,6 +276,7 @@ impl State {
             nodes.insert(
                 node.id.clone(),
                 Allocation {
+                    context: current.context.clone(),
                     id: node.id.clone(),
                     length: node.length,
                     revision: current.revision.clone(),
@@ -288,7 +300,7 @@ impl State {
         });
         Ok((command, outcome))
     }
-    pub(super) fn transact_heap(&self, milestone: &str, command: &Command) -> Result<()> {
+    pub(super) fn transact_user_heap(&self, milestone: &str, command: &Command) -> Result<()> {
         command.validate()?;
         let conn = &self.native.conn;
         conn.set_portable_logical_changes_enabled(true);
@@ -296,7 +308,7 @@ impl State {
         let owner = retainer(&command.flow, &Viewpoint::parse(&command.viewpoint)?);
         for (id, child) in &command.children {
             let row = self
-                .heap_node(id)?
+                .user_heap_node(id)?
                 .ok_or_else(|| anyhow::anyhow!("missing verified child"))?;
             ensure!(
                 row.revision == child.revision
@@ -318,21 +330,23 @@ impl State {
             cache.run_ignore_rows()?;
         }
         for node in &command.nodes {
-            if let Some(row) = self.heap_node(&node.id)? {
+            if let Some(row) = self.user_heap_node(&node.id)? {
                 ensure!(
                     row.revision == node.revision
                         && row.freed.is_empty()
                         && row.length == node.length
-                        && self.heap_children(&node.id)? == node.edges,
+                        && row.context == node.context
+                        && self.user_heap_children(&node.id)? == node.edges,
                     "reserved descriptor changed before transaction"
                 );
             }
-            let mut insert=conn.prepare("INSERT INTO graph_nodes(id,content_length,reserved,etag,promoted,revision) VALUES(?1,?2,?3,'','',?4) ON CONFLICT(id) DO NOTHING")?;
+            let mut insert=conn.prepare("INSERT INTO graph_nodes(id,content_length,reserved,etag,promoted,revision,context) VALUES(?1,?2,?3,'','',?4,?5) ON CONFLICT(id) DO NOTHING")?;
             for (i, value) in [
                 Value::build_text(node.id.clone()),
                 Value::from_i64(node.length as i64),
                 Value::build_text(command.reserved.clone()),
                 Value::build_text(node.revision.clone()),
+                Value::build_text(serde_json::to_string(&node.context)?),
             ]
             .into_iter()
             .enumerate()
@@ -374,7 +388,7 @@ impl State {
         Ok(())
     }
     #[cfg(test)]
-    pub(crate) fn verify_heap(&self, before: Option<&State>, command: &Command) -> Result<()> {
+    pub(crate) fn verify_user_heap(&self, before: Option<&State>, command: &Command) -> Result<()> {
         let viewpoint = command.validate()?;
         let previous = before
             .map(|db| db.latest(&command.flow))
@@ -382,19 +396,20 @@ impl State {
             .flatten();
         ensure!(
             viewpoint == previous.clone().map_or_else(Viewpoint::zero, |v| v.next()),
-            "heap reservation Viewpoint mismatch"
+            "user_heap reservation Viewpoint mismatch"
         );
         ensure!(
             self.latest(&command.flow)? == previous,
-            "heap reservation advanced Flow cursor"
+            "user_heap reservation advanced Flow cursor"
         );
         let owner = retainer(&command.flow, &viewpoint);
         for node in &command.nodes {
             let previous = before
-                .map(|db| db.heap_node(&node.id))
+                .map(|db| db.user_heap_node(&node.id))
                 .transpose()?
                 .flatten();
-            let mut expected = previous.unwrap_or_else(|| HeapNode {
+            let mut expected = previous.unwrap_or_else(|| UserHeapNode {
+                context: node.context.clone(),
                 revision: node.revision.clone(),
                 freed: String::new(),
                 length: node.length,
@@ -408,21 +423,22 @@ impl State {
                 expected.etag = child.etag.clone();
             }
             ensure!(
-                self.heap_children(&node.id)? == node.edges,
+                self.user_heap_children(&node.id)? == node.edges,
                 "recovered child set mismatch"
             );
             ensure!(
                 expected.length == node.length
+                    && expected.context == node.context
                     && expected.revision == node.revision
                     && expected.freed.is_empty(),
-                "invalid heap collision"
+                "invalid user_heap collision"
             );
             ensure!(
-                self.heap_node(&node.id)?.as_ref() == Some(&expected),
-                "recovered heap node mismatch"
+                self.user_heap_node(&node.id)?.as_ref() == Some(&expected),
+                "recovered user_heap node mismatch"
             );
             ensure!(
-                self.heap_edge(&node.id, &owner)?,
+                self.user_heap_edge(&node.id, &owner)?,
                 "missing recovered staging edge"
             );
         }
@@ -433,42 +449,91 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reservation_context_is_immutable_before_upload_and_after_recovery() -> Result<()> {
+        let state = State::genesis()?;
+        let mut first = request("first", b"immutable-context-token", 4);
+        first.nodes[0].as_mut().unwrap().context =
+            crate::user_heap::canonical_context(&BTreeMap::from([
+                ("Kind".into(), "0x-literal".into()),
+                ("owner".into(), "alice".into()),
+            ]))?;
+        let matching = first.nodes[0].as_ref().unwrap().clone();
+        let mut changed = matching.clone();
+        changed.context.insert("owner".into(), "bob".into());
+        first
+            .nodes
+            .extend([Ok(changed.clone()), Ok(matching.clone())]);
+        let (command, result) = state.plan_user_heap(&first)?;
+        assert_eq!(result.results.keys().copied().collect::<Vec<_>>(), [0, 2]);
+        assert_eq!(result.errors[&1].code, "context_collision");
+        let command = command.unwrap();
+        state.transact_user_heap("1", &command)?;
+        state.native.checkpoint()?;
+        let mut mismatch = request("other", b"immutable-context-token", 4);
+        mismatch.nodes = vec![Ok(changed)];
+        for candidate in [&state, &State::from_image(state.native.image()?)?] {
+            let (mutation, result) = candidate.plan_user_heap(&mismatch)?;
+            assert!(mutation.is_none() && result.results.is_empty());
+            assert_eq!(result.errors[&0].code, "context_collision");
+            assert!(
+                !candidate.user_heap_edge(&matching.id, &retainer("other", &Viewpoint::zero()))?
+            );
+            assert_eq!(
+                candidate.user_heap_node(&matching.id)?.unwrap().context,
+                matching.context
+            );
+            mismatch.nodes = vec![Ok(matching.clone())];
+            assert!(candidate.plan_user_heap(&mismatch)?.1.errors.is_empty());
+            mismatch.nodes[0].as_mut().unwrap().context.clear();
+            assert_eq!(
+                candidate.plan_user_heap(&mismatch)?.1.errors[&0].code,
+                "context_collision"
+            );
+            mismatch.nodes[0]
+                .as_mut()
+                .unwrap()
+                .context
+                .insert("owner".into(), "bob".into());
+        }
+        Ok(())
+    }
     fn request(flow: &str, token: &[u8], length: u64) -> Request {
         use base64::Engine;
-        Request::parse(serde_json::json!({"flow":flow,"viewpoint":"0x0","nodes":[{"auth":[0,0,format!("0*{}",base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token))],"length":length,"edges":[]}]}).to_string().as_bytes(),&crate::heap::Limits::default()).unwrap()
+        Request::parse(serde_json::json!({"flow":flow,"viewpoint":"0x0","nodes":[{"auth":[0,0,format!("0*{}",base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token))],"length":length,"edges":[]}]}).to_string().as_bytes(),&crate::user_heap::Limits::default()).unwrap()
     }
     #[test]
     fn collision_flags_retainer_uniqueness_and_edge_ordering() -> Result<()> {
         let state = State::genesis()?;
         let request = request("f/雪", b"node-access-token", 4);
-        let (command, outcome) = state.plan_heap(&request)?;
+        let (command, outcome) = state.plan_user_heap(&request)?;
         assert!(outcome.results[&0].write && outcome.results[&0].preview);
-        state.transact_heap("1", &command.unwrap())?;
+        state.transact_user_heap("1", &command.unwrap())?;
         let id = &request.nodes[0].as_ref().unwrap().id;
-        let original = state.heap_node(id)?.unwrap();
-        let (command, _) = state.plan_heap(&request)?;
-        state.transact_heap("2", &command.unwrap())?;
-        assert_eq!(state.heap_node(id)?.unwrap(), original);
+        let original = state.user_heap_node(id)?.unwrap();
+        let (command, _) = state.plan_user_heap(&request)?;
+        state.transact_user_heap("2", &command.unwrap())?;
+        assert_eq!(state.user_heap_node(id)?.unwrap(), original);
         let wrong = super::tests::request("g", b"node-access-token", 5);
-        let (command, outcome) = state.plan_heap(&wrong)?;
+        let (command, outcome) = state.plan_user_heap(&wrong)?;
         assert!(command.is_none());
         assert_eq!(outcome.errors[&0].code, "length_collision");
         state.native.conn.execute(format!(
             "UPDATE graph_nodes SET etag='\"etag\"', promoted='not-a-date' WHERE id='{id}'"
         ))?;
-        let (_, outcome) = state.plan_heap(&request)?;
+        let (_, outcome) = state.plan_user_heap(&request)?;
         assert!(!outcome.results[&0].write && outcome.results[&0].preview);
         state.native.conn.execute(format!(
             "UPDATE graph_nodes SET promoted='2026-11-11T00:00:00Z' WHERE id='{id}'"
         ))?;
-        let (_, outcome) = state.plan_heap(&request)?;
+        let (_, outcome) = state.plan_user_heap(&request)?;
         assert!(!outcome.results[&0].write && !outcome.results[&0].preview);
-        let parent = crate::heap::node_id(1, 0, b"parent");
+        let parent = crate::user_heap::node_id(1, 0, b"parent");
         state
             .native
             .conn
             .execute(format!("INSERT INTO graph_edges VALUES('{id}','{parent}')"))?;
-        let (command, outcome) = state.plan_heap(&request)?;
+        let (command, outcome) = state.plan_user_heap(&request)?;
         assert!(command.is_some());
         assert!(outcome.errors.is_empty());
         assert!(

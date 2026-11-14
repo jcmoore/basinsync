@@ -7,7 +7,7 @@ use serde::Deserialize;
 pub struct CommitDetails {
     #[serde(default, deserialize_with = "crate::json0::deserialize_text_map")]
     pub context: std::collections::BTreeMap<String, String>,
-    pub edges: Vec<crate::heap::WireEdge>,
+    pub edges: Vec<crate::user_heap::WireEdge>,
     #[serde(deserialize_with = "crate::json0::deserialize_text")]
     pub flow: String,
     #[serde(deserialize_with = "crate::json0::deserialize_viewpoint")]

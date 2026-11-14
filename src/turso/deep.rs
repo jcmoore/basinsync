@@ -1,5 +1,5 @@
 use super::*;
-use crate::{cleanup, event, heap, timeline};
+use crate::{cleanup, event, timeline, user_heap};
 use std::collections::BTreeSet;
 
 struct World {
@@ -36,16 +36,16 @@ impl World {
     fn db(&self) -> &State {
         self.replay.database.as_ref().unwrap()
     }
-    fn request(flow: &str, nodes: Vec<heap::Node>) -> heap::Request {
-        heap::Request {
+    fn request(flow: &str, nodes: Vec<user_heap::Node>) -> user_heap::Request {
+        user_heap::Request {
             flow: flow.into(),
             viewpoint: Viewpoint::zero(),
             nodes: nodes.into_iter().map(Ok).collect(),
             proofs: BTreeMap::new(),
         }
     }
-    fn inspect(&mut self, request: &mut heap::Request) -> Result<()> {
-        self.writer.inspect_heap(request)?;
+    fn inspect(&mut self, request: &mut user_heap::Request) -> Result<()> {
+        self.writer.inspect_user_heap(request)?;
         for child in request.proofs.values_mut().flatten() {
             if child.etag.is_empty() {
                 child.etag = "\"verified\"".into();
@@ -53,10 +53,10 @@ impl World {
         }
         Ok(())
     }
-    fn reserve(&mut self, flow: &str, nodes: Vec<heap::Node>) -> Result<heap::Outcome> {
+    fn reserve(&mut self, flow: &str, nodes: Vec<user_heap::Node>) -> Result<user_heap::Outcome> {
         let mut request = Self::request(flow, nodes);
         self.inspect(&mut request)?;
-        let (prepared, outcome) = self.writer.prepare_heap(&request)?;
+        let (prepared, outcome) = self.writer.prepare_user_heap(&request)?;
         if let Some(prepared) = prepared {
             self.apply(prepared)?;
         }
@@ -104,10 +104,10 @@ impl World {
         cleanup::scan(self.snapshot.as_ref().unwrap(), 32, 32)
     }
 }
-fn node(height: u64, token: u8, edges: &[&heap::Node]) -> heap::Node {
-    heap::Node {
+fn node(height: u64, token: u8, edges: &[&user_heap::Node]) -> user_heap::Node {
+    user_heap::Node {
         context: Default::default(),
-        id: heap::node_id(height, 0, &[token]),
+        id: user_heap::node_id(height, 0, &[token]),
         length: 1,
         edges: edges.iter().map(|n| n.id.clone()).collect(),
     }
@@ -132,7 +132,7 @@ fn deep_graphs_retain_shared_children_and_reclaim_in_bounded_transactions() -> R
             .errors
             .is_empty()
     );
-    let revision = world.db().heap_node(&root.id)?.unwrap().revision;
+    let revision = world.db().user_heap_node(&root.id)?.unwrap().revision;
     assert!(
         world
             .reserve("again", vec![left.clone()])?
@@ -155,7 +155,7 @@ fn deep_graphs_retain_shared_children_and_reclaim_in_bounded_transactions() -> R
     assert!(
         !world
             .db()
-            .heap_node(&leaves[0].id)?
+            .user_heap_node(&leaves[0].id)?
             .unwrap()
             .etag
             .is_empty()
@@ -172,11 +172,11 @@ fn deep_graphs_retain_shared_children_and_reclaim_in_bounded_transactions() -> R
             if parent.id == root.id {
                 old_root = Some(parent.clone());
             }
-            assert!(!world.db().heap_children(&parent.id)?.is_empty());
+            assert!(!world.db().user_heap_children(&parent.id)?.is_empty());
         }
         for ready in &work.freed {
             assert!(
-                world.db().heap_children(&ready.id)?.is_empty(),
+                world.db().user_heap_children(&ready.id)?.is_empty(),
                 "no S3 deletion before outgoing edges are durably gone"
             );
             erased.insert(ready.id.clone());
@@ -198,7 +198,7 @@ fn deep_graphs_retain_shared_children_and_reclaim_in_bounded_transactions() -> R
     assert_eq!(erased.len(), 6);
     assert!(detached >= 6, "one edge per transaction");
     for id in erased {
-        assert!(world.db().heap_node(&id)?.is_none());
+        assert!(world.db().user_heap_node(&id)?.is_none());
     }
     let replacement = node(2, 6, &[&leaves[0]]);
     world.reserve("reuse", vec![leaves[0].clone()])?;
@@ -208,9 +208,12 @@ fn deep_graphs_retain_shared_children_and_reclaim_in_bounded_transactions() -> R
             .errors
             .is_empty()
     );
-    assert_ne!(revision, world.db().heap_node(&root.id)?.unwrap().revision);
+    assert_ne!(
+        revision,
+        world.db().user_heap_node(&root.id)?.unwrap().revision
+    );
     assert!(!world.maintenance(vec![], vec![old_root.unwrap()], vec![])?);
-    assert_eq!(world.db().heap_children(&root.id)?, replacement.edges);
+    assert_eq!(world.db().user_heap_children(&root.id)?, replacement.edges);
     Ok(())
 }
 #[test]
@@ -224,25 +227,25 @@ fn child_verification_is_bound_to_the_current_live_revision() -> Result<()> {
     world.commit("old")?;
     let work = world.work()?;
     world.maintenance(work.tasks, vec![], vec![])?;
-    let (prepared, outcome) = world.writer.prepare_heap(&request)?;
+    let (prepared, outcome) = world.writer.prepare_user_heap(&request)?;
     assert!(prepared.is_none());
     assert_eq!(outcome.errors[&0].code, "child_changed");
     let work = world.work()?;
     world.maintenance(vec![], vec![], work.freed)?;
     world.reserve("replacement", vec![leaf.clone()])?;
-    let (prepared, outcome) = world.writer.prepare_heap(&request)?;
+    let (prepared, outcome) = world.writer.prepare_user_heap(&request)?;
     assert!(prepared.is_none());
     assert_eq!(outcome.errors[&0].code, "child_changed");
-    assert!(world.db().heap_node(&parent.id)?.is_none());
+    assert!(world.db().user_heap_node(&parent.id)?.is_none());
     Ok(())
 }
 
 #[test]
 fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Result<()> {
     let mut w = World::new();
-    let leaf = |name: &str| heap::Node {
+    let leaf = |name: &str| user_heap::Node {
         context: Default::default(),
-        id: heap::node_id(0, 0, name.as_bytes()),
+        id: user_heap::node_id(0, 0, name.as_bytes()),
         length: 1,
         edges: BTreeSet::new(),
     };
@@ -254,23 +257,23 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
             .errors
             .is_empty()
     );
-    let parent = heap::Node {
+    let parent = user_heap::Node {
         context: Default::default(),
-        id: heap::node_id(1, 0, b"marked-parent"),
+        id: user_heap::node_id(1, 0, b"marked-parent"),
         length: 1,
         edges: BTreeSet::from([a.id.clone(), b.id.clone()]),
     };
     w.reserve("graph", vec![parent.clone()])?;
     let middle = parent;
-    let parent = heap::Node {
+    let parent = user_heap::Node {
         context: Default::default(),
-        id: heap::node_id(2, 0, b"marked-root"),
+        id: user_heap::node_id(2, 0, b"marked-root"),
         length: 1,
         edges: BTreeSet::from([middle.id.clone(), b.id.clone()]),
     };
     w.reserve("graph", vec![parent.clone()])?;
     let edges = BTreeSet::from([parent.id.clone()]);
-    let mut proofs = heap::Proofs::new();
+    let mut proofs = user_heap::Proofs::new();
     w.writer.inspect_children(&edges, &mut proofs)?;
     for child in proofs.values_mut().flatten() {
         child.etag = "\"verified\"".into();
@@ -290,11 +293,14 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
         )]),
     }])?;
     w.apply(prepared)?;
-    let owner = heap::marker_retainer("graph", &Viewpoint::zero());
-    assert!(w.db().heap_edge(&parent.id, &owner)?);
-    assert_eq!(w.db().heap_node(&parent.id)?.unwrap().etag, "\"verified\"");
+    let owner = user_heap::marker_retainer("graph", &Viewpoint::zero());
+    assert!(w.db().user_heap_edge(&parent.id, &owner)?);
+    assert_eq!(
+        w.db().user_heap_node(&parent.id)?.unwrap().etag,
+        "\"verified\""
+    );
     // An out-of-order proposal cannot mark a parent before its children, nor remove its task.
-    let row = w.db().heap_node(&parent.id)?.unwrap();
+    let row = w.db().user_heap_node(&parent.id)?.unwrap();
     let task = crate::promotion::Task {
         revision: w.db().flow_revision("graph")?.unwrap(),
         upstream: w.writer.prefix().milestone().clone(),
@@ -345,9 +351,9 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
         }
         w.maintenance(work.tasks, vec![], vec![])?;
     }
-    assert!(!w.db().heap_node(&unused.id)?.unwrap().freed.is_empty());
+    assert!(!w.db().user_heap_node(&unused.id)?.unwrap().freed.is_empty());
     for n in [&a, &b, &middle, &parent] {
-        assert!(w.db().heap_node(&n.id)?.unwrap().freed.is_empty());
+        assert!(w.db().user_heap_node(&n.id)?.unwrap().freed.is_empty());
     }
     let work = crate::promotion::scan(w.snapshot.as_ref().unwrap(), 1, 32)?;
     assert_eq!(work.promote.len(), 2);
@@ -396,11 +402,11 @@ fn marker_graphs_mark_in_bounded_postorder_and_survive_staging_sweeps() -> Resul
     w.apply(p)?;
     assert!(!w.db().marking_task(&task)?);
     for n in [&a, &b, &middle, &parent] {
-        assert!(w.db().heap_node(&n.id)?.unwrap().promoted_valid);
+        assert!(w.db().user_heap_node(&n.id)?.unwrap().promoted_valid);
     }
     // A second marker can retain an already marked/promoted graph; only its task needs clearing.
     let edges = BTreeSet::from([parent.id.clone()]);
-    let mut proofs = heap::Proofs::new();
+    let mut proofs = user_heap::Proofs::new();
     w.writer.inspect_children(&edges, &mut proofs)?;
     assert!(
         proofs

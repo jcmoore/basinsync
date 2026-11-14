@@ -6,12 +6,12 @@ pub mod envbuf;
 pub mod epilogue;
 pub mod event;
 pub mod flexbuffer;
-pub mod heap;
 pub mod json0;
 pub mod lexidecimal;
 pub mod object_read;
 pub mod promotion;
 pub mod range_get;
 pub mod timeline;
+pub mod user_heap;
 
 pub mod turso;

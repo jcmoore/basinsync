@@ -1,4 +1,4 @@
-//! Token-free heap reservations. Raw authentication material stops at this boundary.
+//! Token-free user_heap reservations. Raw authentication material stops at this boundary.
 use crate::{
     event,
     lexidecimal::{self, Viewpoint},
@@ -9,8 +9,16 @@ use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const YOUNG: &str = "heap/young/";
-pub const OLD: &str = "heap/old/";
+pub const YOUNG: &str = "userheap/young/";
+pub const OLD: &str = "userheap/old/";
+
+pub fn canonical_context(context: &BTreeMap<String, String>) -> Result<BTreeMap<String, String>> {
+    crate::details::context_headers(context)?;
+    Ok(context
+        .iter()
+        .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
+        .collect())
+}
 
 pub struct Limits {
     pub max_height: u64,
@@ -131,8 +139,8 @@ pub struct Request {
 impl Request {
     pub fn parse(bytes: &[u8], limits: &Limits) -> Result<Self> {
         // Never propagate deserializer errors that could quote authentication material.
-        let wire: WireRequest =
-            serde_json::from_slice(bytes).map_err(|_| anyhow::anyhow!("invalid heap request"))?;
+        let wire: WireRequest = serde_json::from_slice(bytes)
+            .map_err(|_| anyhow::anyhow!("invalid user_heap request"))?;
         event::valid_flow(&wire.flow)?;
         crate::epilogue::check_flow_key(&wire.flow, &wire.viewpoint)?;
         let nodes = wire
@@ -142,7 +150,7 @@ impl Request {
                 let wire: WireNode = serde_json::from_value(value).map_err(|_| {
                     invalid("invalid_node", "invalid node fields or authentication")
                 })?;
-                crate::details::context_headers(&wire.context)
+                let context = canonical_context(&wire.context)
                     .map_err(|_| invalid("invalid_context", "invalid S3 context metadata"))?;
                 let (height, id) = authenticate(wire.auth, limits)?;
                 let edges = authenticate_edges(wire.edges, limits, Some(height))?;
@@ -153,7 +161,7 @@ impl Request {
                     ));
                 }
                 Ok(Node {
-                    context: wire.context,
+                    context,
                     id,
                     length: wire.length,
                     edges,
@@ -197,7 +205,7 @@ pub async fn verify_children(
                         let _permit = permits
                             .acquire_owned()
                             .await
-                            .expect("heap HEAD limiter stays open");
+                            .expect("user_heap HEAD limiter stays open");
                         match child_etag(&bucket, &id, &child).await {
                             Ok(etag) => {
                                 child.etag = etag;
@@ -275,8 +283,6 @@ pub fn retainer(flow: &str, viewpoint: &Viewpoint) -> String {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Node {
-    // Upload context belongs to the capability, not the immutable graph descriptor.
-    #[serde(skip)]
     pub context: BTreeMap<String, String>,
     pub id: String,
     pub length: u64,
@@ -284,6 +290,10 @@ pub struct Node {
 }
 impl Node {
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            canonical_context(&self.context)? == self.context,
+            "noncanonical node context"
+        );
         let parts: Vec<_> = self.id.split('/').collect();
         ensure!(
             parts.len() == 4
@@ -354,6 +364,7 @@ pub fn key(generation: &str, id: &str, revision: &str) -> String {
 }
 #[derive(Clone, Debug)]
 pub struct Allocation {
+    pub context: BTreeMap<String, String>,
     pub edges: BTreeSet<String>,
     pub id: String,
     pub length: u64,
@@ -362,7 +373,7 @@ pub struct Allocation {
 impl Allocation {
     fn validate(&self) -> Result<()> {
         Node {
-            context: Default::default(),
+            context: self.context.clone(),
             id: self.id.clone(),
             length: self.length,
             edges: self.edges.clone(),
@@ -382,7 +393,10 @@ pub struct Command {
 impl Command {
     pub fn validate(&self) -> Result<Viewpoint> {
         event::valid_flow(&self.flow)?;
-        ensure!(!self.nodes.is_empty(), "empty heap reservation command");
+        ensure!(
+            !self.nodes.is_empty(),
+            "empty user_heap reservation command"
+        );
         time::OffsetDateTime::parse(
             &self.reserved,
             &time::format_description::well_known::Rfc3339,
@@ -501,11 +515,11 @@ mod tests {
     }
 
     #[test]
-    fn heap_frames_reconstruct_without_tokens_and_reject_false_commands() -> Result<()> {
-        let secret = b"heap-test-secret-only-the-client-knows-92741";
+    fn user_heap_frames_reconstruct_without_tokens_and_reject_false_commands() -> Result<()> {
+        let secret = b"user_heap-test-secret-only-the-client-knows-92741";
         let request = request("f", secret, 128);
         let mut writer = crate::turso::wal::Writer::open(&crate::turso::State::genesis()?.image)?;
-        let (captured, outcome) = writer.prepare_heap(&0u8.into(), None, &request)?;
+        let (captured, outcome) = writer.prepare_user_heap(&0u8.into(), None, &request)?;
         assert_eq!(outcome.results.len(), 1);
         let (command, delta) = captured.unwrap();
         let bytes = event::encode_wal(vec![], delta)?;
@@ -524,21 +538,26 @@ mod tests {
         let base = &delta.logical.base.as_ref().unwrap().0;
         let logical = crate::turso::State::ingest_logical(base, &delta.logical)?;
         assert_eq!(logical.image, state.image);
-        state.verify_heap(None, &command)?;
-        for fault in 0..3 {
+        state.verify_user_heap(None, &command)?;
+        for fault in 0..4 {
             let mut command = command.clone();
             match fault {
                 0 => command.nodes[0].length += 1,
                 1 => command.reserved = "2000-01-01T00:00:00Z".into(),
+                2 => {
+                    command.nodes[0]
+                        .context
+                        .insert("changed".into(), "metadata".into());
+                }
                 _ => command.viewpoint = "1".into(),
             }
-            assert!(state.verify_heap(None, &command).is_err());
+            assert!(state.verify_user_heap(None, &command).is_err());
         }
         Ok(())
     }
 
     #[test]
-    fn repeated_heap_histories_have_identical_logical_and_physical_images() -> Result<()> {
+    fn repeated_user_heap_histories_have_identical_logical_and_physical_images() -> Result<()> {
         let mut image = crate::turso::State::genesis()?.image;
         let mut writer = crate::turso::wal::Writer::open(&image)?;
         let mut recovered = crate::timeline::Datashed::default();
@@ -546,7 +565,10 @@ mod tests {
         for step in 0..40u32 {
             let n = step % 11;
             let node = Node {
-                context: Default::default(),
+                context: BTreeMap::from([
+                    ("owner".into(), format!("owner-{n}")),
+                    ("tag".into(), format!("0x{n:x}")),
+                ]),
                 id: node_id(0, 0, format!("history-client-token-{n}").as_bytes()),
                 edges: BTreeSet::new(),
                 length: n as u64,
@@ -558,13 +580,14 @@ mod tests {
                 proofs: BTreeMap::new(),
             };
             let base = num_bigint::BigUint::from(step);
-            let (captured, outcome) = writer.prepare_heap(&base, parent.as_deref(), &request)?;
+            let (captured, outcome) =
+                writer.prepare_user_heap(&base, parent.as_deref(), &request)?;
             assert!(outcome.errors.is_empty());
             assert_eq!(outcome.results.len(), 2);
             let (command, delta) = captured.unwrap();
             let physical = delta.physical.ingest(&image, &base, parent.as_deref())?;
             let logical = crate::turso::State::ingest_logical(&image, &delta.logical)?;
-            assert_eq!(logical.image, physical, "heap history step {step}");
+            assert_eq!(logical.image, physical, "user_heap history step {step}");
             let bytes = event::encode_wal(vec![], delta)?;
             recovered.apply_entry((step + 1).into(), &bytes)?;
             let before = crate::turso::State::from_image(image.clone())?;
@@ -572,7 +595,7 @@ mod tests {
                 .database
                 .as_ref()
                 .unwrap()
-                .verify_heap(Some(&before), &command)?;
+                .verify_user_heap(Some(&before), &command)?;
             assert_eq!(recovered.database.as_ref().unwrap().image, physical);
             parent = Some(event::digest(&bytes));
             image = physical;

@@ -1,6 +1,6 @@
 use super::cleanup::{execute, strings};
 use super::*;
-use crate::{heap, promotion::Command};
+use crate::{promotion::Command, user_heap};
 
 pub(super) fn retain_markers(
     native: &Native,
@@ -11,7 +11,7 @@ pub(super) fn retain_markers(
     for command in commands {
         for (flow, marker) in &command.markers {
             let viewpoint = marker.validate()?;
-            let owner = heap::marker_retainer(flow, &viewpoint);
+            let owner = user_heap::marker_retainer(flow, &viewpoint);
             for id in &marker.edges {
                 let proof = marker
                     .verified
@@ -122,7 +122,7 @@ impl State {
         }
         for sign in &command.signed {
             let task = sign.task();
-            let owner = heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
+            let owner = user_heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
             execute(
                 conn,
                 "DELETE FROM marking_tasks WHERE flow=?1 AND viewpoint=?2 AND upstream=?4 AND EXISTS(SELECT 1 FROM flows WHERE id=?1 AND revision=?5) AND NOT EXISTS(SELECT 1 FROM graph_edges e LEFT JOIN graph_nodes n ON n.id=e.node WHERE e.retainer=?3 AND (n.id IS NULL OR n.promoted=''))",

@@ -1,8 +1,8 @@
-[heap]: <heap.md>
 [node]: <node.md>
 [revision]: <revision.md>
+[userheap]: <userheap.md>
 
 # Old generation
 
-The *heap's*[^][heap] promoted *node*[^][node] keyspace, `heap/old/`, suffixed by
+The *UserHeap's*[^][userheap] promoted *node*[^][node] keyspace, `userheap/old/`, suffixed by
 the *node*[^][node] id and *revision*[^][revision] used for upload, `${node_id}/${revision}`.

@@ -58,9 +58,9 @@ impl State {
         command.tasks = tasks;
         let mut erased = Vec::new();
         for node in command.erased {
-            if self.heap_node(&node.id)?.is_some_and(|row| {
+            if self.user_heap_node(&node.id)?.is_some_and(|row| {
                 row.revision == node.revision && row.freed == node.freed && !row.freed.is_empty()
-            }) && self.heap_children(&node.id)?.is_empty()
+            }) && self.user_heap_children(&node.id)?.is_empty()
                 && strings(
                     &self.native.conn,
                     "SELECT node FROM graph_edges WHERE node=?1 LIMIT 1",
@@ -74,9 +74,9 @@ impl State {
         command.erased = erased;
         let mut detaching = Vec::new();
         for node in command.detaching {
-            if self.heap_node(&node.id)?.is_some_and(|row| {
+            if self.user_heap_node(&node.id)?.is_some_and(|row| {
                 row.revision == node.revision && row.freed == node.freed && !row.freed.is_empty()
-            }) && !self.heap_children(&node.id)?.is_empty()
+            }) && !self.user_heap_children(&node.id)?.is_empty()
             {
                 detaching.push(node);
             }
@@ -100,7 +100,7 @@ impl State {
             if !self.sweeping_task(task)? {
                 continue;
             }
-            let owner = crate::heap::retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
+            let owner = crate::user_heap::retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
             let nodes = strings(
                 conn,
                 &format!(
@@ -140,7 +140,7 @@ impl State {
             if budget == 0 {
                 break;
             }
-            if !self.heap_node(&parent.id)?.is_some_and(|row| {
+            if !self.user_heap_node(&parent.id)?.is_some_and(|row| {
                 row.revision == parent.revision
                     && row.freed == parent.freed
                     && !row.freed.is_empty()
@@ -193,13 +193,16 @@ impl State {
         );
         for node in &command.erased {
             let old = before
-                .heap_node(&node.id)?
+                .user_heap_node(&node.id)?
                 .ok_or_else(|| anyhow::anyhow!("erasure of missing node"))?;
             ensure!(
                 old.revision == node.revision && old.freed == node.freed && !old.freed.is_empty(),
                 "erasure revision mismatch"
             );
-            ensure!(self.heap_node(&node.id)?.is_none(), "erased row survived");
+            ensure!(
+                self.user_heap_node(&node.id)?.is_none(),
+                "erased row survived"
+            );
         }
         let mut budget = command.edge_limit;
         let mut affected = std::collections::BTreeSet::new();
@@ -208,7 +211,7 @@ impl State {
             if budget == 0 {
                 break;
             }
-            let owner = crate::heap::retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
+            let owner = crate::user_heap::retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
             let nodes = strings(
                 &before.native.conn,
                 &format!(
@@ -218,7 +221,7 @@ impl State {
             )?;
             budget -= nodes.len();
             for node in nodes {
-                ensure!(!self.heap_edge(&node, &owner)?, "swept edge survived");
+                ensure!(!self.user_heap_edge(&node, &owner)?, "swept edge survived");
                 affected.insert(node);
             }
             let remaining = !strings(
@@ -237,7 +240,7 @@ impl State {
                 break;
             }
             let old = before
-                .heap_node(&parent.id)?
+                .user_heap_node(&parent.id)?
                 .ok_or_else(|| anyhow::anyhow!("missing detaching parent"))?;
             ensure!(
                 old.revision == parent.revision
@@ -255,19 +258,19 @@ impl State {
             budget -= nodes.len();
             for node in nodes {
                 ensure!(
-                    !self.heap_edge(&node, &parent.id)?,
+                    !self.user_heap_edge(&node, &parent.id)?,
                     "detached edge survived"
                 );
                 affected.insert(node);
             }
             ensure!(
-                self.heap_node(&parent.id)?.as_ref() == Some(&old),
+                self.user_heap_node(&parent.id)?.as_ref() == Some(&old),
                 "detachment changed parent row"
             );
         }
         for id in affected {
             let mut expected = before
-                .heap_node(&id)?
+                .user_heap_node(&id)?
                 .ok_or_else(|| anyhow::anyhow!("swept edge has no node"))?;
             ensure!(expected.freed.is_empty(), "retained node already freed");
             if strings(
@@ -280,7 +283,7 @@ impl State {
                 expected.freed = command.freed_at.clone();
             }
             ensure!(
-                self.heap_node(&id)?.as_ref() == Some(&expected),
+                self.user_heap_node(&id)?.as_ref() == Some(&expected),
                 "swept node state mismatch"
             );
         }
@@ -291,19 +294,19 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{cleanup, event, heap, timeline};
+    use crate::{cleanup, event, timeline, user_heap};
 
-    fn reserve(flow: &str, nodes: &[u8]) -> heap::Request {
-        heap::Request {
+    fn reserve(flow: &str, nodes: &[u8]) -> user_heap::Request {
+        user_heap::Request {
             flow: flow.into(),
             viewpoint: Viewpoint::zero(),
             proofs: BTreeMap::new(),
             nodes: nodes
                 .iter()
                 .map(|n| {
-                    Ok(heap::Node {
+                    Ok(user_heap::Node {
                         context: Default::default(),
-                        id: heap::node_id(0, 0, &[*n]),
+                        id: user_heap::node_id(0, 0, &[*n]),
                         length: 1,
                         edges: Default::default(),
                     })
@@ -361,9 +364,9 @@ mod tests {
         let mut writer = timeline::Datashed::default().into_stager();
         let mut replay = timeline::Datashed::default();
         let request = reserve("f", &[1, 2, 3]);
-        let (prepared, _) = writer.prepare_heap(&request)?;
+        let (prepared, _) = writer.prepare_user_heap(&request)?;
         apply(&mut replay, prepared.unwrap())?;
-        let (prepared, _) = writer.prepare_heap(&reserve("g", &[1]))?;
+        let (prepared, _) = writer.prepare_user_heap(&reserve("g", &[1]))?;
         apply(&mut replay, prepared.unwrap())?;
         let prepared =
             writer.prepare(vec![commit("f", "0"), commit("f", "1"), commit("g", "0")])?;
@@ -386,7 +389,7 @@ mod tests {
         assert!(db.sweeping_task(&task("f", "0"))?);
         let id = &request.nodes[0].as_ref().unwrap().id;
         assert!(
-            db.heap_node(id)?.unwrap().freed.is_empty(),
+            db.user_heap_node(id)?.unwrap().freed.is_empty(),
             "another Flow still retains the node"
         );
         let mut last_snapshot = snapshot;
@@ -408,7 +411,7 @@ mod tests {
                     .database
                     .as_ref()
                     .unwrap()
-                    .heap_node(&node.id)?
+                    .user_heap_node(&node.id)?
                     .unwrap()
                     .freed
                     .is_empty()
@@ -416,7 +419,7 @@ mod tests {
         }
         let mut retry = reserve("f", &[1]);
         retry.viewpoint = Viewpoint::parse("2")?;
-        let (prepared, outcome) = writer.prepare_heap(&retry)?;
+        let (prepared, outcome) = writer.prepare_user_heap(&retry)?;
         assert!(prepared.is_none());
         assert_eq!(outcome.errors[&0].code, "node_freed");
         let erased = work.freed.clone();
@@ -431,7 +434,7 @@ mod tests {
             &mut replay,
             writer.prepare_cleanup(command.clone())?.unwrap(),
         )?;
-        let (prepared, outcome) = writer.prepare_heap(&retry)?;
+        let (prepared, outcome) = writer.prepare_user_heap(&retry)?;
         apply(&mut replay, prepared.unwrap())?;
         let current = &outcome.results[&0];
         assert_ne!(
@@ -442,14 +445,21 @@ mod tests {
             writer.prepare_cleanup(command)?.is_none(),
             "stale acknowledgments cannot remove the new allocation"
         );
-        assert!(replay.database.as_ref().unwrap().heap_node(id)?.is_some());
+        assert!(
+            replay
+                .database
+                .as_ref()
+                .unwrap()
+                .user_heap_node(id)?
+                .is_some()
+        );
         Ok(())
     }
     #[test]
     fn cleanup_frames_match_internal_operation_and_preserve_snapshot() -> Result<()> {
         let mut writer = timeline::Datashed::default().into_stager();
         let mut replay = timeline::Datashed::default();
-        let (prepared, _) = writer.prepare_heap(&reserve("f", &[9]))?;
+        let (prepared, _) = writer.prepare_user_heap(&reserve("f", &[9]))?;
         apply(&mut replay, prepared.unwrap())?;
         let prepared = writer.prepare(vec![commit("f", "0")])?;
         let old_snapshot = prepared.snapshot().unwrap();

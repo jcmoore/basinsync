@@ -7,7 +7,6 @@
 [epilogue-compaction]: <../glossary/epilogue-compaction.md>
 [epilogue-protocol]: <../epilogue-protocol.md>
 [etag]: <../glossary/etag.md>
-[heap-protocol]: <../heap-protocol.md>
 [lexidecimal]: <../glossary/lexidecimal.md>
 [marking-task]: <../glossary/marking-task.md>
 [milestone]: <../glossary/milestone.md>
@@ -20,6 +19,7 @@
 [sweeping-task]: <../glossary/sweeping-task.md>
 [timeline]: <../glossary/timeline.md>
 [upstream]: <../glossary/upstream.md>
+[userheap-protocol]: <../userheap-protocol.md>
 [viewpoint]: <../glossary/viewpoint.md>
 [virtual-file-system]: <../glossary/virtual-file-system.md>
 [young-generation]: <../glossary/young-generation.md>
@@ -27,7 +27,7 @@
 # 0008 — CommitMarker edges with node promotion
 
 Extend *commit details*[^][epilogue-protocol] with a required `edges` array;
-use `[]` for an empty graph. Use the *reservation API's*[^][heap-protocol]
+use `[]` for an empty graph. Use the *reservation API's*[^][userheap-protocol]
 `{ auth: [height, version, token] }` shape, authentication, limits, and stored-target checks.
 Targets may exist in either the *young*[^][young-generation] or *old*[^][old-generation]
 generation. Never persist *access tokens*[^][access-token].

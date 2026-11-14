@@ -1,15 +1,15 @@
 [commit-marker]: <commit-marker.md>
 [flow]: <flow.md>
-[heap-reservation]: <heap-reservation.md>
 [lexidecimal]: <lexidecimal.md>
 [node]: <node.md>
+[userheap-reservation]: <userheap-reservation.md>
 [viewpoint]: <viewpoint.md>
 
 # Retainer
 
 The source of an incoming edge to a *node*[^][node]: another `n-` *node*[^][node],
 a *Flow*[^][flow] *Viewpoint's*[^][viewpoint] `A_` staging area for
-*reservations*[^][heap-reservation], or its `M_` *CommitMarker*[^][commit-marker].
+*reservations*[^][userheap-reservation], or its `M_` *CommitMarker*[^][commit-marker].
 With *Lexidecimal*[^][lexidecimal] `lex`, the latter identifiers are:
 
 ```text

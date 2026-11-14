@@ -1,5 +1,5 @@
 //! Postorder marking and restartable, revision-scoped promotion.
-use crate::{heap, lexidecimal::Viewpoint};
+use crate::{lexidecimal::Viewpoint, user_heap};
 use anyhow::{Context, Result, ensure};
 use num_bigint::BigUint;
 use std::{collections::BTreeSet, num::NonZeroUsize};
@@ -50,7 +50,7 @@ impl ConfirmedSign {
 }
 /// Roots are completion certificates because promotion, like marking, is postorder.
 fn promotion_ready(conn: &std::sync::Arc<Connection>, task: &Task) -> Result<bool> {
-    let owner = heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
+    let owner = user_heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
     let mut q=conn.prepare("SELECT 1 FROM graph_edges e LEFT JOIN graph_nodes n ON n.id=e.node WHERE e.retainer=?1 AND (n.id IS NULL OR n.promoted='') LIMIT 1")?;
     q.bind_at(NonZeroUsize::new(1).unwrap(), Value::build_text(owner))?;
     let mut pending = false;
@@ -171,7 +171,7 @@ pub fn scan(
     }
     let mut planned = BTreeSet::new();
     'tasks: for task in &command.tasks {
-        let owner = heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
+        let owner = user_heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
         let mut stack: Vec<(String, bool)> = children(&conn, &owner)?
             .into_iter()
             .rev()
@@ -225,18 +225,18 @@ fn matches(head: &s3::serde_types::HeadObjectResult, node: &Node) -> bool {
 }
 async fn old_exists(bucket: &s3::Bucket, node: &Node) -> Result<bool> {
     let (head, status) = crate::object_read::if_present(bucket)?
-        .head_object(heap::key(heap::OLD, &node.id, &node.revision))
+        .head_object(user_heap::key(user_heap::OLD, &node.id, &node.revision))
         .await?;
     match status {
         200 => {
             ensure!(
                 matches(&head, node),
-                "old heap object differs from allocation"
+                "old user_heap object differs from allocation"
             );
             Ok(true)
         }
         404 | 412 => Ok(false),
-        _ => anyhow::bail!("old heap HEAD returned HTTP {status}"),
+        _ => anyhow::bail!("old user_heap HEAD returned HTTP {status}"),
     }
 }
 async fn source_context(
@@ -246,13 +246,13 @@ async fn source_context(
     let mut reader = bucket.clone();
     reader.add_header("if-match", &node.etag);
     let (head, status) = reader
-        .head_object(heap::key(heap::YOUNG, &node.id, &node.revision))
+        .head_object(user_heap::key(user_heap::YOUNG, &node.id, &node.revision))
         .await?;
     ensure!(
         status == 200
             && head.e_tag.as_deref() == Some(&node.etag)
             && head.content_length == i64::try_from(node.length).ok(),
-        "young heap metadata differs from allocation"
+        "young user_heap metadata differs from allocation"
     );
     let context = head
         .metadata
@@ -289,7 +289,7 @@ async fn transfer(
         );
     }
     let (mut tx, mut rx) = tokio::io::duplex(64 * 1024);
-    let source = heap::key(heap::YOUNG, &node.id, &node.revision);
+    let source = user_heap::key(user_heap::YOUNG, &node.id, &node.revision);
     let produce = async {
         let mut start = 0;
         while start < node.length {
@@ -298,7 +298,7 @@ async fn transfer(
             ensure!(
                 matches!(part.status_code(), 200 | 206)
                     && part.as_slice().len() as u64 == end - start + 1,
-                "heap source range mismatch"
+                "user_heap source range mismatch"
             );
             tx.write_all(part.as_slice()).await?;
             start = end + 1;
@@ -307,7 +307,7 @@ async fn transfer(
         Ok::<_, anyhow::Error>(())
     };
     let upload = bucket
-        .put_object_stream_builder(heap::key(heap::OLD, &node.id, &node.revision))
+        .put_object_stream_builder(user_heap::key(user_heap::OLD, &node.id, &node.revision))
         .with_headers(headers)
         .with_max_concurrent_chunks(1);
     let consume = async {
@@ -360,32 +360,32 @@ pub async fn promote_one(bucket: &s3::Bucket, node: &Node, allow_transfer: bool)
             );
             // Ambiguous completion is resolved by HEAD below.
             if let Err(e) = transfer(bucket, node, &context).await {
-                tracing::debug!(%e,"heap transfer completion uncertain");
+                tracing::debug!(%e,"user_heap transfer completion uncertain");
             }
         } else {
-            let source = heap::key(heap::YOUNG, &node.id, &node.revision);
-            let destination = heap::key(heap::OLD, &node.id, &node.revision);
+            let source = user_heap::key(user_heap::YOUNG, &node.id, &node.revision);
+            let destination = user_heap::key(user_heap::OLD, &node.id, &node.revision);
             match conditional_copy(bucket, &source, &destination, &node.etag, &context).await {
                 Ok(400 | 405 | 501) if allow_transfer => {
                     if let Err(e) = transfer(bucket, node, &context).await {
-                        tracing::debug!(%e,"heap transfer completion uncertain");
+                        tracing::debug!(%e,"user_heap transfer completion uncertain");
                     }
                 }
                 Ok(_) => {}
-                Err(e) => tracing::debug!(%e,"heap copy completion uncertain"),
+                Err(e) => tracing::debug!(%e,"user_heap copy completion uncertain"),
             }
         }
         ensure!(
             old_exists(bucket, node).await?,
-            "heap promotion has no verified destination"
+            "user_heap promotion has no verified destination"
         );
     }
     let response = bucket
-        .delete_object(heap::key(heap::YOUNG, &node.id, &node.revision))
+        .delete_object(user_heap::key(user_heap::YOUNG, &node.id, &node.revision))
         .await?;
     ensure!(
         matches!(response.status_code(), 200..=299 | 404),
-        "young heap DELETE failed"
+        "young user_heap DELETE failed"
     );
     Ok(())
 }
@@ -408,7 +408,7 @@ pub async fn promote(
                 match promote_one(&bucket, &node, allow_transfer).await {
                     Ok(()) => Some(node),
                     Err(error) => {
-                        tracing::warn!(%error,"heap promotion deferred");
+                        tracing::warn!(%error,"user_heap promotion deferred");
                         None
                     }
                 }

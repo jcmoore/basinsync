@@ -17,7 +17,7 @@ pub struct Marker {
     pub context: BTreeMap<String, String>,
     pub edges: std::collections::BTreeSet<String>,
     #[serde(skip)]
-    pub verified: BTreeMap<String, crate::heap::Child>,
+    pub verified: BTreeMap<String, crate::user_heap::Child>,
     pub viewpoint: String,
     pub sha384: String,
     #[serde(with = "serde_bytes")]
@@ -29,7 +29,7 @@ impl Marker {
         crate::details::context_headers(&self.context)?;
         let viewpoint = Viewpoint::parse(&self.viewpoint)?;
         for id in &self.edges {
-            crate::heap::Node {
+            crate::user_heap::Node {
                 context: Default::default(),
                 id: id.clone(),
                 length: 0,

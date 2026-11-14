@@ -56,14 +56,14 @@ impl Command {
         }
         let mut ids = std::collections::BTreeSet::new();
         for node in self.erased.iter().chain(&self.detaching) {
-            crate::heap::Node {
+            crate::user_heap::Node {
                 context: Default::default(),
                 id: node.id.clone(),
                 length: 0,
                 edges: Default::default(),
             }
             .validate()?;
-            crate::heap::valid_revision(&node.revision)?;
+            crate::user_heap::valid_revision(&node.revision)?;
             time::OffsetDateTime::parse(
                 &node.freed,
                 &time::format_description::well_known::Rfc3339,
@@ -121,15 +121,18 @@ pub async fn erase(bucket: &s3::Bucket, nodes: Vec<Freed>, concurrency: usize) -
             };
             let bucket = bucket.clone();
             running.spawn(async move {
-                let key = crate::heap::key(crate::heap::YOUNG, &node.id, &node.revision);
+                let key = crate::user_heap::key(crate::user_heap::YOUNG, &node.id, &node.revision);
                 match bucket.delete_object(key).await {
                     Ok(r) if matches!(r.status_code(), 200..=299 | 404) => Some(node),
                     Ok(r) => {
-                        tracing::warn!(status = r.status_code(), "young heap deletion deferred");
+                        tracing::warn!(
+                            status = r.status_code(),
+                            "young user_heap deletion deferred"
+                        );
                         None
                     }
                     Err(error) => {
-                        tracing::warn!(%error, "young heap deletion deferred");
+                        tracing::warn!(%error, "young user_heap deletion deferred");
                         None
                     }
                 }

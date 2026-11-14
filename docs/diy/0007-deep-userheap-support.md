@@ -1,9 +1,9 @@
 [access-token]: <../glossary/access-token.md>
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-read]: <../glossary/conditional-read.md>
+[context]: <../glossary/context.md>
 [development]: <../development.md>
 [etag]: <../glossary/etag.md>
-[heap-protocol]: <../heap-protocol.md>
 [node]: <../glossary/node.md>
 [node-degree]: <../glossary/node-degree.md>
 [node-height]: <../glossary/node-height.md>
@@ -11,18 +11,19 @@
 [retainer]: <../glossary/retainer.md>
 [revision]: <../glossary/revision.md>
 [timeline]: <../glossary/timeline.md>
+[userheap-protocol]: <../userheap-protocol.md>
 [young-generation]: <../glossary/young-generation.md>
 
-# 0007 — Deep heap support
+# 0007 — Deep UserHeap support
 
-Lift the *reservation API's*[^][heap-protocol] *zero-height*[^][node-height] and
+Lift the *reservation API's*[^][userheap-protocol] *zero-height*[^][node-height] and
 empty-edge restrictions. Each edge supplies `{ auth: [height, version, token] }`;
 derive the child's *node*[^][node] id without persisting its *access token*[^][access-token].
 Require parent *height*[^][node-height] greater than every child *height*[^][node-height]. Version remains zero;
 existing *height*[^][node-height] and token-size limits apply. Make `BASINSYNC_NODE_MAX_DEGREE`
 configurable (128), counting distinct children; edge order and duplicates do not change the child set.
 
-For an existing parent, require identical content length and child-id set,
+For an existing parent, require identical content length, *context*[^][context], and child-id set,
 including when other *nodes*[^][node] already retain it. For a new parent,
 require every child to have a live `graph_nodes` allocation. Use its cached *etag*[^][etag];
 otherwise perform a *conditional HEAD*[^][conditional-read] on its

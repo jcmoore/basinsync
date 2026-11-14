@@ -6,7 +6,7 @@ import { spawn } from "bun";
 import { DeleteObjectCommand, HeadObjectCommand, CopyObjectCommand, CreateBucketCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, paginateListObjectsV2, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from "@aws-sdk/client-s3";
 import { encode as flexEncode } from "flatbuffers/js/flexbuffers.js";
 import { toObject, encode as extensionEncode } from "./flexbuffer";
-import { commit, form, epilogueStatus as fullStatus, latestBlob, sha384, sha384Bytes, type ApiError, type CommitResponse, type Timelines, type ViewpointMismatch, reserveHeap, type HeapResponse, type HeapNode } from "./client";
+import { commit, form, epilogueStatus as fullStatus, latestBlob, sha384, sha384Bytes, type ApiError, type CommitResponse, type Timelines, type ViewpointMismatch, reserveUserHeap, type UserHeapResponse, type UserHeapNode } from "./client";
 import { parse, stringify } from "./json0";
 import { key, fromKey } from "./diffuse16";
 import { key as epilogueKey, encode as lex, decode as unlex } from "./lexidecimal";
@@ -986,22 +986,22 @@ try {
     await stop(writer.process);await stop(observer.process);
   }
   console.log("put of success: conditional reads, 304/412/404 probe compatibility, and fail-closed authorization/service errors");
-  // Heap staging journals derived identifiers, never authentication material.
+  // UserHeap staging journals derived identifiers, never authentication material.
   {
-    const b=await bucket(),stateDir=`${artifacts}/heap-state`;
+    const b=await bucket(),stateDir=`${artifacts}/userheap-state`;
     const app=await server(b,endpoint,{BASINSYNC_DATA_DIR:stateDir});
-    const flow="0x/雪/staging",secret=bytes("client-only-heap-secret-44b5317c76db0c09"),emptySecret=bytes("client-only-empty-node-secret-d9a812f"),oversize=bytes("oversized-client-token-"+"x".repeat(64));
+    const flow="0x/雪/staging",secret=bytes("client-only-userheap-secret-44b5317c76db0c09"),emptySecret=bytes("client-only-empty-node-secret-d9a812f"),oversize=bytes("oversized-client-token-"+"x".repeat(64));
     const id=(token:Uint8Array,height=0)=>`n-${lex(~BigInt(height))}/v.${lex(0n)}/t.${lex(BigInt(token.length))}/d_${sha384(token)}`;
     const owner=(f:string,v:bigint)=>`A_${f}/v.${lex(0n)}/e.${lex(v)}`;
-    const node=(token=secret,length=7):HeapNode=>({auth:[0,0,token],length,edges:[]});
-    async function reserved(response:Response){await status(response.clone(),200);return parse<HeapResponse>(await response.text());}
-    async function inspectHeap(image:Uint8Array,token:Uint8Array,f=flow,v=0n){
-      const path=`${artifacts}/heap-inspect.turso`;writeFileSync(path,image);
-      const result=spawn([`${root}/target/debug/examples/frame-fixture`,"--heap",path,id(token),owner(f,v)],{cwd:root,stdout:"pipe",stderr:"inherit"});
+    const node=(token=secret,length=7):UserHeapNode=>({auth:[0,0,token],length,edges:[]});
+    async function reserved(response:Response){await status(response.clone(),200);return parse<UserHeapResponse>(await response.text());}
+    async function inspectUserHeap(image:Uint8Array,token:Uint8Array,f=flow,v=0n){
+      const path=`${artifacts}/userheap-inspect.turso`;writeFileSync(path,image);
+      const result=spawn([`${root}/target/debug/examples/frame-fixture`,"--userheap",path,id(token),owner(f,v)],{cwd:root,stdout:"pipe",stderr:"inherit"});
       const row=await new Response(result.stdout).json();assert.equal(await result.exited,0);return row;
     }
-    const input=[node(),{...node(),auth:[129,0,secret] as HeapNode["auth"]},{...node(),auth:[0,1,secret] as HeapNode["auth"]},{...node(),edges:["target"]} as unknown as HeapNode,node(oversize),node(),node(secret,8),node(emptySecret,0)];
-    const response=await reserved(await reserveHeap(app.url,flow,0n,input));
+    const input=[node(),{...node(),auth:[129,0,secret] as UserHeapNode["auth"]},{...node(),auth:[0,1,secret] as UserHeapNode["auth"]},{...node(),edges:["target"]} as unknown as UserHeapNode,node(oversize),node(),node(secret,8),node(emptySecret,0)];
+    const response=await reserved(await reserveUserHeap(app.url,flow,0n,input));
     assert.equal(response.timelines.datashed.milestone,1n);
     assert.deepEqual(Object.keys(response.results!),["0","5","7"]);
     assert.deepEqual(Object.keys(response.errors!),["1","2","3","4","6"]);
@@ -1010,8 +1010,8 @@ try {
     assert(actions.write&&actions.preview&&zero.write&&zero.preview);
     const revision = new URL(actions.write.url).pathname.split("/").at(-1)!;
     assert.match(revision,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    assert(new URL(actions.write.url).pathname.endsWith(`/heap/young/${id(secret)}/${revision}`));
-    assert(new URL(actions.read.url).pathname.endsWith(`/heap/old/${id(secret)}/${revision}`));
+    assert(new URL(actions.write.url).pathname.endsWith(`/userheap/young/${id(secret)}/${revision}`));
+    assert(new URL(actions.read.url).pathname.endsWith(`/userheap/old/${id(secret)}/${revision}`));
     assert.equal(new URL(actions.write.url).searchParams.get("X-Amz-SignedHeaders"),"content-length;host;if-none-match");
     assert.deepEqual(actions.write.headers,{"Content-Length":"7","If-None-Match":"*"});
     for(const action of [actions.preview,actions.read]){assert.equal(action.headers["If-Match"],"*");const r=await fetch(action.url,{headers:action.headers});assert([404,412].includes(r.status));await r.arrayBuffer();}
@@ -1020,50 +1020,50 @@ try {
     assert.equal(envelopes(first).length,2);assert.deepEqual(rangesAt(first),[]);
     const delta=deltasAt(first).turso["default.turso"] as WalDelta;
     let image=ingestWal(delta.logical.base!,delta.physical.segments);
-    const original=await inspectHeap(image,secret);assert.equal(original.length,7);assert.equal(original.etag,"");assert.equal(original.promoted,"");assert(original.retained);assert(Number.isFinite(Date.parse(original.reserved)));
+    const original=await inspectUserHeap(image,secret);assert.equal(original.length,7);assert.equal(original.etag,"");assert.equal(original.promoted,"");assert(original.retained);assert(Number.isFinite(Date.parse(original.reserved)));
     const badWrites:[Record<string,string>,Uint8Array][]=[[{"Content-Length":"7"},bytes("payload")],[{...actions.write.headers,"Content-Length":"8"},bytes("payload!")]];
     for(const [headers,body] of badWrites){
       const rejected:Response=await fetch(actions.write.url,{method:"PUT",headers,body:new Blob([new Uint8Array(body)])});assert(rejected.status>=400,"changing length or omitting the write condition invalidates the signature");await rejected.arrayBuffer();
     }
-    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"heap/young/"}))).KeyCount,0);
+    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"userheap/young/"}))).KeyCount,0);
     const put=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("payload")});assert(put.ok,await put.text());
     const duplicate=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("changed")});assert.equal(duplicate.status,412);await duplicate.arrayBuffer();
     const preview=await fetch(actions.preview.url,{headers:actions.preview.headers});assert.equal(preview.status,200);assert.deepEqual(new Uint8Array(await preview.arrayBuffer()),bytes("payload"));
     const emptyPut=await fetch(zero.write.url,{method:"PUT",headers:zero.write.headers,body:new Uint8Array()});assert(emptyPut.ok,await emptyPut.text());
     const emptyGet=await fetch(zero.preview.url,{headers:zero.preview.headers});assert.equal(emptyGet.status,200);assert.equal((await emptyGet.arrayBuffer()).byteLength,0);
-    await s3.send(new PutObjectCommand({Bucket:b,Key:`heap/old/${id(secret)}/${revision}`,Body:bytes("payload")}));
+    await s3.send(new PutObjectCommand({Bucket:b,Key:`userheap/old/${id(secret)}/${revision}`,Body:bytes("payload")}));
     const old=await fetch(actions.read.url,{headers:actions.read.headers});assert.equal(old.status,200);assert.deepEqual(new Uint8Array(await old.arrayBuffer()),bytes("payload"));
-    const retry=await reserved(await reserveHeap(app.url,flow,0n,[node(),node()]));assert.equal(retry.errors,null);assert.deepEqual(Object.keys(retry.results!),["0","1"]);
-    const other=await reserved(await reserveHeap(app.url,"another-flow",0n,[node()]));assert.equal(other.errors,null);
-    await mismatch(await reserveHeap(app.url,flow,1n,[node()]),0n);
+    const retry=await reserved(await reserveUserHeap(app.url,flow,0n,[node(),node()]));assert.equal(retry.errors,null);assert.deepEqual(Object.keys(retry.results!),["0","1"]);
+    const other=await reserved(await reserveUserHeap(app.url,"another-flow",0n,[node()]));assert.equal(other.errors,null);
+    await mismatch(await reserveUserHeap(app.url,flow,1n,[node()]),0n);
     await status(await commit(app.url,flow,bytes("root marker"),0n),201);
-    await mismatch(await reserveHeap(app.url,flow,0n,[node()]),1n);
-    await mismatch(await reserveHeap(app.url,flow,2n,[node()]),1n);
-    await reserved(await reserveHeap(app.url,flow,1n,[node()]));
-    const invalid=await reserved(await reserveHeap(app.url,flow,1n,[{...node(),auth:[0,0,"client-only-malformed-auth-secret"]} as unknown as HeapNode]));
+    await mismatch(await reserveUserHeap(app.url,flow,0n,[node()]),1n);
+    await mismatch(await reserveUserHeap(app.url,flow,2n,[node()]),1n);
+    await reserved(await reserveUserHeap(app.url,flow,1n,[node()]));
+    const invalid=await reserved(await reserveUserHeap(app.url,flow,1n,[{...node(),auth:[0,0,"client-only-malformed-auth-secret"]} as unknown as UserHeapNode]));
     assert.equal(invalid.results,null);assert.equal(invalid.errors![0].code,"invalid_node");assert.equal(invalid.timelines.datashed.milestone,5n);
-    const empty=await reserved(await reserveHeap(app.url,flow,1n,[]));assert.equal(empty.errors,null);assert.equal(empty.results,null);assert.equal(empty.timelines.datashed.milestone,5n);
+    const empty=await reserved(await reserveUserHeap(app.url,flow,1n,[]));assert.equal(empty.errors,null);assert.equal(empty.results,null);assert.equal(empty.timelines.datashed.milestone,5n);
     await stop(app.process);
     const copying=await server(b,endpoint,{BASINSYNC_DATA_DIR:stateDir,BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     const cp=await eventually(()=>datashedBackup(b),value=>value?.milestone===5n);assert(cp);
     for(let m=2n;m<=5n;m++)image=ingestWal(image,(deltasAt(await get(b,m)).turso["default.turso"] as WalDelta).physical.segments);
     assert.deepEqual(cp.blob,image,"reservations and markers share physical recovery and snapshotting");
-    assert.deepEqual(await inspectHeap(cp.blob,secret),original,"retries retain original node metadata");
-    assert((await inspectHeap(cp.blob,secret,"another-flow")).retained);assert((await inspectHeap(cp.blob,secret,flow,1n)).retained);
+    assert.deepEqual(await inspectUserHeap(cp.blob,secret),original,"retries retain original node metadata");
+    assert((await inspectUserHeap(cp.blob,secret,"another-flow")).retained);assert((await inspectUserHeap(cp.blob,secret,flow,1n)).retained);
     await stop(copying.process);
     const restored=await server(b,endpoint,{BASINSYNC_DATA_DIR:stateDir});
-    const replayed=await reserved(await reserveHeap(restored.url,flow,1n,[node()]));assert.equal(replayed.errors,null);assert.equal(replayed.timelines.datashed.milestone,6n);
+    const replayed=await reserved(await reserveUserHeap(restored.url,flow,1n,[node()]));assert.equal(replayed.errors,null);assert.equal(replayed.timelines.datashed.milestone,6n);
     await stop(restored.process);
     const secrets=[secret,emptySecret,oversize,bytes("client-only-malformed-auth-secret")];
     function assertNoTokens(contents:Uint8Array){const value=Buffer.from(contents);for(const token of secrets){assert(!value.includes(token),"raw token persisted");assert(!value.includes(Buffer.from(stringify(token).slice(1,-1))),"JSON0 token persisted");}}
     for await(const page of paginateListObjectsV2({client:s3},{Bucket:b}))for(const object of page.Contents??[]){assertNoTokens(bytes(object.Key!));const stored=await s3.send(new GetObjectCommand({Bucket:b,Key:object.Key!}));assertNoTokens(await stored.Body!.transformToByteArray());}
     function scan(dir:string){for(const name of readdirSync(dir)){const path=resolve(dir,name);if(statSync(path).isDirectory())scan(path);else assertNoTokens(readFileSync(path));}}
     scan(stateDir);for(const log of [app.log,copying.log,restored.log])assertNoTokens(readFileSync(log));
-    const smallBucket=await bucket(),limited=await server(smallBucket,endpoint,{BASINSYNC_HEAP_MAX_HEIGHT:"0",BASINSYNC_HEAP_MAX_TOKEN_BYTES:"4"});
-    const limits=await reserved(await reserveHeap(limited.url,"limits",0n,[node(bytes("12345")),{...node(bytes("1234")),auth:[1,0,bytes("1234")]},node(bytes("1234"))]));
+    const smallBucket=await bucket(),limited=await server(smallBucket,endpoint,{BASINSYNC_USER_HEAP_MAX_HEIGHT:"0",BASINSYNC_USER_HEAP_MAX_TOKEN_BYTES:"4"});
+    const limits=await reserved(await reserveUserHeap(limited.url,"limits",0n,[node(bytes("12345")),{...node(bytes("1234")),auth:[1,0,bytes("1234")]},node(bytes("1234"))]));
     assert.equal(limits.errors![0].code,"token_limit");assert.equal(limits.errors![1].code,"height_limit");assert(limits.results![2]);await stop(limited.process);
   }
-  console.log("put of success: shallow heap reservations, partial errors, length-bound first-writer uploads, both generations, retries, Viewpoint checks, snapshots, service limits, and no persisted tokens");
+  console.log("put of success: shallow userheap reservations, partial errors, length-bound first-writer uploads, both generations, retries, Viewpoint checks, snapshots, service limits, and no persisted tokens");
   // Reservation and commit batches share the two-slot publication pipeline.
   for(const fault of ["none","before","after"]){
     const b=await bucket(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let puts=0,done=false;
@@ -1073,19 +1073,19 @@ try {
       if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/")){puts++;if(puts===1){entered.resolve();await gate.promise;if(fault==="before")return new Response("not stored",{status:503});}}
     });
     const app=await server(b,proxy.url,{BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});
-    const input:HeapNode={auth:[0,0,bytes("pipeline-client-only-access-token")],length:0,edges:[]};
-    const reservation=reserveHeap(app.url,"pipelined-heap",0n,[input]).then(r=>{done=true;return r});await timeout(entered.promise);
-    const following=commit(app.url,"pipelined-heap",bytes("root"),0n);await batchLogged(app.log,2);
+    const input:UserHeapNode={auth:[0,0,bytes("pipeline-client-only-access-token")],length:0,edges:[]};
+    const reservation=reserveUserHeap(app.url,"pipelined-userheap",0n,[input]).then(r=>{done=true;return r});await timeout(entered.promise);
+    const following=commit(app.url,"pipelined-userheap",bytes("root"),0n);await batchLogged(app.log,2);
     assert.equal(done,false,"do not release actions before reservation durability");assert.equal(puts,1,"prepared successor must not upload early");
     gate.resolve();const first=await reservation;
     if(fault==="none"){
-      await status(first.clone(),200);assert.equal(parse<HeapResponse>(await first.text()).timelines.datashed.milestone,1n);
+      await status(first.clone(),200);assert.equal(parse<UserHeapResponse>(await first.text()).timelines.datashed.milestone,1n);
       const second=await following;await status(second.clone(),201);assert.equal(parse<CommitResponse>(await second.text()).timelines.datashed.milestone,2n);await stop(app.process);
     }else{
       const error=parse<ApiError>(await first.clone().text());assert.equal(error.timelines.datashed.milestone,0n);assert(!("results" in error));await status(first,503);
       await status(await following,503);assert.equal(await timeout(app.process.exited),1);assert.equal(puts,1);
-      const restored=await server(b);const retry=await reserveHeap(restored.url,"pipelined-heap",0n,[input]);await status(retry.clone(),200);
-      assert.equal(parse<HeapResponse>(await retry.text()).timelines.datashed.milestone,fault==="after"?2n:1n);await stop(restored.process);
+      const restored=await server(b);const retry=await reserveUserHeap(restored.url,"pipelined-userheap",0n,[input]);await status(retry.clone(),200);
+      assert.equal(parse<UserHeapResponse>(await retry.text()).timelines.datashed.milestone,fault==="after"?2n:1n);await stop(restored.process);
     }
   }
   // Concurrent reservers arbitrate with the same conditional Timeline append.
@@ -1095,12 +1095,12 @@ try {
       if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/")){if(++puts===2)gate.resolve();await gate.promise;}
     });
     const apps=await Promise.all([server(b,proxy.url),server(b,proxy.url)]);
-    const nodes:HeapNode[]=[{auth:[0,0,bytes("shared-client-only-reservation-secret")],length:0,edges:[]}];
-    const results=await timeout(Promise.all(apps.map((app,i)=>reserveHeap(app.url,`heap-race-${i}`,0n,nodes))));
+    const nodes:UserHeapNode[]=[{auth:[0,0,bytes("shared-client-only-reservation-secret")],length:0,edges:[]}];
+    const results=await timeout(Promise.all(apps.map((app,i)=>reserveUserHeap(app.url,`userheap-race-${i}`,0n,nodes))));
     assert.deepEqual(results.map(r=>r.status).sort(),[200,503]);
     for(let i=0;i<results.length;i++)await status(results[i],results[i].status);
     await Promise.all(apps.map(app=>stop(app.process)));
-    const restored=await server(b);for(let i=0;i<2;i++)await status(await reserveHeap(restored.url,`heap-race-${i}`,0n,nodes),200);
+    const restored=await server(b);for(let i=0;i<2;i++)await status(await reserveUserHeap(restored.url,`userheap-race-${i}`,0n,nodes),200);
     assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"timeline/"}))).KeyCount,3);await stop(restored.process);
   }
   console.log("put of success: pipelined reservation/commit durability, ambiguous reservation recovery, and competing reservers");
@@ -1108,11 +1108,11 @@ try {
   {
     const b=await bucket(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let held=false;
     const proxy=relay((_,response)=>response,async request=>{
-      if(request.method==="DELETE"&&new URL(request.url).pathname.includes("/heap/young/")){held=true;entered.resolve();await gate.promise;}
+      if(request.method==="DELETE"&&new URL(request.url).pathname.includes("/userheap/young/")){held=true;entered.resolve();await gate.promise;}
     });
     const options={BASINSYNC_CLEANUP_INTERVAL_MS:"15",BASINSYNC_SWEEP_BATCH_SIZE:"1",BASINSYNC_SWEEP_EDGE_BATCH_SIZE:"1",BASINSYNC_ERASE_BATCH_SIZE:"1",BASINSYNC_ERASE_CONCURRENCY:"1"};
-    const app=await server(b,proxy.url,options),secret=bytes("cleanup-reusable-token"),input:HeapNode={auth:[0,0,secret],length:4,edges:[]};
-    const reserve=async(url:string,flow:string)=>{const r=await reserveHeap(url,flow,0n,[input]);await status(r.clone(),200);return parse<HeapResponse>(await r.text());};
+    const app=await server(b,proxy.url,options),secret=bytes("cleanup-reusable-token"),input:UserHeapNode={auth:[0,0,secret],length:4,edges:[]};
+    const reserve=async(url:string,flow:string)=>{const r=await reserveUserHeap(url,flow,0n,[input]);await status(r.clone(),200);return parse<UserHeapResponse>(await r.text());};
     const initial=await reserve(app.url,"first"),actions=initial.results![0].actions;assert(actions.write&&actions.preview);
     const oldKey=new URL(actions.write.url).pathname.slice(b.length+2);
     const put=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("same")});assert(put.ok,await put.text());
@@ -1135,7 +1135,7 @@ try {
     await stop(app.process);await stop(competing.process);
     // An old still-valid PUT can leave dust, without changing the current revision.
     const late=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("same")});assert(late.ok,await late.text());
-    const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"heap/young/"}));assert.equal(objects.KeyCount,2);assert(objects.Contents!.some(o=>o.Key===oldKey));
+    const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"userheap/young/"}));assert.equal(objects.KeyCount,2);assert(objects.Contents!.some(o=>o.Key===oldKey));
     const restored=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     const again=await reserve(restored.url,"reuse");assert.equal(new URL(again.results![0].actions.preview!.url).pathname,new URL(next.preview.url).pathname);
     const target=again.timelines.datashed.milestone;
@@ -1155,9 +1155,9 @@ try {
       if(await isSweep(request)){sweeps.add(request);if(fault==="before"){failed=true;return new Response("sweep not stored",{status:503});}}
     });
     const app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"15"});
-    const input:HeapNode={auth:[0,0,bytes(`cleanup-durability-${fault}`)],length:0,edges:[]};
-    const reserved=await reserveHeap(app.url,"f",0n,[input]);await status(reserved.clone(),200);
-    const actions=parse<HeapResponse>(await reserved.text()).results![0].actions;assert(actions.write);
+    const input:UserHeapNode={auth:[0,0,bytes(`cleanup-durability-${fault}`)],length:0,edges:[]};
+    const reserved=await reserveUserHeap(app.url,"f",0n,[input]);await status(reserved.clone(),200);
+    const actions=parse<UserHeapResponse>(await reserved.text()).results![0].actions;assert(actions.write);
     const upload=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:new Uint8Array()});assert(upload.ok);
     await status(await commit(app.url,"f",bytes("marker"),0n),201);
     assert.equal(await timeout(app.process.exited),1);assert(failed);assert.equal(deletes,0,"no object erasure before acknowledged durable freeing");
@@ -1179,13 +1179,13 @@ try {
     }
     async function inspect(bytes:Uint8Array,id?:string){
       const path=`${artifacts}/deep-${serial++}.turso`;writeFileSync(path,bytes);
-      const args=id?["--heap",path,id,"unused"]:["--graph",path];
+      const args=id?["--userheap",path,id,"unused"]:["--graph",path];
       const p=spawn([`${root}/target/debug/examples/frame-fixture`,...args],{cwd:root,stdout:"pipe",stderr:"inherit"});
       const row=await new Response(p.stdout).json();assert.equal(await p.exited,0);return row;
     }
     const proxy=relay((_,response)=>response,async request=>{
       const path=new URL(request.url).pathname;
-      if(request.method==="HEAD"&&path.includes("/heap/")){
+      if(request.method==="HEAD"&&path.includes("/userheap/")){
         assert.equal(request.headers.get("if-match"),"*");heads.set(path,(heads.get(path)??0)+1);
         if(path===target&&mode==="denied")return new Response(null,{status:403});
         if(path===target&&mode==="unavailable")return new Response(null,{status:500});
@@ -1197,10 +1197,10 @@ try {
     });
     const app=await server(b,proxy.url);
     const token=(name:string)=>bytes(`deep-node-auth-private-${name}`);
-    const leaf=(name:string):HeapNode=>({auth:[0,0,token(name)],length:1,edges:[]});
-    const parent=(height:number,name:string,children:HeapNode[]):HeapNode=>({auth:[height,0,token(name)],length:1,edges:children.map(n=>({auth:n.auth}))});
-    const reserve=async(flow:string,nodes:HeapNode[])=>{const r=await reserveHeap(app.url,flow,0n,nodes);await status(r.clone(),200);const body=parse<HeapResponse>(await r.text());if(body.results)flows.add(flow);return body;};
-    const upload=async(a:NonNullable<HeapResponse["results"]>[number]["actions"])=>{assert(a.write);const r=await fetch(a.write.url,{method:"PUT",headers:a.write.headers,body:bytes("x")});assert(r.ok,await r.text());};
+    const leaf=(name:string):UserHeapNode=>({auth:[0,0,token(name)],length:1,edges:[]});
+    const parent=(height:number,name:string,children:UserHeapNode[]):UserHeapNode=>({auth:[height,0,token(name)],length:1,edges:children.map(n=>({auth:n.auth}))});
+    const reserve=async(flow:string,nodes:UserHeapNode[])=>{const r=await reserveUserHeap(app.url,flow,0n,nodes);await status(r.clone(),200);const body=parse<UserHeapResponse>(await r.text());if(body.results)flows.add(flow);return body;};
+    const upload=async(a:NonNullable<UserHeapResponse["results"]>[number]["actions"])=>{assert(a.write);const r=await fetch(a.write.url,{method:"PUT",headers:a.write.headers,body:bytes("x")});assert(r.ok,await r.text());};
     const a=leaf("a"),c=leaf("c"),shared=leaf("shared");
     const leaves=await reserve("leaves",[a,shared,c]);for(const result of Object.values(leaves.results!))await upload(result.actions);
     const left=parent(1,"left",[a,shared]),right=parent(1,"right",[shared,c]);
@@ -1208,7 +1208,7 @@ try {
     const rightResult=await reserve("deep",[right]);await upload(rightResult.results![0].actions);
     const sharedPath=new URL(leaves.results![1].actions.preview!.url).pathname;assert.equal(heads.get(sharedPath),1,"ETag cache avoids a second child HEAD");
     const rootNode=parent(2,"root",[left,right]),rootResult=await reserve("deep",[rootNode]);await upload(rootResult.results![0].actions);
-    const rootPath=new URL(rootResult.results![0].actions.preview!.url).pathname;rootId=rootPath.split("/heap/young/")[1].split("/").slice(0,-1).join("/");
+    const rootPath=new URL(rootResult.results![0].actions.preview!.url).pathname;rootId=rootPath.split("/userheap/young/")[1].split("/").slice(0,-1).join("/");
     const repeat=await reserve("sharing",[{...left,edges:[...left.edges].reverse().concat(left.edges[0])}]);assert(repeat.results);assert.equal(new URL(repeat.results![0].actions.preview!.url).pathname,new URL(leftResult.results![0].actions.preview!.url).pathname);
     assert.equal((await reserve("deep",[{...left,length:2}])).errors![0].code,"length_collision");
     assert.equal((await reserve("deep",[{...left,edges:[left.edges[0]]}])).errors![0].code,"edges_collision");
@@ -1233,12 +1233,12 @@ try {
     const graph=await inspect(await image(),rootId);assert.equal(graph.children.length,2);
     await stop(app.process);
     const limited=await server(await bucket(),endpoint,{BASINSYNC_NODE_MAX_DEGREE:"1"});
-    const degree=await reserveHeap(limited.url,"f",0n,[left]);await status(degree.clone(),200);assert.equal(parse<HeapResponse>(await degree.text()).errors![0].code,"degree_limit");await stop(limited.process);
+    const degree=await reserveUserHeap(limited.url,"f",0n,[left]);await status(degree.clone(),200);assert.equal(parse<UserHeapResponse>(await degree.text()).errors![0].code,"degree_limit");await stop(limited.process);
     const cleaner=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_SWEEP_EDGE_BATCH_SIZE:"1",BASINSYNC_ERASE_BATCH_SIZE:"1",BASINSYNC_ERASE_CONCURRENCY:"1"});
     for(const flow of flows)await status(await commit(cleaner.url,flow,bytes("marker"),0n),201);
     await eventually(async()=>{const rows=await inspect(await image());return rows;},rows=>rows.graph_nodes===0&&rows.graph_edges===0&&rows.sweeping_tasks===0&&rows.marking_tasks===0);
     assert(checkedDeletion,"parent object deletion follows durable outbound edge removal");
-    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"heap/young/"}))).KeyCount,0);
+    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"userheap/young/"}))).KeyCount,0);
     await stop(cleaner.process);
     const restored=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"}),tip=(await fullStatus(restored.url,"deep")).timelines.datashed.milestone;
     const cp=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===tip);assert(cp);assert.deepEqual(await inspect(cp.blob),{graph_nodes:0,graph_edges:0,sweeping_tasks:0,marking_tasks:0});await stop(restored.process);
@@ -1248,8 +1248,8 @@ try {
     const b=await bucket(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let held=false,target="";
     const proxy=relay(async(request,response)=>{if(!held&&request.method==="HEAD"&&new URL(request.url).pathname===target&&response.status===200){held=true;entered.resolve();await gate.promise;}return response;});
     const app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"15"});
-    const child:HeapNode={auth:[0,0,bytes("verification-race-child")],length:1,edges:[]},parent:HeapNode={auth:[1,0,bytes("verification-race-parent")],length:1,edges:[{auth:child.auth}]};
-    const reserve=async(flow:string,nodes:HeapNode[])=>{const r=await reserveHeap(app.url,flow,0n,nodes);await status(r.clone(),200);return parse<HeapResponse>(await r.text());};
+    const child:UserHeapNode={auth:[0,0,bytes("verification-race-child")],length:1,edges:[]},parent:UserHeapNode={auth:[1,0,bytes("verification-race-parent")],length:1,edges:[{auth:child.auth}]};
+    const reserve=async(flow:string,nodes:UserHeapNode[])=>{const r=await reserveUserHeap(app.url,flow,0n,nodes);await status(r.clone(),200);return parse<UserHeapResponse>(await r.text());};
     const first=(await reserve("old",[child])).results![0].actions;assert(first.write);const put=await fetch(first.write.url,{method:"PUT",headers:first.write.headers,body:bytes("x")});assert(put.ok);target=new URL(first.preview!.url).pathname;
     const pending=reserve("parent",[parent]);await timeout(entered.promise);
     await status(await commit(app.url,"old",bytes("marker"),0n),201);
@@ -1275,7 +1275,7 @@ try {
     }
     async function inspect(id:string,owner="unused",blob?:Uint8Array){
       const path=`${artifacts}/promotion-${serial++}.turso`;writeFileSync(path,blob??await image());
-      const p=spawn([`${root}/target/debug/examples/frame-fixture`,"--heap",path,id,owner],{cwd:root,stdout:"pipe",stderr:"inherit"});
+      const p=spawn([`${root}/target/debug/examples/frame-fixture`,"--userheap",path,id,owner],{cwd:root,stdout:"pipe",stderr:"inherit"});
       const row=await new Response(p.stdout).json();assert.equal(await p.exited,0);return row;
     }
     const copies:string[]=[];
@@ -1284,7 +1284,7 @@ try {
       return response;
     },async request=>{
       const path=new URL(request.url).pathname;
-      if(request.method==="PUT"&&path.includes("/heap/old/")&&request.headers.has("x-amz-copy-source")){
+      if(request.method==="PUT"&&path.includes("/userheap/old/")&&request.headers.has("x-amz-copy-source")){
         assert.equal(request.headers.get("if-none-match"),"*");assert(request.headers.get("x-amz-copy-source-if-match"));
         if(holdCopies&&path===rootPath){entered.resolve();await gate.promise;}
         copies.push(path);if(path===rootPath)copyCount++;
@@ -1292,15 +1292,15 @@ try {
       if(request.method==="DELETE"&&path===rootYoung&&!deleteFailed){deleteFailed=true;return new Response("retry",{status:500});}
     });
     let app=await server(b,proxy.url,{BASINSYNC_NODE_MAX_DEGREE:"1"});
-    const auth=(h:number,s:string):HeapNode["auth"]=>[h,0,bytes(`marker-edge-private-${s}`)];
-    const leaf:HeapNode={auth:auth(0,"leaf"),length:1,edges:[],context:{kind:"leaf",tag:"0x-context"}};
-    const orphan:HeapNode={auth:auth(0,"orphan"),length:1,edges:[]};
-    const reserve=async(flow:string,nodes:HeapNode[],vp=0n)=>{const r=await reserveHeap(app.url,flow,vp,nodes);await status(r.clone(),200);return parse<HeapResponse>(await r.text());};
-    const upload=async(action:NonNullable<HeapResponse["results"]>[number]["actions"]["write"],body=bytes("x"))=>{assert(action);const r=await fetch(action.url,{method:"PUT",headers:action.headers,body});assert(r.ok,await r.text());};
+    const auth=(h:number,s:string):UserHeapNode["auth"]=>[h,0,bytes(`marker-edge-private-${s}`)];
+    const leaf:UserHeapNode={auth:auth(0,"leaf"),length:1,edges:[],context:{kind:"leaf",tag:"0x-context"}};
+    const orphan:UserHeapNode={auth:auth(0,"orphan"),length:1,edges:[]};
+    const reserve=async(flow:string,nodes:UserHeapNode[],vp=0n)=>{const r=await reserveUserHeap(app.url,flow,vp,nodes);await status(r.clone(),200);return parse<UserHeapResponse>(await r.text());};
+    const upload=async(action:NonNullable<UserHeapResponse["results"]>[number]["actions"]["write"],body=bytes("x"))=>{assert(action);const r=await fetch(action.url,{method:"PUT",headers:action.headers,body});assert(r.ok,await r.text());};
     const leaves=await reserve("graph",[leaf,orphan]);await upload(leaves.results![0].actions.write);await upload(leaves.results![1].actions.write);
-    const parent:HeapNode={auth:auth(1,"parent"),length:1,edges:[{auth:leaf.auth}],context:{kind:"parent"}};
+    const parent:UserHeapNode={auth:auth(1,"parent"),length:1,edges:[{auth:leaf.auth}],context:{kind:"parent"}};
     const parentActions=(await reserve("graph",[parent])).results![0].actions;assert(parentActions.preview);
-    const parentId=new URL(parentActions.preview.url).pathname.split("/heap/young/")[1]!.split("/").slice(0,-1).join("/");
+    const parentId=new URL(parentActions.preview.url).pathname.split("/userheap/young/")[1]!.split("/").slice(0,-1).join("/");
     const missing=await commit(app.url,"graph",bytes("marker"),0n,undefined,[{auth:parent.auth}]);await status(missing.clone(),422);assert.equal(parse<ApiError>(await missing.text()).error,"child_missing");
     assert.deepEqual(await epilogueStatus(app.url,"graph"),{latest:null});
     const unknown=await commit(app.url,"graph",bytes("marker"),0n,undefined,[{auth:auth(0,"unknown")}]);await status(unknown.clone(),422);assert.equal(parse<ApiError>(await unknown.text()).error,"child_unknown");
@@ -1337,7 +1337,7 @@ try {
     }
     await eventually(async()=>{const r=await fetch(leaves.results![1].actions.preview!.url,{headers:leaves.results![1].actions.preview!.headers});await r.arrayBuffer();return r.status;},s=>s===404||s===412);
     const repeated=(await reserve("graph",[parent],1n)).results![0].actions;assert.equal(repeated.write,null);assert.equal(repeated.preview,null);assert.equal(new URL(repeated.read.url).pathname,rootPath);
-    const newParent:HeapNode={auth:auth(2,"new-parent"),length:1,edges:[{auth:parent.auth}]};
+    const newParent:UserHeapNode={auth:auth(2,"new-parent"),length:1,edges:[{auth:parent.auth}]};
     assert((await reserve("next",[newParent])).results);
     await status(await commit(app.url,"other",bytes("old-node-edge"),0n,undefined,[{auth:parent.auth}]),201);
     const node=(await inspect(parentId,owner));assert(node.promoted&&node.marked&&!node.freed);
@@ -1354,16 +1354,16 @@ try {
     const b=await bucket();let blocked=true,copyAttempts=0,sourceReads=0;const copyRejected=Promise.withResolvers<void>();
     const proxy=relay((_,response)=>response,async request=>{
       const path=new URL(request.url).pathname;
-      if(request.method==="PUT"&&path.includes("/heap/old/")&&request.headers.has("x-amz-copy-source")){
+      if(request.method==="PUT"&&path.includes("/userheap/old/")&&request.headers.has("x-amz-copy-source")){
         copyAttempts++;copyRejected.resolve();return new Response("unsupported",{status:501});
       }
-      if(request.method==="GET"&&path.includes("/heap/young/"))sourceReads++;
-      if(request.method==="DELETE"&&path.includes("/heap/young/")&&blocked)return new Response("deferred",{status:500});
+      if(request.method==="GET"&&path.includes("/userheap/young/"))sourceReads++;
+      if(request.method==="DELETE"&&path.includes("/userheap/young/")&&blocked)return new Response("deferred",{status:500});
     });
     let app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
     const data=new Uint8Array(9*1024*1024+3);data.fill(42);data[0]=7;data[data.length-1]=19;
-    const input:HeapNode={auth:[0,0,bytes("promotion-fallback-private")],length:data.length,edges:[],context:{kind:"multipart",tag:"0#species"}};
-    const r=await reserveHeap(app.url,"f",0n,[input]);await status(r.clone(),200);const actions=parse<HeapResponse>(await r.text()).results![0].actions;assert(actions.write&&actions.preview);
+    const input:UserHeapNode={auth:[0,0,bytes("promotion-fallback-private")],length:data.length,edges:[],context:{kind:"multipart",tag:"0#species"}};
+    const r=await reserveUserHeap(app.url,"f",0n,[input]);await status(r.clone(),200);const actions=parse<UserHeapResponse>(await r.text()).results![0].actions;assert(actions.write&&actions.preview);
     const p=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:data});assert(p.ok);
     await status(await commit(app.url,"f",bytes("marker"),0n,undefined,[{auth:input.auth}]),201);
     await timeout(copyRejected.promise);await Bun.sleep(40);assert.equal(sourceReads,0,"COPY failure cannot silently relay bytes");
@@ -1374,7 +1374,7 @@ try {
     const preview=await fetch(actions.preview.url,{headers:actions.preview.headers});assert.equal(preview.status,200);await preview.arrayBuffer();
     await stop(app.process);const before=copyAttempts;blocked=false;
     app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
-    await eventually(async()=>{const r=await reserveHeap(app.url,"f",1n,[input]);await status(r.clone(),200);return parse<HeapResponse>(await r.text());},r=>r.results?.[0]?.actions.preview===null);
+    await eventually(async()=>{const r=await reserveUserHeap(app.url,"f",1n,[input]);await status(r.clone(),200);return parse<UserHeapResponse>(await r.text());},r=>r.results?.[0]?.actions.preview===null);
     assert.equal(copyAttempts,before,"restart resumes deletion from verified old object");
     const old=await fetch(actions.read.url,{headers:actions.read.headers});assert.equal(old.status,200);assert.deepEqual(new Uint8Array(await old.arrayBuffer()),data);
     assert.equal(old.headers.get("x-amz-meta-ctx-kind"),"multipart");assert.equal(old.headers.get("x-amz-meta-ctx-tag"),"0#species");
@@ -1385,8 +1385,8 @@ try {
     const b=await bucket(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let held=false,target="";
     const proxy=relay(async(request,response)=>{if(!held&&request.method==="HEAD"&&new URL(request.url).pathname===target&&response.status===200){held=true;entered.resolve();await gate.promise;}return response;});
     const app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"15"});
-    const node:HeapNode={auth:[0,0,bytes("marker-verification-reuse-private")],length:1,edges:[]};
-    const reserve=async(flow:string)=>{const r=await reserveHeap(app.url,flow,0n,[node]);await status(r.clone(),200);return parse<HeapResponse>(await r.text());};
+    const node:UserHeapNode={auth:[0,0,bytes("marker-verification-reuse-private")],length:1,edges:[]};
+    const reserve=async(flow:string)=>{const r=await reserveUserHeap(app.url,flow,0n,[node]);await status(r.clone(),200);return parse<UserHeapResponse>(await r.text());};
     const first=(await reserve("stage")).results![0].actions;assert(first.write&&first.preview);
     let r=await fetch(first.write.url,{method:"PUT",headers:first.write.headers,body:bytes("x")});assert(r.ok);target=new URL(first.preview.url).pathname;
     const pending=commit(app.url,"marker",bytes("marker"),0n,undefined,[{auth:node.auth}]);await timeout(entered.promise);
@@ -1509,11 +1509,11 @@ try {
 
   {
     const b=await bucket(),app=await server(b),flow="reservation-context";
-    const node:HeapNode={auth:[0,0,bytes("context-node-private-token")],length:1,edges:[],context:{Kind:"0x-literal",owner:"alice",empty:""}};
-    const input=[node,{...node,context:{owner:"bob"}},{...node,context:{"bad name":"x"}}];
-    const r=await reserveHeap(app.url,flow,0n,input);await status(r.clone(),200);const result=parse<HeapResponse>(await r.text());
-    assert.deepEqual(Object.keys(result.results!),["0","1"]);assert.equal(result.errors![2].code,"invalid_context");
-    const actions=result.results![0].actions,other=result.results![1].actions;assert(actions.write&&actions.preview&&other.write);
+    const node:UserHeapNode={auth:[0,0,bytes("context-node-private-token")],length:1,edges:[],context:{Kind:"0x-literal",owner:"alice",empty:""}};
+    const input=[node,{...node,context:{owner:"bob"}},{...node,context:{"bad name":"x"}},{...node,context:{kind:"0x-literal",owner:"alice",empty:""}}];
+    const r=await reserveUserHeap(app.url,flow,0n,input);await status(r.clone(),200);const result=parse<UserHeapResponse>(await r.text());
+    assert.deepEqual(Object.keys(result.results!),["0","3"]);assert.equal(result.errors![1].code,"context_collision");assert.equal(result.errors![2].code,"invalid_context");
+    const actions=result.results![0].actions,other=result.results![3].actions;assert(actions.write&&actions.preview&&other.write);
     assert.equal(actions.write.headers["x-amz-meta-ctx-kind"],"0x-literal","JSON0 must not decode header text as a bigint");
     const signed=new URL(actions.write.url).searchParams.get("X-Amz-SignedHeaders")!;
     for(const name of ["kind","owner","empty"])assert(signed.split(";").includes(`x-amz-meta-ctx-${name}`));
@@ -1521,19 +1521,58 @@ try {
     for(const headers of [omitted,{...actions.write.headers,"x-amz-meta-ctx-owner":"mallory"}]){
       const bad:Response=await fetch(actions.write.url,{method:"PUT",headers,body:bytes("x")});assert(bad.status>=400);await bad.arrayBuffer();
     }
+    for(const context of [{owner:"bob"},{}] as Record<string,string>[]){
+      const mismatch=await reserveUserHeap(app.url,"other-flow",0n,[{...node,context}]);await status(mismatch.clone(),200);
+      const rejected=parse<UserHeapResponse>(await mismatch.text());assert.equal(rejected.results,null);assert.equal(rejected.errors![0].code,"context_collision");
+      assert.equal(rejected.timelines.datashed.milestone,1n,"context mismatches do not mutate state");
+    }
     const uploaded=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("x")});assert(uploaded.ok,await uploaded.text());
     const collision=await fetch(other.write.url,{method:"PUT",headers:other.write.headers,body:bytes("x")});assert.equal(collision.status,412);await collision.arrayBuffer();
     const preview=await fetch(actions.preview.url,{headers:actions.preview.headers});assert.equal(preview.status,200);await preview.arrayBuffer();
     assert.equal(preview.headers.get("x-amz-meta-ctx-kind"),"0x-literal");assert.equal(preview.headers.get("x-amz-meta-ctx-owner"),"alice");
     await stop(app.process);
     const restored=await server(b);
-    const again=await reserveHeap(restored.url,flow,0n,[{...node,context:{owner:"carol"}}]);await status(again.clone(),200);
-    const next=parse<HeapResponse>(await again.text()).results![0].actions.write!;
+    const again=await reserveUserHeap(restored.url,flow,0n,[{...node,context:{owner:"carol"}}]);await status(again.clone(),200);
+    const rejected=parse<UserHeapResponse>(await again.text());assert.equal(rejected.results,null);assert.equal(rejected.errors![0].code,"context_collision");
+    const retry=await reserveUserHeap(restored.url,flow,0n,[node]);await status(retry.clone(),200);
+    const next=parse<UserHeapResponse>(await retry.text()).results![0].actions.write!;
     const duplicate=await fetch(next.url,{method:"PUT",headers:next.headers,body:bytes("x")});assert.equal(duplicate.status,412);await duplicate.arrayBuffer();
     const head=await s3.send(new HeadObjectCommand({Bucket:b,Key:new URL(next.url).pathname.slice(b.length+2)}));assert.equal(head.Metadata!["ctx-owner"],"alice");
-    await stop(restored.process);
+    await status(await commit(restored.url,flow,bytes("marker"),0n),201);await stop(restored.process);
+    const copying=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
+    const cp=await eventually(()=>datashedBackup(b),cp=>!!cp&&cp.milestone>=3n);assert(cp);await stop(copying.process);
+    for(const object of (await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"timeline/"}))).Contents??[])await s3.send(new DeleteObjectCommand({Bucket:b,Key:object.Key!}));
+    const snapshotOnly=await server(b);
+    const mismatch=await reserveUserHeap(snapshotOnly.url,flow,1n,[{...node,context:{owner:"bob"}}]);await status(mismatch.clone(),200);
+    const fromSnapshot=parse<UserHeapResponse>(await mismatch.text());assert.equal(fromSnapshot.results,null);assert.equal(fromSnapshot.errors![0].code,"context_collision");
+    const matching=await reserveUserHeap(snapshotOnly.url,flow,1n,[node]);await status(matching.clone(),200);assert.equal(parse<UserHeapResponse>(await matching.text()).errors,null);
+    await stop(snapshotOnly.process);
   }
-  console.log("put of success: per-node context validation, JSON0 header strings, signed metadata tamper rejection, and first-writer metadata across reservation retries");
+  console.log("put of success: per-node context validation, JSON0 header strings, signed metadata tamper rejection, and immutable reservation context before upload, after replay, and after snapshot recovery");
+
+  {
+    const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let puts=0;
+    const proxy=relay((_,response)=>response,async request=>{
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/")){
+        if(++puts===2)entered.resolve();await release.promise;
+      }
+    });
+    const servers=await Promise.all([server(b,proxy.url),server(b,proxy.url)]);
+    const inputs:UserHeapNode[]=["alice","bob"].map(owner=>({auth:[0,0,bytes("racing-context-token")],length:1,edges:[],context:{owner}}));
+    const pending=Promise.all(servers.map((app,index)=>reserveUserHeap(app.url,`race-${index}`,0n,[inputs[index]!])));
+    await timeout(entered.promise);release.resolve();const replies=await pending;
+    assert.deepEqual(replies.map(r=>r.status).sort(),[200,503]);
+    const winner=replies.findIndex(r=>r.status===200),loser=1-winner;
+    await status(replies[winner]!.clone(),200);assert.equal(parse<UserHeapResponse>(await replies[winner]!.text()).errors,null);
+    await status(replies[loser]!,503);await Promise.all(servers.map(app=>stop(app.process)));
+    const restored=await server(b);
+    const retry=await reserveUserHeap(restored.url,"retried-loser",0n,[inputs[loser]!]);await status(retry.clone(),200);
+    const rejected=parse<UserHeapResponse>(await retry.text());assert.equal(rejected.results,null);assert.equal(rejected.errors![0].code,"context_collision");
+    assert.equal(rejected.timelines.datashed.milestone,1n);
+    const matching=await reserveUserHeap(restored.url,"same-context",0n,[inputs[winner]!]);await status(matching.clone(),200);
+    assert.equal(parse<UserHeapResponse>(await matching.text()).errors,null);await stop(restored.process);
+  }
+  console.log("put of success: competing UserHeap contexts have one durable agreement and reject the losing context after recovery");
 
   console.log(`Integration passed. Logs: ${artifacts}`);
 } finally {
