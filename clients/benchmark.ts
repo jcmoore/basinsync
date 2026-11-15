@@ -1,3 +1,4 @@
+import {s3Fixture,s3FixtureVersion} from "./s3-fixture";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, existsSync, readFileSync, writeFileSync, openSync, closeSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
@@ -42,9 +43,9 @@ function stats(values:number[]) {
   return {mean:values.reduce((a,b)=>a+b,0)/values.length,p50:quantile(values,.5),p95:quantile(values,.95),p99:quantile(values,.99),min:Math.min(...values),max:Math.max(...values)};
 }
 console.log(`Benchmark artifacts: ${artifacts}`);
-if (!Bun.env.FS_BIN && !existsSync(`${root}/.local/bin/fs`)) {
+if (!Bun.env.VERSITYGW_BIN && !existsSync(`${root}/.local/bin/versitygw`)) {
   mkdirSync(`${root}/.local/bin`,{recursive:true});
-  await run(["go","install","github.com/go-faster/fs/cmd/fs@v0.15.0"],{GOBIN:`${root}/.local/bin`},`${artifacts}/fs-build.log`);
+  await run(["go","install","github.com/versity/versitygw/cmd/versitygw@v1.11.0"],{CGO_ENABLED:"0",GOBIN:`${root}/.local/bin`},`${artifacts}/gateway-build.log`);
 }
 console.log("Building optimized benchmark harness (outside measured intervals)...");
 const build = await run(["cargo","test","--locked","--profile","bench","--lib","--no-run","--message-format=json"],{},`${artifacts}/build.log`);
@@ -56,9 +57,10 @@ const port=address.port; await new Promise<void>((yes,no)=>socket.close(err=>err
 const endpoint=`http://127.0.0.1:${port}`;
 const credentials={accessKeyId:"benchmark-local",secretAccessKey:"benchmark-local-secret"};
 const s3 = new S3Client({endpoint,region:"us-east-1",forcePathStyle:true,credentials,maxAttempts:1});
+const gatewayConfig=s3Fixture(root,endpoint,`${artifacts}/s3`,credentials);
 const log = openSync(`${artifacts}/s3.log`,"w");
-const service=spawn([Bun.env.FS_BIN ?? `${root}/.local/bin/fs`,"s3","--addr",`127.0.0.1:${port}`,"--root",`${artifacts}/s3`],{
-  cwd:root,env:{...Bun.env,FS_ROOT_ACCESS_KEY:credentials.accessKeyId,FS_ROOT_SECRET_KEY:credentials.secretAccessKey},stdout:log,stderr:log,
+const service=spawn(gatewayConfig.command,{
+  cwd:root,env:{...Bun.env,...gatewayConfig.env},stdout:log,stderr:log,
 }); closeSync(log);
 const runs:Run[]=[];
 try {
@@ -122,8 +124,8 @@ const summary=flowCounts.flatMap(flows=>(["builtin","capture","capture-s3"] as V
   };
 }));
 const report={schema:1,recorded_at:new Date().toISOString(),source_snapshot:system(["jj","log","-r","@","--no-graph","-T","commit_id"]),host:{cpu_brand:system(["sysctl","-n","machdep.cpu.brand_string"]),uname:system(["uname","-a"]),model:system(["sysctl","-n","hw.model"]),memory_bytes:Number(system(["sysctl","-n","hw.memsize"])),logical_cpus:Number(system(["sysctl","-n","hw.logicalcpu"]))},
-  toolchain:{rust:system(["rustc","--version"]),bun:Bun.version,fs:"github.com/go-faster/fs v0.15.0",profile:"bench (optimized)",turso:runs[0].turso_version},
-  commits,warmup,rounds,flow_counts:flowCounts,blob_bytes:blobBytes,concurrency:1,endpoint:"local go-faster/fs over HTTP loopback",summary};
+  toolchain:{rust:system(["rustc","--version"]),bun:Bun.version,s3:s3FixtureVersion,profile:"bench (optimized)",turso:runs[0].turso_version},
+  commits,warmup,rounds,flow_counts:flowCounts,blob_bytes:blobBytes,concurrency:1,endpoint:`local ${s3FixtureVersion} over HTTP loopback`,summary};
 writeFileSync(`${artifacts}/summary.json`,JSON.stringify(report,null,2)+"\n");
 const phaseNames=[...new Set(runs.flatMap(r=>r.samples.flatMap(s=>Object.keys(s.phases_us))))].sort();
 const header=["flows","round","variant","milestone","total_us","database_bytes","event_bytes",...phaseNames.map(p=>`${p}_us`)];

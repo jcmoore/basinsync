@@ -1,3 +1,4 @@
+import {s3Fixture,s3FixtureVersion} from "./s3-fixture";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, openSync, closeSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
@@ -33,8 +34,9 @@ const port=address.port;await new Promise<void>((yes,no)=>socket.close(e=>e?no(e
 const endpoint=`http://127.0.0.1:${port}`;
 const credentials={accessKeyId:"zset-local",secretAccessKey:"zset-local-secret"};
 const s3=new S3Client({endpoint,region:"us-east-1",forcePathStyle:true,credentials,maxAttempts:1});
+const gatewayConfig=s3Fixture(root,endpoint,`${artifacts}/s3`,credentials);
 const log=openSync(`${artifacts}/s3.log`,"w");
-const service=spawn([Bun.env.FS_BIN ?? `${root}/.local/bin/fs`,"s3","--addr",`127.0.0.1:${port}`,"--root",`${artifacts}/s3`],{cwd:root,env:{...Bun.env,FS_ROOT_ACCESS_KEY:credentials.accessKeyId,FS_ROOT_SECRET_KEY:credentials.secretAccessKey},stdout:log,stderr:log});closeSync(log);
+const service=spawn(gatewayConfig.command,{cwd:root,env:{...Bun.env,...gatewayConfig.env},stdout:log,stderr:log});closeSync(log);
 const runs:Run[]=[];
 try {
  const deadline=Date.now()+15000;
@@ -67,6 +69,6 @@ const summary=[...new Set(runs.map(r=>`${r.mode}/${r.flows}/${r.batch}/${r.varia
  const samples=group.flatMap(r=>r.samples);
  return {mode:first.mode,flows:first.flows,batch:first.batch,variant:first.variant,runs:group.length,samples:samples.length,initial_bytes:first.initial_bytes,final_bytes:stats(group.map(r=>r.final_bytes)),cache_init_us:stats(group.map(r=>r.cache_init_us)),cache_rows:first.cache_rows,cache_record_bytes:first.cache_record_bytes,rate:stats(group.map(r=>r.requests_per_second)),cpu_us:stats(samples.map(s=>s.cpu_us)),latency_us:stats(samples.map(s=>s.latency_us)),event_bytes:stats(samples.map(s=>s.event_bytes)),logical_bytes:stats(samples.map(s=>s.logical_bytes)),physical_bytes:stats(samples.map(s=>s.physical_bytes))};
 });
-const report={recorded_at:new Date().toISOString(),source_snapshot:system(["jj","log","-r","@","--no-graph","-T","commit_id"]),host:{cpu:system(["sysctl","-n","machdep.cpu.brand_string"]),memory_bytes:Number(system(["sysctl","-n","hw.memsize"]))},rust:system(["rustc","--version"]),turso:"0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88",profile:"bench (optimized)",s3:"go-faster/fs v0.15.0 over loopback",rounds,cpuEvents,s3Count,summary};
+const report={recorded_at:new Date().toISOString(),source_snapshot:system(["jj","log","-r","@","--no-graph","-T","commit_id"]),host:{cpu:system(["sysctl","-n","machdep.cpu.brand_string"]),memory_bytes:Number(system(["sysctl","-n","hw.memsize"]))},rust:system(["rustc","--version"]),turso:"0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88",profile:"bench (optimized)",s3:`${s3FixtureVersion} over loopback`,rounds,cpuEvents,s3Count,summary};
 writeFileSync(`${artifacts}/summary.json`,JSON.stringify(report,null,2)+"\n");
 console.log(`Results: ${artifacts}/summary.json`);

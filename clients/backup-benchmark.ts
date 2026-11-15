@@ -1,3 +1,4 @@
+import {s3Fixture,s3FixtureVersion} from "./s3-fixture";
 // Real HTTP/S3 comparison of background backup cost; all state caches live on disk.
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, openSync, closeSync, writeFileSync } from "node:fs";
@@ -33,7 +34,8 @@ const rounds=Number(process.env.BACKUP_ROUNDS??3),perFlow=Number(process.env.BAC
 const samples:{round:number;mode:string;requests:number;seconds:number;rps:number;p50:number;p95:number;backups:number}[]=[];
 const quantile=(values:number[],q:number)=>[...values].sort((a,b)=>a-b)[Math.min(values.length-1,Math.floor(values.length*q))];
 try{
-  const fs=launch([process.env.FS_BIN??`${root}/.local/bin/fs`,"s3","--addr",new URL(endpoint).host,"--root",`${artifacts}/s3`],{FS_ROOT_ACCESS_KEY:credentials.accessKeyId,FS_ROOT_SECRET_KEY:credentials.secretAccessKey});
+  const gatewayConfig=s3Fixture(root,endpoint,`${artifacts}/s3`,credentials);
+  const fs=launch(gatewayConfig.command,gatewayConfig.env);
   await until(async()=>{assert.equal(fs.exitCode,null);try{await s3.send(new CreateBucketCommand({Bucket:"readiness"}));return true;}catch{return false;}});
   for(let round=0;round<rounds;round++)for(let i=0;i<configurations.length;i++){
     const config=configurations[(round+i)%configurations.length];delayMs=config.delay;backupPuts=0;
@@ -66,5 +68,5 @@ try{
     console.log(JSON.stringify(samples.at(-1)));await stop(app);
   }
   const summary=configurations.map(c=>{const rows=samples.filter(s=>s.mode===c.name);return {mode:c.name,rps:quantile(rows.map(r=>r.rps),.5),p50:quantile(rows.map(r=>r.p50),.5),p95:quantile(rows.map(r=>r.p95),.5)};});
-  writeFileSync(`${artifacts}/samples.json`,JSON.stringify({rounds,perFlow,flows,seedFlows,configurations,samples,summary},null,2));console.log(JSON.stringify({summary,artifacts}));
+  writeFileSync(`${artifacts}/samples.json`,JSON.stringify({s3:s3FixtureVersion,rounds,perFlow,flows,seedFlows,configurations,samples,summary},null,2));console.log(JSON.stringify({summary,artifacts}));
 }finally{await Promise.all(children.map(stop));await relay.stop(true);s3.destroy();}

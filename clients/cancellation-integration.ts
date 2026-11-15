@@ -3,6 +3,7 @@ import {createServer} from "node:net";
 import {mkdtempSync,openSync,closeSync,readFileSync} from "node:fs";
 import {S3Client,CreateBucketCommand,ListMultipartUploadsCommand,HeadObjectCommand} from "@aws-sdk/client-s3";
 import {commit,reserveUserHeap,parseResponse,form,epilogueStatus,type UserHeapResponse} from "./client";
+import {s3Fixture} from "./s3-fixture";
 
 const root=new URL("../",import.meta.url).pathname;
 const artifacts=mkdtempSync(`${root}.local/cancellation-probe-`);
@@ -28,7 +29,8 @@ function proxy(before:(request:Request)=>Promise<Response|void>,after:((request:
   const server=Bun.serve({hostname:"127.0.0.1",port:0,async fetch(request){const early=await before(request);if(early)return early;const url=new URL(request.url);const response=await fetch(`${endpoint}${url.pathname}${url.search}`,{method:request.method,headers:request.headers,body:["GET","HEAD"].includes(request.method)?undefined:await request.arrayBuffer(),redirect:"manual"});await after(request,response);return response;}});proxies.push(server);return `http://127.0.0.1:${server.port}`;
 }
 try{
-  launch([`${root}.local/bin/fs`,"s3","--addr",new URL(endpoint).host,"--root",`${artifacts}/s3`],{FS_ROOT_ACCESS_KEY:credentials.accessKeyId,FS_ROOT_SECRET_KEY:credentials.secretAccessKey});
+  const fixture=s3Fixture(root,endpoint,`${artifacts}/s3`,credentials);
+  launch(fixture.command,fixture.env);
   await until(async()=>{await s3.send(new CreateBucketCommand({Bucket:"readiness"}));return true;},Boolean);
   // A source error must await multipart abort, preserve the source, and allow retry.
   for(const fault of ["source","upload"]){

@@ -1,3 +1,4 @@
+import {s3Fixture,s3FixtureVersion} from "./s3-fixture";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, openSync, closeSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
@@ -31,7 +32,8 @@ const binary=build.split("\n").filter(Boolean).map(line=>JSON.parse(line)).find(
 const socket=createServer();await new Promise<void>(yes=>socket.listen(0,"127.0.0.1",yes));const address=socket.address();assert(address && typeof address!=="string");const port=address.port;await new Promise<void>((yes,no)=>socket.close(e=>e?no(e):yes()));
 const endpoint=`http://127.0.0.1:${port}`,credentials={accessKeyId:"shadow-local",secretAccessKey:"shadow-local-secret"};
 const s3=new S3Client({endpoint,region:"us-east-1",forcePathStyle:true,credentials,maxAttempts:1});
-const log=openSync(`${artifacts}/s3.log`,"w");const service=spawn([Bun.env.FS_BIN ?? `${root}/.local/bin/fs`,"s3","--addr",`127.0.0.1:${port}`,"--root",`${artifacts}/s3`],{cwd:root,env:{...Bun.env,FS_ROOT_ACCESS_KEY:credentials.accessKeyId,FS_ROOT_SECRET_KEY:credentials.secretAccessKey},stdout:log,stderr:log});closeSync(log);
+const gatewayConfig=s3Fixture(root,endpoint,`${artifacts}/s3`,credentials);
+const log=openSync(`${artifacts}/s3.log`,"w");const service=spawn(gatewayConfig.command,{cwd:root,env:{...Bun.env,...gatewayConfig.env},stdout:log,stderr:log});closeSync(log);
 const runs:Run[]=[];
 try{
  const deadline=Date.now()+15000;for(;;){try{await s3.send(new CreateBucketCommand({Bucket:"disk-shadow-ready"}));break}catch(e){if(Date.now()>deadline)throw e;await Bun.sleep(30)}}
@@ -54,5 +56,5 @@ const summary=[...new Set(runs.map(r=>`${r.mode}/${r.flows}/${r.rowBytes}/${r.ba
  const phases=Object.fromEntries(["latency_us","admission_us","primary_us","shadow_us","shadow_queued_us","encode_us","put_us","event_bytes"].map(key=>[key,stats(samples.map(s=>s[key as keyof Sample]))]));
  return {mode:first.mode,flows:first.flows,rowBytes:first.rowBytes,batch:first.batch,capture:first.capture,window:first.window,put_delay_ms:first.put_delay_ms,runs:group.length,initial_bytes:first.initial_bytes,setup_us:stats(group.map(r=>r.setup_us)),setup_disk_bytes:stats(group.map(r=>r.setup_disk_bytes)),final_files:first.final_files,rate:stats(group.map(r=>r.requests_per_second)),admitted_peak:Math.max(...group.map(r=>r.admitted_peak)),...phases};
 });
-const report={recorded_at:new Date().toISOString(),source_snapshot:system(["jj","log","-r","@","--no-graph","-T","commit_id"]),host:{cpu:system(["sysctl","-n","machdep.cpu.brand_string"]),memory_bytes:Number(system(["sysctl","-n","hw.memsize"]))},rust:system(["rustc","--version"]),turso:"0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88",redb:{version:"4.4.0",revision:system(["jj","log","-r","@","--no-graph","-T","commit_id"],resolve(root,"../../../cberner/redb.git/lts-4"))},profile:"bench (optimized)",s3:"go-faster/fs v0.15.0 over loopback",rounds,cpuGroups,s3Requests,s3Groups,s3WarmupGroups,delays_ms:delays,cache_bytes_per_engine:2*1024*1024,turso_fullfsync:Bun.env.DISK_FULLFSYNC==="1",summary};
+const report={recorded_at:new Date().toISOString(),source_snapshot:system(["jj","log","-r","@","--no-graph","-T","commit_id"]),host:{cpu:system(["sysctl","-n","machdep.cpu.brand_string"]),memory_bytes:Number(system(["sysctl","-n","hw.memsize"]))},rust:system(["rustc","--version"]),turso:"0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88",redb:{version:"4.4.0",revision:system(["jj","log","-r","@","--no-graph","-T","commit_id"],resolve(root,"../../../cberner/redb.git/lts-4"))},profile:"bench (optimized)",s3:`${s3FixtureVersion} over loopback`,rounds,cpuGroups,s3Requests,s3Groups,s3WarmupGroups,delays_ms:delays,cache_bytes_per_engine:2*1024*1024,turso_fullfsync:Bun.env.DISK_FULLFSYNC==="1",summary};
 writeFileSync(`${artifacts}/summary.json`,JSON.stringify(report,null,2)+"\n");console.log(`Results: ${artifacts}/summary.json`);

@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 node docs/skills/basinsync-tutorial-dag/scripts/check-dag.mjs
 node --test docs/skills/basinsync-tutorial-dag/scripts/check-dag.test.mjs
 mkdir -p .local/bin
-GOBIN="$PWD/.local/bin" go install github.com/go-faster/fs/cmd/fs@v0.15.0
+CGO_ENABLED=0 GOBIN="$PWD/.local/bin" go install github.com/versity/versitygw/cmd/versitygw@v1.11.0
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked

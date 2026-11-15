@@ -14,6 +14,7 @@ import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, e
 import { ingestWal } from "./wal";
 import { all as envelopes, before as previousEnvelope } from "./envbuf";
 import { stress } from "./stress";
+import { s3Fixture } from "./s3-fixture";
 
 // Cursor cases below assert positions; full capability
 // responses and their byte ranges are exercised separately.
@@ -185,7 +186,7 @@ async function flowBlob(bucket:string,flow:string,viewpoint:bigint):Promise<Uint
 async function eventually<T>(read:()=>Promise<T>,done:(value:T)=>boolean):Promise<T>{
   const deadline=Date.now()+15000;let last:unknown;
   while(Date.now()<deadline){try{const value=await read();if(done(value))return value;last=value;}catch(error){last=error;}await Bun.sleep(10);}
-  throw new Error(`condition not reached: ${JSON.stringify(last)}; ${artifacts}`);
+  throw new Error(`condition not reached: ${JSON.stringify(last,(_key,value)=>typeof value==="bigint"?value.toString():value)}; ${artifacts}`);
 }
 async function datashedBackup(bucket:string){
   const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/",MaxKeys:1}));
@@ -200,11 +201,29 @@ async function inspectImage(blob:Uint8Array){
 }
 
 try {
-  const fs = launch([process.env.FS_BIN ?? `${root}/.local/bin/fs`,"s3","--addr",new URL(endpoint).host,"--root",`${artifacts}/s3`],{
-    FS_ROOT_ACCESS_KEY:credentials.accessKeyId,FS_ROOT_SECRET_KEY:credentials.secretAccessKey,
-  });
-  await ready(fs,async()=>{await s3.send(new CreateBucketCommand({Bucket:"readiness"}));});
+  const gatewayConfig=s3Fixture(root,endpoint,`${artifacts}/s3`,credentials);
+  const gateway = launch(gatewayConfig.command,gatewayConfig.env);
+  await ready(gateway,async()=>{await s3.send(new CreateBucketCommand({Bucket:"readiness"}));});
   const b = await bucket();
+  // A successful COPY alone does not prove its destination conditions are atomic.
+  {
+    const sources=await Promise.all(Array.from({length:8},async(_,n)=>{
+      const Key=`conformance/source-${n}`,Body=bytes(`source-${n}`);
+      const result=await s3.send(new PutObjectCommand({Bucket:b,Key,Body}));return {Key,Body,etag:result.ETag!};
+    }));
+    const Key="conformance/winner";
+    const results=await Promise.all(sources.map(async source=>{
+      try{await s3.send(new CopyObjectCommand({Bucket:b,Key,CopySource:`${b}/${source.Key}`,CopySourceIfMatch:source.etag,IfNoneMatch:"*"}));return 200;}
+      catch(error){return (error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode;}
+    }));
+    assert.equal(results.filter(s=>s===200).length,1,"conditional COPY must have one winner");
+    assert.equal(results.filter(s=>s===412).length,7);
+    const winner=sources[results.indexOf(200)];
+    assert.deepEqual(await (await s3.send(new GetObjectCommand({Bucket:b,Key}))).Body!.transformToByteArray(),winner.Body);
+    await assert.rejects(s3.send(new CopyObjectCommand({Bucket:b,Key:"conformance/bad-source",CopySource:`${b}/${winner.Key}`,CopySourceIfMatch:'"incorrect"',IfNoneMatch:"*"})),(error:any)=>error.$metadata?.httpStatusCode===412);
+    await assert.rejects(s3.send(new CopyObjectCommand({Bucket:b,Key,CopySource:`${b}/${winner.Key}`,IfMatch:'"incorrect"'})),(error:any)=>error.$metadata?.httpStatusCode===412);
+    console.log("put of success: COPY enforces source ETags and atomic destination preconditions");
+  }
   // Flow Epilogue contents must never become a source of Datashed state.
   await s3.send(new PutObjectCommand({Bucket:b,Key:"flows/unrelated/epilogue/0",Body:bytes("legacy, not a Timeline")}));
   const trace: {method:string;url:URL}[] = [];
