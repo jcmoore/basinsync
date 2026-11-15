@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { encode, toReference, type Reference } from "./flexbuffer";
-import { readable, wrap, concat } from "./envbuf";
+import { all, readable, wrap, concat, PADDING } from "./envbuf";
 import { encode as lex } from "./lexidecimal";
 
 export type Marker={viewpoint:string;sha384:string;blob:Uint8Array;edges:string[];context:Record<string,string>};
@@ -18,9 +18,14 @@ export function encodeEvent(markers:Record<string,Marker>,deltas?:Deltas<TursoDe
   for(const [flow,marker] of Object.entries(markers))owned[flow]={...marker,blob:new Uint8Array(marker.blob)};
   return encode([[Symbol.species,namespace,command,{markers:owned,...(deltas?{deltas}:{})}]]);
 }
-export function encodeTuples(commands:unknown[][]):Uint8Array {
-  const envelopes:Record<string,unknown>=Object.create(null),chunks:Uint8Array[]=[];let end=0;
-  for(const tuple of commands){const chunk=wrap(encode(tuple));end+=chunk.length;chunks.push(chunk);envelopes[lex(BigInt(end))]=tuple.slice(0,3);}
+export function encodeTuples(commands:(unknown[]|{padding:Uint8Array})[]):Uint8Array {
+  const envelopes:Record<string,unknown>=Object.create(null),chunks:Uint8Array[]=[];let end=0,lastPadding:string|null=null;
+  for(const tuple of commands){
+    const padding=!Array.isArray(tuple),chunk=padding?wrap(tuple.padding,PADDING):wrap(encode(tuple));end+=chunk.length;chunks.push(chunk);
+    const key=lex(BigInt(end));
+    if(padding){if(lastPadding!==null)delete envelopes[lastPadding];envelopes[key]=null;lastPadding=key;}
+    else{envelopes[key]=tuple.slice(0,3);lastPadding=null;}
+  }
   chunks.push(wrap(encode([Symbol.species,namespace,manifestPath,{envelopes}])));return concat(chunks);
 }
 export function encodeWalEvent(commands:Record<string,Marker>[],delta:WalDelta):Uint8Array {
@@ -34,11 +39,15 @@ function tuples(bytes:Uint8Array):{tuple:Reference;base:number}[] {
   let commands:{tuple:Reference;base:number}[];
   const enveloped=bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56;
   if(enveloped){
-    const frames=readable(bytes);assert(frames.length>=2);
+    const physical=all(bytes),frames=physical.filter(e=>e.format!==PADDING);assert(frames.length>=2);
     const refs=frames.map(e=>{assert.equal(e.format,5);return toReference(new Uint8Array(e.content).buffer);});
     const manifest=refs.pop()!;assert.equal(manifest.get(0).symbolValue(),Symbol.species);assert.equal(manifest.get(1).stringValue(),namespace);assert.equal(manifest.get(2).stringValue(),manifestPath);
     const index=manifest.get(3).get("envelopes").toObject() as Record<string,unknown>;
-    assert.equal(Object.keys(index).length,refs.length);
+    let expected=refs.length;
+    for(let n=0;n<physical.length&&physical[n].start<frames.at(-1)!.start;n++){
+      if(physical[n].format===PADDING&&physical[n+1].format!==PADDING){assert.equal(index[lex(BigInt(physical[n].end))],null);expected++;}
+    }
+    assert.equal(Object.keys(index).length,expected);
     for(let n=0;n<refs.length;n++)assert.deepEqual(index[lex(BigInt(frames[n].end))],[Symbol.species,namespace,refs[n].get(2).stringValue()]);
     commands=refs.map((tuple,n)=>({tuple,base:frames[n].contentStart}));
   }else{

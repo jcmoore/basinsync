@@ -5,20 +5,21 @@
 # Range manifest
 
 The final non-padding *EnvBuf*[^][envbuf] in a command sequence. Its
-*FlexBuffers*[^][flexbuffers] payload indexes every preceding command *envelope*[^][envbuf] by its
+*FlexBuffers*[^][flexbuffers] payload indexes preceding command *envelopes*[^][envbuf] and padding runs by their
 exclusive end offset in the containing object, encoded as positive
 *Lexidecimal*[^][lexidecimal]:
 
 ```ts
 [Symbol.species, "sync.memoremix.com", "sts/0/databasin/rangemanifest", {
-  envelopes: { [lex_exclusive: string]: [Symbol.species, host, path] }
+  envelopes: { [lex_exclusive: string]: [Symbol.species, host, path] | null }
 }]
 ```
 
-Each value is a command prefix without its query payload. The manifest omits
-itself and padding; locate it by reading backward from the object's final footer,
+Command values are prefixes without query payloads. A consecutive run of padding
+*envelopes*[^][envbuf] has one `null` entry at the last envelope's exclusive end.
+The manifest omits itself; locate it by reading backward from the object's final footer,
 skipping padding *envelopes*[^][envbuf].
 
 *FlexBuffers*[^][flexbuffers] sorts these keys lexicographically, so neighboring
-decoded offsets bound a complete *EnvBuf*[^][envbuf] plus any intervening padding: `[previous, current)`, with
+decoded offsets bound one command *EnvBuf*[^][envbuf] or padding run: `[previous, current)`, with
 zero preceding the first key. Its HTTP Range is `bytes=previous-(current - 1)`.

@@ -264,7 +264,7 @@ pub struct BlobRange {
 type CommandPrefix = (Vec<u8>, String, String);
 #[derive(Serialize)]
 struct RangeManifest {
-    envelopes: BTreeMap<String, CommandPrefix>,
+    envelopes: BTreeMap<String, Option<CommandPrefix>>,
 }
 
 /// Commitflow bytes are finalized before the database transaction: subsequent
@@ -272,7 +272,7 @@ struct RangeManifest {
 pub struct FlowChunks {
     bytes: Vec<u8>,
     ranges: Vec<BlobRange>,
-    envelopes: BTreeMap<String, CommandPrefix>,
+    envelopes: BTreeMap<String, Option<CommandPrefix>>,
 }
 impl FlowChunks {
     pub fn new(commands: &[FlowCommand]) -> Result<Self> {
@@ -282,15 +282,18 @@ impl FlowChunks {
             envelopes: BTreeMap::new(),
         };
         for command in commands {
-            ensure!(!command.markers.is_empty(), "empty marker batch");
-            let start = chunks.bytes.len();
-            chunks.append(COMMIT_FLOW, command)?;
-            let envelope = crate::envbuf::at(&chunks.bytes, start)?;
-            chunks
-                .ranges
-                .extend(ranges_in(envelope.content, envelope.content_start)?);
+            chunks.append_commit(command)?;
         }
         Ok(chunks)
+    }
+    pub fn append_commit(&mut self, command: &FlowCommand) -> Result<()> {
+        ensure!(!command.markers.is_empty(), "empty marker batch");
+        let start = self.bytes.len();
+        self.append(COMMIT_FLOW, command)?;
+        let envelope = crate::envbuf::at(&self.bytes, start)?;
+        self.ranges
+            .extend(ranges_in(envelope.content, envelope.content_start)?);
+        Ok(())
     }
     pub fn ranges(&self) -> &[BlobRange] {
         &self.ranges
@@ -301,8 +304,21 @@ impl FlowChunks {
         let end = crate::envbuf::append(&mut self.bytes, &content, crate::envbuf::FLEXBUFFERS)?;
         self.envelopes.insert(
             crate::lexidecimal::encode(&end.into()),
-            (species, NAMESPACE.into(), path.into()),
+            Some((species, NAMESPACE.into(), path.into())),
         );
+        Ok(())
+    }
+    pub fn append_padding(&mut self, content: &[u8]) -> Result<()> {
+        let end = crate::envbuf::append(&mut self.bytes, content, crate::envbuf::PADDING)?;
+        if self
+            .envelopes
+            .last_key_value()
+            .is_some_and(|(_, prefix)| prefix.is_none())
+        {
+            self.envelopes.pop_last();
+        }
+        self.envelopes
+            .insert(crate::lexidecimal::encode(&end.into()), None);
         Ok(())
     }
     pub fn finish(self, delta: crate::turso::wal::Delta) -> Result<Vec<u8>> {
@@ -312,6 +328,9 @@ impl FlowChunks {
     }
     pub(crate) fn finish_body(mut self, body: &impl Serialize) -> Result<Vec<u8>> {
         self.append(INGEST_TURSO, body)?;
+        self.finish_manifest()
+    }
+    fn finish_manifest(mut self) -> Result<Vec<u8>> {
         let species = Extension::WellKnownSymbol("species".into()).payload()?;
         let content = flexbuffers::to_vec((
             species,
@@ -387,7 +406,11 @@ pub fn encode_wal(commands: Vec<FlowCommand>, delta: crate::turso::wal::Delta) -
 }
 
 fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
-    let envelopes = crate::envbuf::readable(bytes)?;
+    let frames = crate::envbuf::all(bytes)?;
+    let envelopes: Vec<_> = frames
+        .iter()
+        .filter(|e| e.format != crate::envbuf::PADDING)
+        .collect();
     ensure!(
         envelopes.len() >= 2,
         "missing ingestion or range manifest envelope"
@@ -401,8 +424,24 @@ fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
     let body = manifest.index(3)?.get_map()?;
     ensure!(body.len() == 1, "invalid range manifest fields");
     let index = body.index("envelopes")?.get_map()?;
+    let mut expected_entries = envelopes.len() - 1;
+    for (n, frame) in frames
+        .iter()
+        .enumerate()
+        .take_while(|(_, frame)| frame.start < last.start)
+    {
+        if frame.format == crate::envbuf::PADDING && frames[n + 1].format != crate::envbuf::PADDING
+        {
+            let key = crate::lexidecimal::encode(&frame.end.into());
+            ensure!(
+                index.index(key.as_str())?.flexbuffer_type() == flexbuffers::FlexBufferType::Null,
+                "padding run must have a null range manifest entry"
+            );
+            expected_entries += 1;
+        }
+    }
     ensure!(
-        index.len() == envelopes.len() - 1,
+        index.len() == expected_entries,
         "range manifest coverage mismatch"
     );
     let mut commands = Vec::new();
@@ -500,24 +539,88 @@ mod envelope_tests {
     fn padding_is_skipped_without_affecting_marker_ranges_or_recovery() -> Result<()> {
         let commands = commands();
         let mut writer = crate::turso::wal::Writer::open(&crate::turso::State::genesis()?.image)?;
-        let delta = writer.prepare(&0u8.into(), None, &commands)?;
-        let bytes = encode_wal(commands, delta)?;
-        let manifest_start = crate::envbuf::before(&bytes, bytes.len())?.start;
-        let mut padded = bytes[..manifest_start].to_vec();
-        crate::envbuf::append(&mut padded, &[255, 0, 1], crate::envbuf::PADDING)?;
-        let padding_end = padded.len();
-        padded.extend_from_slice(&bytes[manifest_start..]);
+        let mut chunks = FlowChunks::new(&[])?;
+        chunks.append_padding(&[])?;
+        let first_padding_end = chunks.bytes.len();
+        chunks.append_padding(&[255, 0, 1])?;
+        for (n, command) in commands.iter().enumerate() {
+            chunks.append_commit(command)?;
+            if n == 0 {
+                chunks.append_padding(&[])?;
+                chunks.append_padding(&[1])?;
+            }
+        }
+        let locations = chunks.ranges().to_vec();
+        let delta = writer.prepare_with_ranges(&0u8.into(), None, &commands, &locations)?;
+        chunks.append_padding(&[2])?;
+        chunks.append_padding(&[3])?;
+        chunks.append(
+            INGEST_TURSO,
+            &IngestTurso {
+                turso: BTreeMap::from([(crate::turso::ID.into(), delta)]),
+            },
+        )?;
+        chunks.append_padding(&[4])?;
+        chunks.append_padding(&[])?;
+        assert_eq!(chunks.envelopes.values().filter(|v| v.is_none()).count(), 4);
+        assert!(
+            !chunks
+                .envelopes
+                .contains_key(&crate::lexidecimal::encode(&first_padding_end.into()))
+        );
+        // Missing, split, mistyped, and shifted run entries must fail closed.
+        let (padding_key, _) = chunks
+            .envelopes
+            .iter()
+            .find(|(_, value)| value.is_none())
+            .unwrap();
+        for fault in 0..4 {
+            let mut index = chunks.envelopes.clone();
+            match fault {
+                0 => {
+                    index.remove(padding_key);
+                }
+                1 => {
+                    index.insert(crate::lexidecimal::encode(&first_padding_end.into()), None);
+                }
+                2 => {
+                    index.insert(
+                        padding_key.clone(),
+                        Some((
+                            Extension::WellKnownSymbol("species".into()).payload()?,
+                            NAMESPACE.into(),
+                            COMMIT_FLOW.into(),
+                        )),
+                    );
+                }
+                _ => {
+                    index.remove(padding_key);
+                    index.insert(
+                        crate::lexidecimal::encode(&(first_padding_end + 1).into()),
+                        None,
+                    );
+                }
+            }
+            let bad = FlowChunks {
+                bytes: chunks.bytes.clone(),
+                ranges: vec![],
+                envelopes: index,
+            }
+            .finish_manifest()?;
+            assert!(decode_entry(&bad).is_err(), "fault {fault}");
+        }
+        let mut padded = chunks.finish_manifest()?;
         crate::envbuf::append(&mut padded, &[], crate::envbuf::PADDING)?;
-        assert_eq!(blob_ranges(&padded)?, blob_ranges(&bytes)?);
+        assert_eq!(blob_ranges(&padded)?, locations);
         let mut recovered = crate::timeline::Datashed::default();
         recovered.apply_entry(1u8.into(), &padded)?;
         assert_eq!(recovered.database.unwrap().image, writer.image()?);
         let mut bad = padded.clone();
-        bad[padding_end - 1] ^= 1;
+        bad[first_padding_end - 1] ^= 1;
         assert!(decode_entry(&bad).is_err());
         // Raw content is readable and cannot silently disappear from a command stream.
-        padded[manifest_start + 3] = 4;
-        padded[padding_end - 4] = 4;
+        padded[3] = 4;
+        padded[first_padding_end - 4] = 4;
         assert!(decode_entry(&padded).is_err());
         Ok(())
     }

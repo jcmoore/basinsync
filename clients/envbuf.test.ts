@@ -1,6 +1,8 @@
 import { expect,test } from "bun:test";
 import { all,at,before,concat,wrap,readable,PADDING,PLATFORM_EXTENSION } from "./envbuf";
-import { encodeWalEvent,rangesAt,eventTuples,deltasAt,type WalDelta } from "./events";
+import { encodeWalEvent,encodeTuples,manifestPath,rangesAt,eventTuples,deltasAt,type WalDelta } from "./events";
+import { encode,toObject } from "./flexbuffer";
+import { encode as lex } from "./lexidecimal";
 import { sha384 } from "./client";
 
 test("default EnvBuf total lengths and concatenated boundaries are multiples of sixteen",()=>{
@@ -63,14 +65,30 @@ test("ingestion-only events have one indexed command and no marker ranges",()=>{
   expect(rangesAt(bytes)).toEqual([]);
   expect(deltasAt(bytes).turso["default.turso"]).toEqual(delta);
 });
-test("event readers skip validated padding without changing marker ranges or manifest coverage",()=>{
+test("range manifests index each consecutive padding run once at its exclusive end",()=>{
   const delta:WalDelta={version:"test",logical:{base:null,header:new Uint8Array(),frames:[]},physical:{format:"sqlite-wal/1",base:"0",milestone:"1",parent:null,base_sha384:null,segments:[]}};
   const marker={viewpoint:"0",sha384:sha384(new Uint8Array([1])),blob:new Uint8Array([1]),edges:[],context:{}};
-  const bytes=encodeWalEvent([{flow:marker}],delta),manifest=all(bytes).at(-1)!;
-  const padding=wrap(new Uint8Array([255,0,1]),PADDING);
-  const padded=concat([bytes.subarray(0,manifest.start),padding,bytes.subarray(manifest.start),padding]);
-  expect(eventTuples(padded)).toEqual(eventTuples(bytes));expect(rangesAt(padded)).toEqual(rangesAt(bytes));expect(deltasAt(padded).turso["default.turso"]).toEqual(delta);
-  const raw=concat([bytes.subarray(0,manifest.start),wrap(new Uint8Array([255,0,1]),0),bytes.subarray(manifest.start)]);
-  expect(()=>rangesAt(raw)).toThrow();
-  const bad=new Uint8Array(padded);bad[manifest.start+padding.length-1]^=1;expect(()=>rangesAt(bad)).toThrow();
+  const plain=encodeWalEvent([{flow:marker}],delta),commands=eventTuples(plain),pad={padding:new Uint8Array([255,0,1])};
+  const bytes=encodeTuples([pad,pad,commands[0],pad,pad,commands[1],pad,pad]);
+  const frames=all(bytes),manifest=frames.at(-1)!,index=(toObject(new Uint8Array(manifest.content)) as any[])[3].envelopes;
+  const paddingEnds=[frames[1].end,frames[4].end,frames[7].end].map(n=>lex(BigInt(n)));
+  expect(Object.keys(index).filter(key=>index[key]===null)).toEqual(paddingEnds);
+  expect(Object.keys(index).length).toBe(5);expect(index[lex(BigInt(frames[0].end))]).toBeUndefined();
+  const padded=concat([bytes,wrap(new Uint8Array(),PADDING)]);
+  expect(eventTuples(padded)).toEqual(commands);expect(deltasAt(padded).turso["default.turso"]).toEqual(delta);
+  const ranges=rangesAt(padded);expect(ranges.length).toBe(1);expect(ranges[0].marker).toEqual(marker);
+  expect(padded.subarray(ranges[0].offset,ranges[0].offset+ranges[0].length)).toEqual(marker.blob);
+  const prefix=commands[0].slice(0,3);
+  for(const fault of [
+    (i:Record<string,unknown>)=>{delete i[paddingEnds[0]];},
+    (i:Record<string,unknown>)=>{i[lex(BigInt(frames[0].end))]=null;},
+    (i:Record<string,unknown>)=>{i[paddingEnds[0]]=prefix;},
+    (i:Record<string,unknown>)=>{delete i[paddingEnds[0]];i[lex(BigInt(frames[1].end+1))]=null;},
+    (i:Record<string,unknown>)=>{i[lex(BigInt(frames[2].end))]=null;},
+  ]){
+    const changed={...index};fault(changed);
+    const bad=concat([bytes.subarray(0,manifest.start),wrap(encode([Symbol.species,"sync.memoremix.com",manifestPath,{envelopes:changed}]))]);
+    expect(()=>rangesAt(bad)).toThrow();
+  }
+  const bad=new Uint8Array(padded);bad[frames[0].end-1]^=1;expect(()=>rangesAt(bad)).toThrow();
 });
