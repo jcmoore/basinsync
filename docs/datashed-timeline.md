@@ -13,6 +13,7 @@
 [flow]: <glossary/flow.md>
 [milestone]: <glossary/milestone.md>
 [node]: <glossary/node.md>
+[object-keys]: <object-keys.md>
 [physical-frame]: <glossary/physical-frame.md>
 [range-manifest]: <glossary/range-manifest.md>
 [sha384]: <glossary/sha384.md>
@@ -22,8 +23,8 @@
 
 # Datashed Timeline
 
-The *Datashed's*[^][datashed] shared *Timeline*[^][timeline] records state changes at
-`timeline/Diffuse16(milestone)`. *Milestones*[^][milestone] start at one and increase
+The *Datashed's*[^][datashed] shared *Timeline*[^][timeline] records state changes using the
+*Timeline object-key pattern*[^][object-keys]. *Milestones*[^][milestone] start at one and increase
 without gaps. Before writing, read the latest *Datashed*[^][datashed] *recovery anchor*[^][datashed-backup]
 and ingest every subsequent *DifferentialEvent*[^][differential-event]. Its
 recorded *Milestone*[^][milestone] seeds exponential search for the tail.

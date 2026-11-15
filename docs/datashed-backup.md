@@ -7,10 +7,10 @@
 [flow]: <glossary/flow.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [milestone]: <glossary/milestone.md>
+[object-keys]: <object-keys.md>
 [prologue-vacuuming]: <glossary/prologue-vacuuming.md>
 [promotion-sign]: <glossary/promotion-sign.md>
 [reservoir]: <glossary/reservoir.md>
-[revision]: <glossary/revision.md>
 [sha384]: <glossary/sha384.md>
 [timeline]: <glossary/timeline.md>
 [timeline-eviction]: <glossary/timeline-eviction.md>
@@ -19,14 +19,8 @@
 
 # Datashed backup and recovery
 
-Keep *Reservoir*[^][reservoir] keyspaces separate. Within one bucket:
-
-```text
-epilogue/Lexidecimal(~viewpoint)                       # Datashed
-flows/0x<lowercase UTF-8 hex of id>/<revision>/epilogue/Lexidecimal(~viewpoint)
-```
-
-*Flow*[^][flow] keys use the UUIDv4 *revision*[^][revision] recorded in `flows`.
+Keep *Reservoir*[^][reservoir] keyspaces separate using the shared
+*object-key patterns*[^][object-keys].
 
 Use *complemented Lexidecimal*[^][lexidecimal] positions for *markers*[^][commit-marker]
 in both *Epilogues*[^][epilogue]; their *PromotionSigns*[^][promotion-sign] use

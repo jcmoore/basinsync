@@ -542,10 +542,7 @@ fn wal_growth_deletion_rollback_and_corruption() -> Result<()> {
     let markers: BTreeMap<_, _> = (0..400)
         .map(|n| {
             (
-                format!(
-                    "flow-{n:04}/{}",
-                    "雪".repeat(if n == 1 { 10000 } else { 100 })
-                ),
+                format!("flow-{n:04}-{}", "x".repeat(140)),
                 Marker {
                     context: Default::default(),
                     edges: Default::default(),
@@ -567,7 +564,13 @@ fn wal_growth_deletion_rollback_and_corruption() -> Result<()> {
     );
     image = reconstructed.image;
     let mut before_cursor = delta.physical.milestone;
+    // Bypass the Flow API for a storage-only UTF-8/overflow-row probe.
+    let overflow = format!(
+        "INSERT INTO flows VALUES ('{}', '0', '00000000-0000-4000-8000-000000000001')",
+        "雪".repeat(10000)
+    );
     for sql in [
+        overflow.as_str(),
         "DELETE FROM flows WHERE rowid % 2 = 0",
         "DELETE FROM flows",
         "INSERT INTO flows VALUES ('reuse', '340282366920938463463374607431768211456', '00000000-0000-4000-8000-000000000001')",
@@ -625,7 +628,7 @@ proptest::proptest! {
         for (n,batch) in ops.into_iter().enumerate() {
             let mut markers=BTreeMap::new();
             for id in batch {
-                let flow=format!("{id}/雪");
+                let flow=format!("{id}-snow");
                 let vp=live.state.latest(&flow).unwrap().map_or_else(Viewpoint::zero,|v|v.next());
                 markers.insert(flow,Marker { context: Default::default(),
             edges: Default::default(), verified: Default::default(),viewpoint:vp.decimal(),sha384:hash(&[]),blob:vec![]});

@@ -167,9 +167,10 @@ async function flowRevisions(b:string):Promise<Record<string,string>> {
 }
 const revisions=new Map<string,string>();
 async function flowPrefix(b:string,flow:string){
+  flow=flow.toLowerCase();
   const cacheKey=JSON.stringify([b,flow]);let revision=revisions.get(cacheKey);
   if(!revision){revision=(await flowRevisions(b))[flow];assert(revision);revisions.set(cacheKey,revision);}
-  return `flows/0x${Buffer.from(flow).toString("hex")}/${revision}/epilogue/`;
+  return `flows/${flow.toLowerCase()}/${revision}/epilogue/`;
 }
 async function signKey(b:string,flow:string,vp:bigint){return `${await flowPrefix(b,flow)}${lex(vp)}`;}
 async function exists(b:string,key:string){try{await s3.send(new HeadObjectCommand({Bucket:b,Key:key,IfMatch:"*"}));return true;}catch(e){if([404,412].includes((e as {$metadata: {httpStatusCode:number}}).$metadata.httpStatusCode))return false;throw e;}}
@@ -230,9 +231,35 @@ try {
   const traced = relay((r,response)=>{ trace.push({method:r.method,url:new URL(r.url)}); return response; });
   let writer = await server(b,traced.url);
   const observer = await server(b,traced.url);
-  const flowA = "0x雪/first", flowB = "__proto__";
+  const flowA = "0x-first", flowB = "__proto__";
   const a = bytes("359");
   assert(sha384(a).startsWith("00"));
+  {
+    const name=await bucket(),app=await server(name,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
+    const node:UserHeapNode={auth:[0,0,bytes("flow-id-case-test")],length:1,edges:[]};
+    const mixed="MiXeD.Id_0-",canonical=mixed.toLowerCase();
+    await status(await reserveUserHeap(app.url,mixed,0n,[node]),200);
+    await status(await commit(app.url,canonical,a,0n),201);
+    assert.equal((await fullStatus(app.url,mixed)).latest?.viewpoint,0n);
+    await mismatch(await commit(app.url,mixed,a,0n),1n);
+    await status(await reserveUserHeap(app.url,mixed,0n,[node]),409);
+    const longest="A".repeat(160);
+    await status(await commit(app.url,longest,a,0n),201);
+    assert.equal((await fullStatus(app.url,longest.toLowerCase())).latest?.viewpoint,0n);
+    for(const invalid of ["", ".", "..", "/", "a/b", "a\\b", "a b", "a\tb", "a\0b", "雪", "%2f", "a?b", "a#b", "a:b", "a".repeat(161)]){
+      await status(await commit(app.url,invalid,a,0n),400);
+      await status(await reserveUserHeap(app.url,invalid,0n,[node]),400);
+      await status(await fetch(`${app.url}/api/v0/epilogue/status?${new URLSearchParams({flow:invalid})}`),400);
+    }
+    await eventually(()=>datashedBackup(name),v=>!!v&&v.milestone>=3n);
+    const objects=(await s3.send(new ListObjectsV2Command({Bucket:name,Prefix:"flows/"}))).Contents??[];
+    assert(objects.some(o=>o.Key!.startsWith(`flows/${canonical}/`)));
+    assert(objects.some(o=>o.Key!.startsWith(`flows/${longest.toLowerCase()}/`)));
+    assert.deepEqual(Object.keys(await flowRevisions(name)).sort(),[canonical,longest.toLowerCase()].sort());
+    await stop(app.process);
+    const restored=await server(name);assert.equal((await fullStatus(restored.url,mixed)).latest?.viewpoint,0n);await stop(restored.process);
+    console.log("put of success: portable Flow IDs normalize across APIs and recovery, reject unsafe characters, and fit direct object keys at 160 characters");
+  }
   assert.deepEqual(await epilogueStatus(writer.url,flowA),{latest:null});
   await mismatch(await commit(writer.url,flowA,a,1n),0n);
   for (const kind of ["missing-details","duplicate-details","missing-flow","nul-flow","long-flow","missing-blob","duplicate-blob","unknown-part","legacy-part","unknown-details","decimal","number","negative","missing-viewpoint","missing-digest","missing-edges","hex-digest","array-digest","wrong-digest","short-digest","long-digest","malformed-json","duplicate-property","unescaped-flow","invalid-base64"]) {
@@ -633,7 +660,7 @@ try {
     });
     const observer=await server(b);
     const app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0"});
-    const flow="0/雪/../";
+    const flow="0-archive";
     await status(await commit(app.url,flow,a,0n),201);await timeout(entered.promise);
     assert.equal((await datashedBackup(b)),null,"no backup before its PUT completes");
     assert.deepEqual(await flowBlob(b,flow,0n),a);
@@ -1011,7 +1038,7 @@ try {
   {
     const b=await bucket(),stateDir=`${artifacts}/userheap-state`;
     const app=await server(b,endpoint,{BASINSYNC_DATA_DIR:stateDir});
-    const flow="0x/雪/staging",secret=bytes("client-only-userheap-secret-44b5317c76db0c09"),emptySecret=bytes("client-only-empty-node-secret-d9a812f"),oversize=bytes("oversized-client-token-"+"x".repeat(64));
+    const flow="0x-staging",secret=bytes("client-only-userheap-secret-44b5317c76db0c09"),emptySecret=bytes("client-only-empty-node-secret-d9a812f"),oversize=bytes("oversized-client-token-"+"x".repeat(64));
     const id=(token:Uint8Array,height=0)=>`n-${lex(~BigInt(height))}/v.${lex(0n)}/t.${lex(BigInt(token.length))}/d_${sha384(token)}`;
     const owner=(f:string,v:bigint)=>`_a_${f}/v.${lex(0n)}/e.${lex(v)}`;
     const node=(token=secret,length=7):UserHeapNode=>({auth:[0,0,token],length,edges:[]});
@@ -1423,7 +1450,7 @@ try {
   console.log("put of success: authenticated marker edges, postorder marking, retained DAGs, bounded promotion, conditional COPY and streaming fallback, foreground progress, and retry/restart/snapshot recovery");
 
   {
-    const b=await bucket(),flow="sign/0x",attempted=Promise.withResolvers<void>();let target="";
+    const b=await bucket(),flow="sign-0x",attempted=Promise.withResolvers<void>();let target="";
     let stored=false,confirm=false,puts=0;let mismatch=Promise.withResolvers<void>();
     async function counts(){
       const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"timeline/"}));let image:Uint8Array|undefined;
@@ -1486,7 +1513,7 @@ try {
   console.log("put of success: uncomplemented PromotionSigns, empty graphs, retained tasks until S3 confirmation, ambiguous sign PUTs, restart repair, and mixed-key Epilogue recovery");
 
   {
-    const b=await bucket(),flow="context/0-flow",body=bytes("context marker");
+    const b=await bucket(),flow="context-0-flow",body=bytes("context marker");
     let app=await server(b);
     const context={Kind:"0x-literal",owner:"alice",empty:"", "0-key":"0"};
     for(const invalid of [{"bad name":"x"},{a:"x\r\ny"},{A:"one",a:"two"},{big:"x".repeat(2048)}] as Record<string,string>[]){
@@ -1522,7 +1549,7 @@ try {
     assert.deepEqual(await latestBlob((await fullStatus(app.url,flow)).latest!),bytes("second"));
     await status(await commit(app.url,flow,bytes("third"),2n,undefined,[],{owner:"carol"}),201);
     await eventually(()=>datashedBackup(b),cp=>cp?.milestone===3n);
-    const thirdKey=`flows/0x${Buffer.from(flow).toString("hex")}/${initial}/${epilogueKey(2n)}`;
+    const thirdKey=`flows/${flow}/${initial}/${epilogueKey(2n)}`;
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:thirdKey}))).Metadata!["ctx-owner"],"carol");
     await stop(app.process);
   }

@@ -1,5 +1,6 @@
 [SKILL]: <skills/basinsync-tutorial-dag/SKILL.md>
 [lexidecimal]: <glossary/lexidecimal.md>
+[object-keys]: <object-keys.md>
 
 # Prompt-to-documentation
 
@@ -60,6 +61,9 @@ hosted URL to the same implementation. Use small code blocks when needed to conv
 prompted requirements or established clarifications. Self-contained means a
 seasoned developer can fill in the gaps without project source, not that every
 implementation step or test must be documented.
+
+Keep object-key layouts in the *object-key reference*[^][object-keys]; link there
+rather than duplicating patterns across pages.
 
 Tutorial and command requirements belong in these docs. Implementations should
 follow them.

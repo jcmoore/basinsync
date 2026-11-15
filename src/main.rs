@@ -179,7 +179,7 @@ impl Commit {
         basinsync::details::context_headers(&context).map_err(Failure::bad)?;
         let edges = user_heap::authenticate_edges(edges, limits, None)
             .map_err(|e| Failure::new(StatusCode::UNPROCESSABLE_ENTITY, e.code, e.message))?;
-        event::valid_flow(&flow).map_err(Failure::bad)?;
+        let flow = event::normalize_flow(&flow).map_err(Failure::bad)?;
         basinsync::epilogue::check_flow_key(&flow, &viewpoint).map_err(Failure::bad)?;
         let blob = blob.ok_or_else(|| Failure::bad("missing blob"))?;
         let digest = Sha384::digest(&blob);
@@ -376,15 +376,11 @@ async fn epilogue_status(
     let result = async {
         let Query(query) =
             query.map_err(|error| Failure::new(error.status(), "invalid_query", error))?;
-        event::valid_flow(&query.flow).map_err(Failure::bad)?;
-        basinsync::epilogue::check_flow_key(&query.flow, &Viewpoint::zero())
-            .map_err(Failure::bad)?;
+        let flow = event::normalize_flow(&query.flow).map_err(Failure::bad)?;
+        basinsync::epilogue::check_flow_key(&flow, &Viewpoint::zero()).map_err(Failure::bad)?;
         let (reply, result) = oneshot::channel();
         app.queue
-            .send(Message::Status {
-                flow: query.flow,
-                reply,
-            })
+            .send(Message::Status { flow, reply })
             .await
             .map_err(|_| stopped())?;
         result.await.map_err(|_| stopped())

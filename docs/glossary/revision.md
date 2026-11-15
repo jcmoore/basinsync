@@ -1,5 +1,6 @@
 [flow]: <flow.md>
 [node]: <node.md>
+[object-keys]: <../object-keys.md>
 [timeline]: <timeline.md>
 
 # Revision
@@ -10,4 +11,4 @@ new revision, keeping stale deletion requests and acknowledgments scoped to the
 previous allocation without revealing its *Flow*[^][flow] or *Timeline*[^][timeline] position.
 
 A *Flow*[^][flow] also has a revision, assigned in its first commit transaction
-and preserved on recovery. Its S3 namespace is `flows/0x<UTF-8 hex id>/<revision>/`.
+and preserved on recovery; see the *object-key patterns*[^][object-keys].

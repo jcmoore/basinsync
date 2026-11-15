@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn collision_flags_retainer_uniqueness_and_edge_ordering() -> Result<()> {
         let state = State::genesis()?;
-        let request = request("f/雪", b"node-access-token", 4);
+        let request = request("f-snow", b"node-access-token", 4);
         let (command, outcome) = state.plan_user_heap(&request)?;
         assert!(outcome.results[&0].write && outcome.results[&0].preview);
         state.transact_user_heap("1", &command.unwrap())?;

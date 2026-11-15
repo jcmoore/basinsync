@@ -3,13 +3,12 @@
 [conditional-read]: <glossary/conditional-read.md>
 [context]: <glossary/context.md>
 [datashed]: <glossary/datashed.md>
-[datashed-backup]: <datashed-backup.md>
 [differential-event]: <glossary/differential-event.md>
-[epilogue]: <glossary/epilogue.md>
 [json0]: <glossary/json0.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [milestone]: <glossary/milestone.md>
 [node]: <glossary/node.md>
+[object-keys]: <object-keys.md>
 [range-get]: <glossary/range-get.md>
 [reservoir]: <glossary/reservoir.md>
 [sha384]: <glossary/sha384.md>
@@ -18,8 +17,8 @@
 
 # Epilogue protocol
 
-*CommitMarkers*[^][commit-marker] use `epilogue/Lexidecimal(~viewpoint)` keys
-within each *Reservoir*[^][reservoir] namespace; see the *key layout*[^][datashed-backup].
+*CommitMarkers*[^][commit-marker] use complemented positions within each
+*Reservoir*[^][reservoir] namespace; see the *object-key patterns*[^][object-keys].
 *Viewpoints*[^][viewpoint] increase from zero; their
 *encoded keys*[^][lexidecimal] decrease lexicographically.
 

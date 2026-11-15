@@ -8,7 +8,7 @@ prerequisites:
 [dusting]: <../glossary/dusting.md>
 [flow]: <../glossary/flow.md>
 [node]: <../glossary/node.md>
-[old-generation]: <../glossary/old-generation.md>
+[object-keys]: <../object-keys.md>
 [retainer]: <../glossary/retainer.md>
 [revision]: <../glossary/revision.md>
 [sweeping-task]: <../glossary/sweeping-task.md>
@@ -26,9 +26,8 @@ leaving object deletion outside the request path. No *CommitMarker*[^][commit-ma
 edges exist yet, so every staged *node*[^][node] eventually becomes unretained.
 
 Add a random UUIDv4 *revision*[^][revision] to each new `graph_nodes` row;
-existing allocations retain theirs. Use `userheap/young/${node_id}/${revision}`
-and `userheap/old/${node_id}/${revision}` for *young*[^][young-generation] and
-*old*[^][old-generation] generation keys. Reusing a reclaimed id creates a fresh
+existing allocations retain theirs. Include it in both generations'
+*object-key patterns*[^][object-keys]. Reusing a reclaimed id creates a fresh
 revision: delayed DELETEs and acknowledgments must target the old *revision*[^][revision] only.
 These keys disclose neither *Flow*[^][flow], *Viewpoint*[^][viewpoint], nor *Timeline*[^][timeline] position.
 

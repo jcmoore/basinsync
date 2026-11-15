@@ -8,6 +8,7 @@
 [node]: <glossary/node.md>
 [node-height]: <glossary/node-height.md>
 [node-promotion]: <glossary/node-promotion.md>
+[object-keys]: <object-keys.md>
 [old-generation]: <glossary/old-generation.md>
 [revision]: <glossary/revision.md>
 [userheap-reservation]: <glossary/userheap-reservation.md>
@@ -59,7 +60,7 @@ case-insensitively and values exactly. Mismatches return an indexed
 `context_collision` error without actions, even before upload. `preview` and `read` are
 *conditional GETs*[^][conditional-read] for that *node*[^][node] in the
 *young*[^][young-generation] and *old*[^][old-generation] generations respectively.
-Both object keys end in `${node_id}/${revision}`, sharing the stored UUIDv4
+Both *object-key patterns*[^][object-keys] share the stored UUIDv4
 *revision*[^][revision]. Send each action's headers. A nonempty stored *etag*[^][etag] makes `write` null; a valid
 *promotion*[^][node-promotion] timestamp makes `preview` null.
 

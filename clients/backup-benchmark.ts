@@ -7,7 +7,6 @@ import { resolve } from "node:path";
 import { spawn } from "bun";
 import { S3Client, CreateBucketCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { commit, epilogueStatus, sha384 } from "./client";
-import { key as epilogueKey } from "./lexidecimal";
 
 const root=resolve(import.meta.dir,"..");mkdirSync(`${root}/.local`,{recursive:true});
 const artifacts=mkdtempSync(`${root}/.local/backup-benchmark-`);
@@ -45,7 +44,7 @@ try{
     await until(async()=>{assert.equal(app.exitCode,null);try{return (await fetch(`${url}/ready`)).status===404;}catch{return false;}});
     // A 16 KiB-page database with 1,024 initial Flow rows, outside measurement.
     const seed=await Promise.all(Array.from({length:32},async(_,lane)=>{
-      for(let n=lane;n<seedFlows;n+=32){const r=await commit(url,`seed-${n.toString().padStart(5,"0")}-${"x".repeat(400)}`,new Uint8Array(),0n);assert.equal(r.status,201);await r.text();}
+      for(let n=lane;n<seedFlows;n+=32){const r=await commit(url,`seed-${n.toString().padStart(5,"0")}-${"x".repeat(140)}`,new Uint8Array(),0n);assert.equal(r.status,201);await r.text();}
     }));void seed;
     const seeded=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"timeline/"}));assert(!seeded.IsTruncated);const seedTail=BigInt(seeded.KeyCount!);
     await until(async()=>{if(!config.interval)return true;const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));await r.Body!.transformToByteArray();return BigInt(r.Metadata!.milestone)===seedTail;});
@@ -61,7 +60,8 @@ try{
       await until(async()=>{const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));const bytes=await r.Body!.transformToByteArray();assert.equal(r.Metadata!.sha384,sha384(bytes));return BigInt(r.Metadata!.milestone)===tail;});
       for(let flow=0;flow<flows;flow++){
         const state=await epilogueStatus(url,`live-${flow}`);assert.equal(state.latest?.viewpoint,BigInt(perFlow-1));
-        const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:`flows/0x${Buffer.from(`live-${flow}`).toString("hex")}/${epilogueKey(BigInt(perFlow-1))}`}));assert.deepEqual(await r.Body!.transformToByteArray(),new Uint8Array(1024).fill(flow));
+        assert(state.latest?.url);assert(!state.latest.headers?.Range,"backup copied the Flow marker");
+        const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:decodeURIComponent(new URL(state.latest!.url!).pathname.slice(bucket.length+2))}));assert.deepEqual(await r.Body!.transformToByteArray(),new Uint8Array(1024).fill(flow));
       }
     }
     samples.push({round,mode:config.name,requests:flows*perFlow,seconds,rps:flows*perFlow/seconds,p50:quantile(latencies,.5),p95:quantile(latencies,.95),backups:putsDuringRequests});

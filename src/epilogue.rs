@@ -9,11 +9,10 @@ use std::collections::HashMap;
 pub const DATASHED_PREFIX: &str = "epilogue/";
 
 pub fn flow_prefix(flow: &str, revision: &uuid::Uuid) -> String {
-    // A reversible, path-safe encoding; no restrictions on leading zeroes or '/'.
-    let id: String = flow.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
-    format!("flows/0x{id}/{revision}/epilogue/")
+    format!("flows/{flow}/{revision}/epilogue/")
 }
 pub fn flow_key(flow: &str, revision: &uuid::Uuid, viewpoint: &Viewpoint) -> Result<String> {
+    event::valid_flow(flow)?;
     let key = format!(
         "{}{}",
         flow_prefix(flow, revision),
@@ -42,6 +41,7 @@ pub fn flow_promotion_key(
     revision: &uuid::Uuid,
     viewpoint: &Viewpoint,
 ) -> Result<String> {
+    event::valid_flow(flow)?;
     promotion_key(&flow_prefix(flow, revision), viewpoint)
 }
 /// A sign is an immutable, empty object; confirmation also resolves ambiguous PUT replies.
@@ -309,7 +309,7 @@ mod tests {
     fn reservoir_keys_are_disjoint_and_flow_ids_are_unambiguous() -> Result<()> {
         let revision = uuid::Uuid::new_v4();
         let vp = Viewpoint::zero();
-        let ids = ["", "0", "0x1", "/", "../", "雪", "__proto__"];
+        let ids = ["a", "0", "0x1", "dot.id", "a-b", "a_b", "__proto__"];
         let mut keys = std::collections::BTreeSet::new();
         for flow in ids {
             let key = flow_key(flow, &revision, &vp)?;
@@ -327,8 +327,8 @@ mod tests {
         let mut signs = Vec::new();
         for value in values {
             let vp = Viewpoint::parse(value)?;
-            let marker = flow_key("f/雪", &revision, &vp)?;
-            let sign = flow_promotion_key("f/雪", &revision, &vp)?;
+            let marker = flow_key("f-snow", &revision, &vp)?;
+            let sign = flow_promotion_key("f-snow", &revision, &vp)?;
             assert!(sign.ends_with(&vp.lexidecimal()));
             assert!(marker < sign);
             assert!(Viewpoint::from_key(&promotion_key(DATASHED_PREFIX, &vp)?).is_err());

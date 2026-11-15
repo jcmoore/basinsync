@@ -27,6 +27,7 @@ prerequisites:
 [logical-frame]: <../glossary/logical-frame.md>
 [milestone]: <../glossary/milestone.md>
 [mvcc]: <../glossary/mvcc.md>
+[object-keys]: <../object-keys.md>
 [physical-frame]: <../glossary/physical-frame.md>
 [range-manifest]: <../glossary/range-manifest.md>
 [revision]: <../glossary/revision.md>
@@ -73,7 +74,7 @@ INSERT INTO datashed VALUES (1, '0');
 
 Assign each new *Flow*[^][flow] a UUIDv4 *revision*[^][revision] in its first commit
 transaction; retain it on later commits and recover it from captured frames.
-Use `flows/0x<UTF-8 hex id>/<revision>/` as its S3 namespace.
+Include it in the *Flow object-key patterns*[^][object-keys].
 
 Materialize *Datashed Timeline race's*[^][0z001-datashed-timeline-race] blob locations in `marker_ranges`
 in the commit transaction. Its *upstream*[^][upstream] *Milestones*[^][milestone]

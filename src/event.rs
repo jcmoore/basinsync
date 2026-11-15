@@ -62,10 +62,21 @@ pub type Batch = Vec<(Vec<u8>, String, String, CommitFlow)>;
 
 pub fn valid_flow(flow: &str) -> Result<()> {
     ensure!(
-        !flow.contains('\0'),
-        "Flow id cannot contain NUL (FlexBuffers map key)"
+        (1..=160).contains(&flow.len())
+            && flow != "."
+            && flow != ".."
+            && flow.bytes().all(|c| c.is_ascii_lowercase()
+                || c.is_ascii_digit()
+                || matches!(c, b'.' | b'_' | b'-')),
+        "Flow id must be 1–160 lowercase ASCII letters, digits, '.', '_' or '-', excluding '.' and '..'"
     );
     Ok(())
+}
+
+pub fn normalize_flow(flow: &str) -> Result<String> {
+    let flow = flow.to_ascii_lowercase();
+    valid_flow(&flow)?;
+    Ok(flow)
 }
 
 pub fn encode(command: CommitFlow) -> Result<Vec<u8>> {
@@ -114,6 +125,19 @@ pub fn decode(bytes: &[u8]) -> Result<CommitFlow> {
 mod tests {
     use super::*;
     #[test]
+    fn flow_ids_are_portable_and_canonical() {
+        assert_eq!(normalize_flow("MiXeD.Id_0-").unwrap(), "mixed.id_0-");
+        assert!(normalize_flow(&"A".repeat(160)).is_ok());
+        assert!(valid_flow("UPPER").is_err());
+        for id in [
+            "", ".", "..", "/", "a/b", "a\\b", "a b", "a\tb", "a\0b", "雪", "%2f", "a?b", "a#b",
+            "a:b",
+        ] {
+            assert!(normalize_flow(id).is_err(), "{id:?}");
+        }
+        assert!(normalize_flow(&"a".repeat(161)).is_err());
+    }
+    #[test]
     fn unary_batch_and_binary_blob() {
         let blob = vec![0, 255, 0, 128];
         let marker = Marker {
@@ -126,11 +150,11 @@ mod tests {
         };
         let state = crate::timeline::Datashed::default();
         let (_, command) = state
-            .prepare(BTreeMap::from([("雪/flow".into(), marker)]))
+            .prepare(BTreeMap::from([("snow-flow".into(), marker)]))
             .unwrap();
         let encoded = encode(command).unwrap();
         let payload = decode(&encoded).unwrap();
-        assert_eq!(payload.markers["雪/flow"].blob, blob);
+        assert_eq!(payload.markers["snow-flow"].blob, blob);
         assert!(decode(&flexbuffers::to_vec(Vec::<u8>::new()).unwrap()).is_err());
         let bad = vec![(
             b"#species".to_vec(),
@@ -632,7 +656,7 @@ mod envelope_tests {
                 let blob = (0..length).map(|n| (n % 251) as u8).collect::<Vec<_>>();
                 FlowCommand {
                     markers: BTreeMap::from([(
-                        format!("{i}-雪"),
+                        format!("{i}-snow"),
                         Marker {
                             context: Default::default(),
                             edges: Default::default(),

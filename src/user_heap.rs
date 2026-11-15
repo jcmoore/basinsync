@@ -139,9 +139,9 @@ pub struct Request {
 impl Request {
     pub fn parse(bytes: &[u8], limits: &Limits) -> Result<Self> {
         // Never propagate deserializer errors that could quote authentication material.
-        let wire: WireRequest = serde_json::from_slice(bytes)
+        let mut wire: WireRequest = serde_json::from_slice(bytes)
             .map_err(|_| anyhow::anyhow!("invalid user_heap request"))?;
-        event::valid_flow(&wire.flow)?;
+        wire.flow = event::normalize_flow(&wire.flow)?;
         crate::epilogue::check_flow_key(&wire.flow, &wire.viewpoint)?;
         let nodes = wire
             .nodes
@@ -484,8 +484,8 @@ mod tests {
         let child = node_id(0, 0, b"child");
         let parent = node_id(1, 0, b"parent");
         assert!(parent < child);
-        assert!(retainer("雪/flow", &Viewpoint::zero()) < child);
-        assert!(marker_retainer("雪/flow", &Viewpoint::zero()) < child);
+        assert!(retainer("snow-flow", &Viewpoint::zero()) < child);
+        assert!(marker_retainer("snow-flow", &Viewpoint::zero()) < child);
         Node {
             context: Default::default(),
             id: child,

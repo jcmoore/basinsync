@@ -1,14 +1,21 @@
 [conditional-write]: <glossary/conditional-write.md>
-[go-faster-fs]: <https://github.com/go-faster/fs>
 [sha384]: <glossary/sha384.md>
-[versitygw]: <https://github.com/versity/versitygw>
+[versitygw]: <https://github.com/versity/versitygw/releases/tag/v1.11.0>
 [viewpoint]: <glossary/viewpoint.md>
 
 # Development
 
-Use *go-faster/fs*[^][go-faster-fs] or *Versity Gateway*[^][versitygw] as the
-S3-compatible endpoint. Write TypeScript clients that stress one or more
-concurrent Rust server processes.
+Use *VersityGW v1.11.0*[^][versitygw] as the S3-compatible test endpoint, with its
+POSIX backend and a separate metadata sidecar directory. Install the pinned binary:
+
+```sh
+mkdir -p .local/bin
+CGO_ENABLED=0 GOBIN="$PWD/.local/bin" go install github.com/versity/versitygw/cmd/versitygw@v1.11.0
+```
+
+Test fixtures launch isolated instances; `VERSITYGW_BIN` overrides the executable.
+The integration suite verifies atomic destination preconditions and source ETags
+for COPY before exercising concurrent Rust server processes with TypeScript clients.
 
 Verify gapless sequences, winning blob contents, and restart recovery. Wrong
 *viewpoints*[^][viewpoint] and *digests*[^][sha384] must fail without advancing

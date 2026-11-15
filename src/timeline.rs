@@ -706,7 +706,7 @@ mod tests {
             let commands = (0..24)
                 .map(|i| event::FlowCommand {
                     markers: BTreeMap::from([(
-                        format!("flow-{i}-{}", "雪".repeat(70)),
+                        format!("flow-{i}-{}", "x".repeat(140)),
                         marker(&n.to_string()),
                     )]),
                 })

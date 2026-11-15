@@ -4,6 +4,7 @@
 [lexidecimal]: <lexidecimal.md>
 [milestone]: <milestone.md>
 [node-promotion]: <node-promotion.md>
+[object-keys]: <../object-keys.md>
 [upstream]: <upstream.md>
 [viewpoint]: <viewpoint.md>
 
@@ -11,7 +12,7 @@
 
 The S3 complement of a *CommitMarker*[^][commit-marker], stored in the same
 *Epilogue*[^][epilogue] using its uncomplemented *Lexidecimal*[^][lexidecimal]
-*Viewpoint*[^][viewpoint]: `epilogue/lex(viewpoint)`, versus `epilogue/lex(~viewpoint)`.
+*Viewpoint*[^][viewpoint]; see the *object-key patterns*[^][object-keys].
 Its presence certifies that the entire graph has completed *promotion*[^][node-promotion],
 including an empty graph. Its `x-amz-meta-upstream` records the source
 *upstream*[^][upstream] *Milestone*[^][milestone] as canonical decimal.

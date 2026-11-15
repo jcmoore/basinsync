@@ -7,6 +7,7 @@
 [0z005-deep-userheap-support]: <diy/0z005-deep-userheap-support.md>
 [0z006-commit-marker-edges-with-node-promotion]: <diy/0z006-commit-marker-edges-with-node-promotion.md>
 [lexidecimal]: <glossary/lexidecimal.md>
+[object-keys]: <object-keys.md>
 
 # basinsync
 
@@ -35,3 +36,5 @@ Build deeper graphs with *Deep UserHeap support*[^][0z005-deep-userheap-support]
 
 Retain and promote committed graphs with
 *CommitMarker edges with node promotion*[^][0z006-commit-marker-edges-with-node-promotion].
+
+Audit storage layouts in the *object-key reference*[^][object-keys].

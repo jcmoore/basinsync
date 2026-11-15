@@ -148,7 +148,7 @@ proptest::proptest! {
         let mut latest:BTreeMap<String,Viewpoint>=BTreeMap::new();
         for (index,batch) in batches.into_iter().enumerate(){
             let mut commands=Vec::new();
-            for id in batch {let flow=format!("{id}/雪");let vp=latest.get(&flow).map_or_else(Viewpoint::zero,Viewpoint::next);commands.push(command(&flow,&vp.decimal()));latest.insert(flow,vp);}
+            for id in batch {let flow=format!("{id}-snow");let vp=latest.get(&flow).map_or_else(Viewpoint::zero,Viewpoint::next);commands.push(command(&flow,&vp.decimal()));latest.insert(flow,vp);}
             let delta=writer.prepare(&reader.milestone,reader.head.as_deref(),&commands).unwrap();
             let bytes=event::encode_wal(commands,delta.clone()).unwrap();
             reader.apply_entry((index+1).into(),&bytes).unwrap();
