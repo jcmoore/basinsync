@@ -270,6 +270,39 @@ async fn source_context(
         .collect::<Result<_>>()
 }
 
+// An unsuccessful producer must become a read error, never successful EOF.
+struct TransferReader {
+    stream: tokio::io::DuplexStream,
+    complete: Option<tokio::sync::oneshot::Receiver<std::io::Result<()>>>,
+}
+impl tokio::io::AsyncRead for TransferReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buffer: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        use std::{future::Future, task::Poll};
+        let before = buffer.filled().len();
+        match std::pin::Pin::new(&mut self.stream).poll_read(cx, buffer) {
+            Poll::Ready(Ok(())) if buffer.filled().len() == before && buffer.remaining() > 0 => {
+                let Some(complete) = self.complete.as_mut() else {
+                    return Poll::Ready(Ok(()));
+                };
+                match std::pin::Pin::new(complete).poll(cx) {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready(result) => {
+                        self.complete = None;
+                        Poll::Ready(result.unwrap_or_else(|_| {
+                            Err(std::io::Error::other("transfer producer stopped"))
+                        }))
+                    }
+                }
+            }
+            other => other,
+        }
+    }
+}
+
 // Bounded-memory fallback for endpoints without destination-conditional COPY, and objects >5 GiB.
 async fn transfer(
     bucket: &s3::Bucket,
@@ -288,33 +321,52 @@ async fn transfer(
             value.parse()?,
         );
     }
-    let (mut tx, mut rx) = tokio::io::duplex(64 * 1024);
+    let (mut tx, rx) = tokio::io::duplex(64 * 1024);
+    let (complete, received) = tokio::sync::oneshot::channel();
     let source = user_heap::key(user_heap::YOUNG, &node.id, &node.revision);
-    let produce = async {
-        let mut start = 0;
-        while start < node.length {
-            let end = (start + 8 * 1024 * 1024).min(node.length) - 1;
-            let part = reader.get_object_range(&source, start, Some(end)).await?;
-            ensure!(
-                matches!(part.status_code(), 200 | 206)
-                    && part.as_slice().len() as u64 == end - start + 1,
-                "user_heap source range mismatch"
-            );
-            tx.write_all(part.as_slice()).await?;
-            start = end + 1;
+    let produce = async move {
+        let result = async {
+            let mut start = 0;
+            while start < node.length {
+                let end = (start + 8 * 1024 * 1024).min(node.length) - 1;
+                let part = reader.get_object_range(&source, start, Some(end)).await?;
+                ensure!(
+                    matches!(part.status_code(), 200 | 206)
+                        && part.as_slice().len() as u64 == end - start + 1,
+                    "user_heap source range mismatch"
+                );
+                tx.write_all(part.as_slice()).await?;
+                start = end + 1;
+            }
+            Ok::<_, anyhow::Error>(())
         }
-        tx.shutdown().await?;
-        Ok::<_, anyhow::Error>(())
+        .await;
+        let _ = complete.send(
+            result
+                .as_ref()
+                .map(|_| ())
+                .map_err(|e| std::io::Error::other(e.to_string())),
+        );
+        drop(tx);
+        result
     };
     let upload = bucket
         .put_object_stream_builder(user_heap::key(user_heap::OLD, &node.id, &node.revision))
         .with_headers(headers)
         .with_max_concurrent_chunks(1);
-    let consume = async {
+    let consume = async move {
+        let mut rx = TransferReader {
+            stream: rx,
+            complete: Some(received),
+        };
         upload.execute_stream(&mut rx).await?;
         Ok::<_, anyhow::Error>(())
     };
-    tokio::try_join!(produce, consume)?;
+    // Keep polling the upload through its awaited abort path on a source error.
+    // A failed upload drops its reader, unblocking a producer waiting to write.
+    let (produced, uploaded) = tokio::join!(produce, consume);
+    produced?;
+    uploaded?;
     Ok(())
 }
 async fn conditional_copy(
@@ -427,6 +479,31 @@ pub async fn promote(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn transfer_eof_preserves_the_producers_outcome() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for outcome in [0, 1, 2] {
+            let (mut tx, stream) = tokio::io::duplex(4);
+            let (complete, received) = tokio::sync::oneshot::channel();
+            tx.write_all(b"part").await.unwrap();
+            match outcome {
+                0 => complete.send(Ok(())).unwrap(),
+                1 => complete
+                    .send(Err(std::io::Error::other("source failed")))
+                    .unwrap(),
+                _ => drop(complete),
+            }
+            drop(tx);
+            let mut reader = TransferReader {
+                stream,
+                complete: Some(received),
+            };
+            let mut bytes = vec![];
+            let result = reader.read_to_end(&mut bytes).await;
+            assert_eq!(bytes, b"part");
+            assert_eq!(result.is_ok(), outcome == 0);
+        }
+    }
     #[test]
     fn destination_requires_length_and_original_etag() {
         let node = Node {

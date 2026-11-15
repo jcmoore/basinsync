@@ -126,7 +126,14 @@ pub async fn run(
 ) {
     let mut completed: BigUint = 0u8.into();
     loop {
-        tokio::time::sleep(interval).await;
+        let sleep = tokio::time::sleep(interval);
+        tokio::pin!(sleep);
+        let closing = loop {
+            tokio::select! {
+                _ = &mut sleep => break false,
+                changed = targets.changed() => if changed.is_err() { break true; },
+            }
+        };
         let target = targets.borrow_and_update().clone();
         if let Some(snapshot) = target.filter(|s| s.prefix.milestone() > &completed) {
             match publish(&bucket, &snapshot).await {
@@ -135,7 +142,7 @@ pub async fn run(
             }
         }
         // Drop retained generations once the pipeline closes. A crash recovers from S3.
-        if targets.has_changed().is_err() {
+        if closing {
             return;
         }
     }

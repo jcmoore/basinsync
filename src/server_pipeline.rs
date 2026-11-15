@@ -167,6 +167,8 @@ struct Preparation {
     output: mpsc::Sender<Publication>,
     published: watch::Receiver<timeline::Prefix>,
     halted: watch::Receiver<bool>,
+    shutdown: watch::Receiver<bool>,
+    draining: bool,
     batches: Arc<Semaphore>,
     batch_max: usize,
     batch_wait: Duration,
@@ -176,10 +178,16 @@ struct Preparation {
 impl Preparation {
     async fn next(&mut self, queue: &mut mpsc::Receiver<Message>) -> Result<Option<Message>> {
         anyhow::ensure!(!*self.halted.borrow(), "publication stopped");
-        tokio::select! {
-            biased;
-            _ = self.halted.changed() => bail!("publication stopped"),
-            message = queue.recv() => Ok(message),
+        loop {
+            tokio::select! {
+                biased;
+                _ = self.halted.changed() => bail!("publication stopped"),
+                _ = self.shutdown.changed(), if !self.draining => {
+                    self.draining = true;
+                    queue.close();
+                },
+                message = queue.recv() => return Ok(message),
+            }
         }
     }
     async fn refreshed(&mut self, before_write: bool) -> Result<timeline::Datashed> {
@@ -235,6 +243,10 @@ impl Preparation {
         let mut pending = None;
         loop {
             anyhow::ensure!(!*self.halted.borrow(), "publication stopped");
+            if *self.shutdown.borrow() && !self.draining {
+                self.draining = true;
+                queue.close();
+            }
             let message = match pending.take() {
                 Some(message) => Some(message),
                 None => self.next(queue).await?,
@@ -570,16 +582,19 @@ impl Worker {
         mut self,
         mut queue: mpsc::Receiver<Message>,
         published: watch::Sender<timeline::Prefix>,
+        shutdown: watch::Receiver<bool>,
     ) -> Result<()> {
         self.state.enable_vfs()?;
         let (targets, snapshots) = watch::channel(self.state.snapshot()?);
-        if !self.backup_interval.is_zero() {
-            tokio::spawn(basinsync::backup::run(
+        let backup_job = if !self.backup_interval.is_zero() {
+            Some(tokio::spawn(basinsync::backup::run(
                 self.bucket.clone(),
                 snapshots.clone(),
                 self.backup_interval,
-            ));
-        }
+            )))
+        } else {
+            None
+        };
         let snapshots = (!self.cleanup.interval.is_zero()).then_some(snapshots);
         let backups = Some(targets);
         let (output, receiver) = mpsc::channel(PIPELINE_BATCHES - 1);
@@ -605,6 +620,7 @@ impl Worker {
                 self.maintenance,
                 self.cleanup,
                 halted.clone(),
+                shutdown.clone(),
             ))
         });
         let mut preparation = Preparation {
@@ -613,6 +629,8 @@ impl Worker {
             output,
             published: published_rx,
             halted,
+            shutdown,
+            draining: false,
             batches,
             batch_max: self.batch_max,
             batch_wait: self.batch_wait,
@@ -628,11 +646,23 @@ impl Worker {
                 message.reject(&preparation.published.borrow());
             }
         }
-        if let Some(job) = cleanup_job {
-            job.abort();
-        }
         drop(preparation);
-        let publication = publisher.await.context("publication task panicked")?;
+        let publication = publisher
+            .await
+            .context("publication task panicked")
+            .and_then(|r| r);
+        let cleanup_result = if let Some(job) = cleanup_job {
+            job.await.context("cleanup task panicked")
+        } else {
+            Ok(())
+        };
+        let backup_result = if let Some(job) = backup_job {
+            job.await.context("backup task panicked")
+        } else {
+            Ok(())
+        };
+        cleanup_result?;
+        backup_result?;
         result.and(publication)
     }
 }
@@ -667,9 +697,13 @@ async fn cleanup_loop(
     queue: mpsc::Sender<Message>,
     config: CleanupConfig,
     mut halted: watch::Receiver<bool>,
+    mut shutdown: watch::Receiver<bool>,
 ) {
     loop {
-        tokio::select! { _ = halted.changed() => return, _ = tokio::time::sleep(config.interval) => {} }
+        if *halted.borrow() || *shutdown.borrow() {
+            return;
+        }
+        tokio::select! { _ = halted.changed() => return, _ = shutdown.changed() => return, _ = tokio::time::sleep(config.interval) => {} }
         let Some(snapshot) = snapshots.borrow().clone() else {
             continue;
         };
@@ -764,9 +798,9 @@ async fn cleanup_loop(
             }
             Ok::<_, anyhow::Error>(())
         };
-        tokio::select! {
-            _ = halted.changed() => return,
-            result = cycle => if let Err(error) = result { tracing::warn!(%error,"cleanup deferred"); }
+        // Finish the current phase (including S3 cleanup) rather than dropping it.
+        if let Err(error) = cycle.await {
+            tracing::warn!(%error,"cleanup deferred");
         }
     }
 }

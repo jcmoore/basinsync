@@ -465,6 +465,20 @@ fn required(name: &str) -> Result<String> {
     env::var(name).with_context(|| format!("set {name}"))
 }
 
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -498,7 +512,16 @@ async fn main() -> Result<()> {
     let next = &state.milestone + 1u8;
     diffuse16::key(&next)?;
     let (fatal_tx, mut fatal_rx) = watch::channel(false);
-    let mut shutdown_rx = fatal_rx.clone();
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let shutdown_timeout = Duration::from_millis(
+        env::var("BASINSYNC_SHUTDOWN_TIMEOUT_MS")
+            .unwrap_or_else(|_| "30000".into())
+            .parse()?,
+    );
+    anyhow::ensure!(
+        !shutdown_timeout.is_zero(),
+        "shutdown timeout must be positive"
+    );
     let batch_max: usize = env::var("BASINSYNC_BATCH_MAX")
         .unwrap_or_else(|_| "32".into())
         .parse()?;
@@ -574,15 +597,14 @@ async fn main() -> Result<()> {
                 .parse()?,
         ),
     };
-    let job = tokio::spawn(worker.run(receiver, published));
-    tokio::spawn(async move {
-        match job.await {
-            Ok(Ok(())) => {}
-            result => {
-                tracing::error!(?result, "commit worker stopped");
-                fatal_tx.send_replace(true);
-            }
+    let job = tokio::spawn(worker.run(receiver, published, shutdown_rx.clone()));
+    let supervisor = tokio::spawn(async move {
+        let result = job.await.context("commit worker panicked").and_then(|r| r);
+        if let Err(error) = &result {
+            tracing::error!(%error, "commit worker stopped");
+            fatal_tx.send_replace(true);
         }
+        result
     });
     let app = Arc::new(App {
         queue,
@@ -610,6 +632,7 @@ async fn main() -> Result<()> {
                 "method not allowed",
             ))
         });
+    let admission = app.admission.clone();
     let router = Router::new()
         .nest("/api/v0", api)
         .layer(DefaultBodyLimit::max(MAX_BODY))
@@ -621,21 +644,35 @@ async fn main() -> Result<()> {
     tracing::info!(address = %listener.local_addr()?, next_milestone = %next, "ready");
     let server = axum::serve(listener, router)
         .with_graceful_shutdown(async move {
-            tokio::select! { _ = shutdown_rx.changed() => {}, _ = tokio::signal::ctrl_c() => {} }
+            let mut shutdown_rx = shutdown_rx;
+            let _ = shutdown_rx.wait_for(|stopped| *stopped).await;
         })
         .into_future();
     tokio::pin!(server);
-    tokio::select! {
-        result = &mut server => { result?; }
-        _ = fatal_rx.changed() => {
-            // Let the failing request send its response, but bound shutdown if
-            // another client holds an incomplete HTTP request open.
-            let _ = tokio::time::timeout(Duration::from_secs(5), &mut server).await;
-        }
-    }
-    if *fatal_rx.borrow() {
-        bail!("commit worker stopped");
-    }
+    let served = tokio::select! {
+        result = &mut server => Some(result),
+        _ = fatal_rx.changed() => None,
+        signal = shutdown_signal() => { signal.context("listen for shutdown signal")?; None },
+    };
+    admission.close();
+    shutdown_tx.send_replace(true);
+    // Bound failure shutdown even if a client holds an unfinished request open.
+    let timeout = if *fatal_rx.borrow() {
+        Duration::from_secs(5)
+    } else {
+        shutdown_timeout
+    };
+    tokio::time::timeout(timeout, async {
+        let served = match served {
+            Some(result) => result,
+            None => server.await,
+        };
+        let worker = supervisor.await.context("worker supervisor panicked")?;
+        served?;
+        worker
+    })
+    .await
+    .context("shutdown drain timed out; in-flight outcomes require recovery")??;
     Ok(())
 }
 
