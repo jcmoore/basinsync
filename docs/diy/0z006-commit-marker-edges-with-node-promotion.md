@@ -39,7 +39,7 @@ Targets may exist in either the *young*[^][young-generation] or *old*[^][old-gen
 generation. Never persist *access tokens*[^][access-token].
 
 After verification, recheck live *revisions*[^][revision] inside the transaction
-that caches *etags*[^][etag], inserts `M_` *CommitMarker*[^][commit-marker]
+that caches *etags*[^][etag], inserts `_m_` *CommitMarker*[^][commit-marker]
 *retainer*[^][retainer] edges, advances the *Viewpoint*[^][viewpoint], and queues
 both *sweeping*[^][sweeping-task] and *marking*[^][marking-task] tasks, unconditionally.
 Commitflow records derived child ids as `edges`; rejection leaves state unchanged.

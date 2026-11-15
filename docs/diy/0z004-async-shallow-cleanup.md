@@ -50,7 +50,7 @@ Every commit transaction inserts a *sweeping task*[^][sweeping-task] alongside
 its *Viewpoint*[^][viewpoint] advancement, including intermediate commits in a batch.
 
 A separate worker reads consistent *VFS snapshots*[^][virtual-file-system] while requests continue.
-For a bounded task batch, transactionally remove the tasks and their `A_` staging
+For a bounded task batch, transactionally remove the tasks and their `_a_` staging
 *retainer*[^][retainer] edges. Mark a *node*[^][node] `freed` with the current time only
 when no *retainers*[^][retainer] remain. Bound edges processed too; retain unfinished tasks.
 Reject *reservations*[^][userheap-reservation] of freed *nodes*[^][node] until reclamation completes.

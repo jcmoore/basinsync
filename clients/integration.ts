@@ -994,7 +994,7 @@ try {
     const app=await server(b,endpoint,{BASINSYNC_DATA_DIR:stateDir});
     const flow="0x/雪/staging",secret=bytes("client-only-userheap-secret-44b5317c76db0c09"),emptySecret=bytes("client-only-empty-node-secret-d9a812f"),oversize=bytes("oversized-client-token-"+"x".repeat(64));
     const id=(token:Uint8Array,height=0)=>`n-${lex(~BigInt(height))}/v.${lex(0n)}/t.${lex(BigInt(token.length))}/d_${sha384(token)}`;
-    const owner=(f:string,v:bigint)=>`A_${f}/v.${lex(0n)}/e.${lex(v)}`;
+    const owner=(f:string,v:bigint)=>`_a_${f}/v.${lex(0n)}/e.${lex(v)}`;
     const node=(token=secret,length=7):UserHeapNode=>({auth:[0,0,token],length,edges:[]});
     async function reserved(response:Response){await status(response.clone(),200);return parse<UserHeapResponse>(await response.text());}
     async function inspectUserHeap(image:Uint8Array,token:Uint8Array,f=flow,v=0n){
@@ -1312,7 +1312,7 @@ try {
     await upload(parentActions.write);
     rootPath=new URL(parentActions.read.url).pathname;rootYoung=new URL(parentActions.preview.url).pathname;
     await status(await commit(app.url,"graph",bytes("marker"),0n,undefined,[{auth:parent.auth},{auth:parent.auth}]),201);
-    const markerImage=await image();const owner=`M_graph/v.${lex(0n)}/e.${lex(0n)}`;
+    const markerImage=await image();const owner=`_m_graph/v.${lex(0n)}/e.${lex(0n)}`;
     assert((await inspect(parentId,owner,markerImage)).retained);
     const events=(await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"timeline/"}))).Contents!;
     const markerEvent=await get(b,events.map(o=>fromKey(o.Key!)).reduce((a,b)=>a>b?a:b));

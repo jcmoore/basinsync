@@ -8,13 +8,14 @@
 # Retainer
 
 The source of an incoming edge to a *node*[^][node]: another `n-` *node*[^][node],
-a *Flow*[^][flow] *Viewpoint's*[^][viewpoint] `A_` staging area for
-*reservations*[^][userheap-reservation], or its `M_` *CommitMarker*[^][commit-marker].
+a *Flow*[^][flow] *Viewpoint's*[^][viewpoint] `_a_` staging area for
+*reservations*[^][userheap-reservation], or its `_m_` *CommitMarker*[^][commit-marker].
 With *Lexidecimal*[^][lexidecimal] `lex`, the latter identifiers are:
 
 ```text
-A_${flow}/v.${lex(version)}/e.${lex(viewpoint)}
-M_${flow}/v.${lex(version)}/e.${lex(viewpoint)}
+_a_${flow}/v.${lex(version)}/e.${lex(viewpoint)}
+_m_${flow}/v.${lex(version)}/e.${lex(viewpoint)}
 ```
 
-Require `retainer < node`; uppercase `A_`/`M_` precede lowercase `n-`.
+Require `retainer < node`; `_a_`/`_m_` precede `n-`.
+Reserve `_r_` for future retainers.

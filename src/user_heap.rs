@@ -121,7 +121,7 @@ pub fn authenticate_edges(
     Ok(edges)
 }
 pub fn marker_retainer(flow: &str, viewpoint: &Viewpoint) -> String {
-    retainer(flow, viewpoint).replacen("A_", "M_", 1)
+    retainer(flow, viewpoint).replacen("_a_", "_m_", 1)
 }
 #[derive(Clone, Debug)]
 pub struct Child {
@@ -274,7 +274,7 @@ pub fn node_id(height: u64, version: u64, token: &[u8]) -> String {
 }
 pub fn retainer(flow: &str, viewpoint: &Viewpoint) -> String {
     format!(
-        "A_{flow}/v.{}/e.{}",
+        "_a_{flow}/v.{}/e.{}",
         lexidecimal::encode(&0.into()),
         viewpoint.lexidecimal()
     )
@@ -485,7 +485,7 @@ mod tests {
         let parent = node_id(1, 0, b"parent");
         assert!(parent < child);
         assert!(retainer("雪/flow", &Viewpoint::zero()) < child);
-        assert!("M_flow/v.0/e.0" < child.as_str());
+        assert!(marker_retainer("雪/flow", &Viewpoint::zero()) < child);
         Node {
             context: Default::default(),
             id: child,
