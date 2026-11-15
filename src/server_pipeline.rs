@@ -674,7 +674,6 @@ pub(super) struct CleanupConfig {
     pub nodes: usize,
     pub concurrency: usize,
     pub marking: usize,
-    pub allow_transfer: bool,
 }
 async fn maintenance(queue: &mpsc::Sender<Message>, command: cleanup::Command) -> Result<()> {
     let slot = queue.try_reserve().context("request queue busy")?;
@@ -765,13 +764,8 @@ async fn cleanup_loop(
             if !work.marking.marked.is_empty() {
                 promote_maintenance(&queue, work.marking).await?;
             }
-            let promoted = basinsync::promotion::promote(
-                &bucket,
-                work.promote,
-                config.concurrency,
-                config.allow_transfer,
-            )
-            .await;
+            let promoted =
+                basinsync::promotion::promote(&bucket, work.promote, config.concurrency).await;
             if !promoted.is_empty() {
                 promote_maintenance(
                     &queue,

@@ -3,7 +3,7 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, writeFileSync, readFileSyn
 import { createServer, createConnection } from "node:net";
 import { resolve } from "node:path";
 import { spawn } from "bun";
-import { DeleteObjectCommand, HeadObjectCommand, CopyObjectCommand, CreateBucketCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, paginateListObjectsV2, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, HeadObjectCommand, CopyObjectCommand, CreateBucketCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, paginateListObjectsV2 } from "@aws-sdk/client-s3";
 import { encode as flexEncode } from "flatbuffers/js/flexbuffers.js";
 import { toObject, encode as extensionEncode } from "./flexbuffer";
 import { commit, form, epilogueStatus as fullStatus, latestBlob, sha384, sha384Bytes, type ApiError, type CommitResponse, type Timelines, type ViewpointMismatch, reserveUserHeap, type UserHeapResponse, type UserHeapNode } from "./client";
@@ -817,31 +817,32 @@ try {
     await stop(lowApp.process);await stop(highApp.process);
   }
   console.log("put of success: competing backup workers retain a gapless Datashed Epilogue");
-  // Full database images cross the multipart threshold without weakening first-writer wins.
+  // Large database images use one known-length conditional PUT.
   {
     const b=await bucket();
     const fixture=spawn([`${root}/target/debug/examples/frame-fixture`,"--padded"],{cwd:root,stdin:"pipe",stdout:"pipe",stderr:"inherit"});
     fixture.stdin.write(JSON.stringify({large:marker(a)},(_key,value)=>value instanceof Uint8Array?Array.from(value):value));fixture.stdin.end();
     const payload=new Uint8Array(await new Response(fixture.stdout).arrayBuffer());assert.equal(await fixture.exited,0);await seed(b,1n,payload);
-    let completed=0;const operations:string[]=[];const proxy=relay((request,response)=>{
+    let snapshots=0;const operations:string[]=[];const proxy=relay((request,response)=>{
       const url=new URL(request.url);
       if(url.pathname.includes("/epilogue/"))operations.push(`${request.method} ${url.pathname}${url.search}`);
-      if(request.method==="POST"&&url.pathname.includes("/epilogue/")&&url.searchParams.has("uploadId")){assert.equal(request.headers.get("if-none-match"),"*");completed++;}
+      if(isDatashedPut(request)){
+        assert.equal(request.headers.get("if-none-match"),"*");
+        assert(Number(request.headers.get("content-length"))>8*1024*1024);
+        assert(new URL(request.url).searchParams.get("X-Amz-SignedHeaders")?.includes("content-length"));snapshots++;
+      }
       return response;
     });
     const app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-    const cp=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===1n);assert(cp);assert(cp.blob.length>8*1024*1024);await eventually(async()=>completed,n=>n===1);assert.equal(completed,1,JSON.stringify(operations));
+    const cp=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===1n);assert(cp);assert(cp.blob.length>8*1024*1024);assert.equal(snapshots,1,JSON.stringify(operations));
+    assert(!operations.some(op=>op.startsWith("POST ")),"the snapshot is published in its single PUT");
     assert.equal(cp.metadata.sha384,sha384(cp.blob));assert.equal((await inspectImage(cp.blob)).flows.large,"0");
-    const upload=await s3.send(new CreateMultipartUploadCommand({Bucket:b,Key:cp.key}));
-    try{
-      const part=await s3.send(new UploadPartCommand({Bucket:b,Key:cp.key,UploadId:upload.UploadId!,PartNumber:1,Body:a}));
-      await assert.rejects(()=>s3.send(new CompleteMultipartUploadCommand({Bucket:b,Key:cp.key,UploadId:upload.UploadId!,IfNoneMatch:"*",MultipartUpload:{Parts:[{PartNumber:1,ETag:part.ETag}]}})),(error:unknown)=>(error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode===412);
-    }finally{await s3.send(new AbortMultipartUploadCommand({Bucket:b,Key:cp.key,UploadId:upload.UploadId!}));}
+    await assert.rejects(s3.send(new PutObjectCommand({Bucket:b,Key:cp.key,Body:a,IfNoneMatch:"*"})),(error:unknown)=>(error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode===412);
     assert.equal((await datashedBackup(b))?.metadata.sha384,cp.metadata.sha384);
     await status(await commit(app.url,"large",bytes("suffix"),1n),201);await stop(app.process);
     const restored=await server(b);assert.equal((await epilogueStatus(restored.url,"large")).latest?.viewpoint,1n);await stop(restored.process);
   }
-  console.log("put of success: multipart snapshots preserve metadata, conditional creation, and suffix recovery");
+  console.log("put of success: single-PUT snapshots preserve metadata, conditional creation, and suffix recovery");
   // A GET capability exposes precisely one marker, even while its event also
   // contains other Flows, older markers, and database pages.
   {
@@ -1399,33 +1400,37 @@ try {
   }
   {
     // Retry an ambiguous successful COPY after restart; old presence protects the young source.
-    const b=await bucket();let blocked=true,copyAttempts=0,sourceReads=0;const copyRejected=Promise.withResolvers<void>();
-    const proxy=relay((_,response)=>response,async request=>{
+    const b=await bucket();let blocked=true,unsupported=true,ambiguous=true,copyAttempts=0,sourceReads=0;const copyRejected=Promise.withResolvers<void>();
+    const proxy=relay(async(request,response)=>{
+      if(ambiguous&&!unsupported&&request.headers.has("x-amz-copy-source")&&response.ok){ambiguous=false;await response.arrayBuffer();return new Response("lost COPY reply",{status:500});}
+      return response;
+    },async request=>{
       const path=new URL(request.url).pathname;
       if(request.method==="PUT"&&path.includes("/userheap/old/")&&request.headers.has("x-amz-copy-source")){
-        copyAttempts++;copyRejected.resolve();return new Response("unsupported",{status:501});
+        copyAttempts++;if(unsupported){copyRejected.resolve();return new Response("unsupported",{status:501});}
       }
       if(request.method==="GET"&&path.includes("/userheap/young/"))sourceReads++;
       if(request.method==="DELETE"&&path.includes("/userheap/young/")&&blocked)return new Response("deferred",{status:500});
     });
     let app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
     const data=new Uint8Array(9*1024*1024+3);data.fill(42);data[0]=7;data[data.length-1]=19;
-    const input:UserHeapNode={auth:[0,0,bytes("promotion-fallback-private")],length:data.length,edges:[],context:{kind:"multipart",tag:"0#species"}};
+    const input:UserHeapNode={auth:[0,0,bytes("promotion-copy-private")],length:data.length,edges:[],context:{kind:"copy",tag:"0#species"}};
     const r=await reserveUserHeap(app.url,"f",0n,[input]);await status(r.clone(),200);const actions=parse<UserHeapResponse>(await r.text()).results![0].actions;assert(actions.write&&actions.preview);
     const p=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:data});assert(p.ok);
     await status(await commit(app.url,"f",bytes("marker"),0n,undefined,[{auth:input.auth}]),201);
     await timeout(copyRejected.promise);await Bun.sleep(40);assert.equal(sourceReads,0,"COPY failure cannot silently relay bytes");
     await stop(app.process);
-    app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_PROMOTION_ALLOW_TRANSFER:"true"});
+    unsupported=false;
+    app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
     await eventually(async()=>{const r=await fetch(actions.read.url,{headers:actions.read.headers});await r.arrayBuffer();return r.status;},s=>s===200);
-    assert(sourceReads>0,"transfer is explicitly enabled");
+    assert.equal(sourceReads,0,"promotion never relays payload bytes");assert(!ambiguous,"HEAD resolves a lost COPY reply");
     const preview=await fetch(actions.preview.url,{headers:actions.preview.headers});assert.equal(preview.status,200);await preview.arrayBuffer();
     await stop(app.process);const before=copyAttempts;blocked=false;
     app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
     await eventually(async()=>{const r=await reserveUserHeap(app.url,"f",1n,[input]);await status(r.clone(),200);return parse<UserHeapResponse>(await r.text());},r=>r.results?.[0]?.actions.preview===null);
     assert.equal(copyAttempts,before,"restart resumes deletion from verified old object");
     const old=await fetch(actions.read.url,{headers:actions.read.headers});assert.equal(old.status,200);assert.deepEqual(new Uint8Array(await old.arrayBuffer()),data);
-    assert.equal(old.headers.get("x-amz-meta-ctx-kind"),"multipart");assert.equal(old.headers.get("x-amz-meta-ctx-tag"),"0#species");
+    assert.equal(old.headers.get("x-amz-meta-ctx-kind"),"copy");assert.equal(old.headers.get("x-amz-meta-ctx-tag"),"0#species");
     await stop(app.process);
   }
   {
@@ -1447,7 +1452,7 @@ try {
     await status(await commit(app.url,"marker",bytes("retry"),0n,undefined,[{auth:node.auth}]),201);
     await stop(app.process);
   }
-  console.log("put of success: authenticated marker edges, postorder marking, retained DAGs, bounded promotion, conditional COPY and streaming fallback, foreground progress, and retry/restart/snapshot recovery");
+  console.log("put of success: authenticated marker edges, postorder marking, retained DAGs, bounded promotion, conditional COPY, foreground progress, and retry/restart/snapshot recovery");
 
   {
     const b=await bucket(),flow="sign-0x",attempted=Promise.withResolvers<void>();let target="";

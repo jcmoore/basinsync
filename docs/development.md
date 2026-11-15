@@ -27,11 +27,7 @@ cancel publication. Trace cancellation through callers before adding timeouts
 or `select!`, especially around temporarily removed state or remote writes;
 cancellation does not roll back S3.
 
-Streaming producer failures must reach uploaders as read errors, never successful
-EOF. Await multipart abort cleanup rather than dropping the uploader. Shutdown
-must close admission, stop background producers, drain queued publications, and
-await tracked tasks. `BASINSYNC_SHUTDOWN_TIMEOUT_MS` defaults to `30000`; exhausting
+Shutdown must close admission, stop background producers, drain queued
+publications, and await tracked tasks. `BASINSYNC_SHUTDOWN_TIMEOUT_MS` defaults to `30000`; exhausting
 it exits unsuccessfully and leaves in-flight outcomes for recovery. Test these
 boundaries with gated I/O, disconnects, source failures, and shutdown signals.
-Process crashes or forced termination can still leave unfinished multipart uploads
-for eventual reclamation.

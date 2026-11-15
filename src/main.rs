@@ -543,9 +543,6 @@ async fn main() -> Result<()> {
     };
     let signing_bucket = bucket.clone();
     let cleanup = server_pipeline::CleanupConfig {
-        allow_transfer: env::var("BASINSYNC_PROMOTION_ALLOW_TRANSFER")
-            .unwrap_or_else(|_| "false".into())
-            .parse()?,
         marking: env::var("BASINSYNC_MARK_BATCH_SIZE")
             .unwrap_or_else(|_| "256".into())
             .parse()?,

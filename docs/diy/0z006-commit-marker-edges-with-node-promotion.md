@@ -7,7 +7,6 @@ prerequisites:
 [access-token]: <../glossary/access-token.md>
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-read]: <../glossary/conditional-read.md>
-[conditional-write]: <../glossary/conditional-write.md>
 [development]: <../development.md>
 [epilogue]: <../glossary/epilogue.md>
 [epilogue-compaction]: <../glossary/epilogue-compaction.md>
@@ -74,10 +73,9 @@ The `(promoted, marked)` index queues *promotion*[^][node-promotion] where
 *old generation*[^][old-generation]; if absent, COPY the exact
 *young-generation*[^][young-generation] *revision*[^][revision] with destination
 `If-None-Match: *` and source *ETag*[^][etag] matching. Verify the destination before
-deleting young, then durably record `promoted`. Strongly prefer storage-side COPY;
-retry failures without relaying bytes. Bounded-memory GET+PUT with
-*conditional publication*[^][conditional-write] requires explicit
-`BASINSYNC_PROMOTION_ALLOW_TRANSFER=true` (false by default). Keep object I/O outside the writer;
+deleting young, then durably record `promoted`. Require the storage endpoint to
+COPY any object accepted by a single PUT; retry failures without relaying bytes.
+Keep object I/O outside the writer;
 journal mutations through *Timeline*[^][timeline] ingestion frames.
 
 Once the entire graph is promoted, conditionally create its *PromotionSign*[^][promotion-sign]
@@ -89,6 +87,6 @@ a contiguous available prefix of stored *marker*[^][commit-marker]/sign pairs. *
 remains for a later tutorial.
 
 Test shared graphs, rejected edges, bounded postorder, retained versus swept branches,
-slow and ambiguous COPYs, failed DELETEs, multipart fallback, restart/backup recovery,
+unsupported, slow, and ambiguous COPYs, failed DELETEs, restart/backup recovery,
 logical/physical replay, sign confirmation failures, and mixed *Epilogue*[^][epilogue] keys. Run the *development checks*[^][development].
 *Old-generation*[^][old-generation] reclamation remains for a later tutorial.

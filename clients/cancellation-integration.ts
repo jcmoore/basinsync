@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {createServer} from "node:net";
 import {mkdtempSync,openSync,closeSync,readFileSync} from "node:fs";
-import {S3Client,CreateBucketCommand,ListMultipartUploadsCommand,HeadObjectCommand} from "@aws-sdk/client-s3";
+import {S3Client,CreateBucketCommand,HeadObjectCommand} from "@aws-sdk/client-s3";
 import {commit,reserveUserHeap,parseResponse,form,epilogueStatus,type UserHeapResponse} from "./client";
 import {s3Fixture} from "./s3-fixture";
 
@@ -32,39 +32,37 @@ try{
   const fixture=s3Fixture(root,endpoint,`${artifacts}/s3`,credentials);
   launch(fixture.command,fixture.env);
   await until(async()=>{await s3.send(new CreateBucketCommand({Bucket:"readiness"}));return true;},Boolean);
-  // A source error must await multipart abort, preserve the source, and allow retry.
-  for(const fault of ["source","upload"]){
-    const b=await bucket(),part=Promise.withResolvers<void>(),secondRange=Promise.withResolvers<void>(),failed=Promise.withResolvers<void>(),aborting=Promise.withResolvers<void>(),releaseAbort=Promise.withResolvers<void>();
-    let initiations=0,parts=0,aborts=0,failures=0,uploadId="",uploadKey="";
+  // Shutdown awaits an in-flight COPY; rejection preserves its source and a lost reply is verified.
+  for(const fault of ["rejected","reply-lost"]){
+    const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let copies=0,sourceReads=0;
     const p=proxy(async request=>{
       const u=new URL(request.url);
-      if(request.method==="PUT"&&u.pathname.includes("/userheap/old/")&&request.headers.has("x-amz-copy-source"))return new Response("unsupported",{status:501});
-      if(request.method==="GET"&&u.pathname.includes("/userheap/young/")&&request.headers.get("range")?.startsWith("bytes=8388608-")){
-        secondRange.resolve();
-        if(fault==="source"){await part.promise;failures++;failed.resolve();return new Response("source read failed",{status:500});}
+      if(request.method==="GET"&&u.pathname.includes("/userheap/young/"))sourceReads++;
+      if(request.method==="PUT"&&u.pathname.includes("/userheap/old/")&&request.headers.has("x-amz-copy-source")){
+        copies++;assert.equal(request.headers.get("if-none-match"),"*");assert(request.headers.get("x-amz-copy-source-if-match"));entered.resolve();await release.promise;
+        if(fault==="reply-lost"){
+          const copied=await fetch(`${endpoint}${u.pathname}${u.search}`,{method:"PUT",headers:request.headers,body:await request.arrayBuffer()});assert(copied.ok);await copied.arrayBuffer();
+          return new Response("lost COPY reply",{status:500});
+        }
+        return new Response("COPY unavailable",{status:501});
       }
-      if(fault==="upload"&&request.method==="PUT"&&u.pathname.includes("/userheap/old/")&&u.searchParams.has("partNumber")){await secondRange.promise;failed.resolve();return new Response("part failed",{status:500});}
-      if(request.method==="DELETE"&&u.searchParams.has("uploadId")){aborts++;aborting.resolve();await releaseAbort.promise;}
-    },async(request,response)=>{
-      const u=new URL(request.url);
-      if(request.method==="POST"&&u.pathname.includes("/userheap/old/")&&u.searchParams.has("uploads")&&response.ok){initiations++;uploadKey=decodeURIComponent(u.pathname.slice(b.length+2));const xml=await response.clone().text();uploadId=xml.match(/<UploadId>([^<]+)/)?.[1]??"";}
-      if(request.method==="PUT"&&u.pathname.includes("/userheap/old/")&&u.searchParams.has("partNumber")&&response.ok){parts++;part.resolve();}
     });
-    const server=await app(b,p,{BASINSYNC_CLEANUP_INTERVAL_MS:"1000",BASINSYNC_PROMOTION_ALLOW_TRANSFER:"true"});
-    const data=new Uint8Array(9*1024*1024+3).fill(42),node={auth:[0,0,bytes("multipart-audit-token")] as [number,number,Uint8Array],length:data.length,edges:[]};
+    const server=await app(b,p,{BASINSYNC_CLEANUP_INTERVAL_MS:"1000"});
+    const data=new Uint8Array(9*1024*1024+3).fill(42),node={auth:[0,0,bytes("copy-audit-token")] as [number,number,Uint8Array],length:data.length,edges:[]};
     const reservation=await reserveUserHeap(server.url,"f",0n,[node]);assert.equal(reservation.status,200);const actions=(await parseResponse<UserHeapResponse>(reservation)).results![0].actions;
     const put=await fetch(actions.write!.url,{method:"PUT",headers:actions.write!.headers,body:data});assert(put.ok);
     assert.equal((await commit(server.url,"f",bytes("marker"),0n,undefined,[{auth:node.auth}])).status,201);
-    await deadline(failed.promise);await deadline(aborting.promise);assert.equal(initiations,1);assert.equal(parts,fault==="source"?1:0);assert.equal(aborts,1);assert(uploadId);
-    server.process.kill("SIGINT");await Bun.sleep(100);assert.equal(server.process.exitCode,null,"shutdown awaits abort cleanup");
-    releaseAbort.resolve();assert.equal(await deadline(server.process.exited),0);
-    assert.equal((await s3.send(new ListMultipartUploadsCommand({Bucket:b}))).Uploads?.length??0,0);
-    await assert.rejects(s3.send(new HeadObjectCommand({Bucket:b,Key:uploadKey})),"a short destination must never be completed");
-    const source=await fetch(actions.preview!.url,{headers:actions.preview!.headers});assert.equal(source.status,200);assert.equal((await source.arrayBuffer()).byteLength,data.length);
+    await deadline(entered.promise);server.process.kill("SIGINT");await Bun.sleep(100);assert.equal(server.process.exitCode,null,"shutdown awaits the active COPY");
+    release.resolve();assert.equal(await deadline(server.process.exited),0);assert.equal(copies,1);assert.equal(sourceReads,0);
+    if(fault==="rejected"){
+      await assert.rejects(s3.send(new HeadObjectCommand({Bucket:b,Key:decodeURIComponent(new URL(actions.read.url).pathname.slice(b.length+2))})));
+      const source=await fetch(actions.preview!.url,{headers:actions.preview!.headers});assert.equal(source.status,200);assert.deepEqual(new Uint8Array(await source.arrayBuffer()),data);
+    }
     const restored=await app(b,endpoint,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
     await until(async()=>{const r=await fetch(actions.read.url,{headers:actions.read.headers});const body=new Uint8Array(await r.arrayBuffer());return r.status===200&&body.length===data.length;},Boolean);
+    const old=await fetch(actions.read.url,{headers:actions.read.headers});assert.deepEqual(new Uint8Array(await old.arrayBuffer()),data);
     await stop(restored.process);
-    console.log(`put of success: ${fault} failure awaits multipart abort, cannot publish a short object, and retries after restart`);
+    console.log(`put of success: shutdown drains a ${fault} COPY without relaying bytes and restart completes promotion`);
   }
   // Disconnected requests still drain, including a prepared successor batch.
   for(const signal of (process.platform==="win32"?["SIGINT"]:["SIGINT","SIGTERM"]) as ("SIGINT"|"SIGTERM")[]){

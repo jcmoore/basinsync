@@ -47,7 +47,8 @@ A separate worker first copies every *Flow*[^][flow] *CommitMarker*[^][commit-ma
 through that durable *Milestone*[^][milestone] into its
 *Epilogue*[^][epilogue], as in *Shallow epilogue commits*[^][0z000-shallow-epilogue-commits]. Only then
 publish the pinned backup at the next *Datashed*[^][datashed]
-*Viewpoint*[^][viewpoint] using a *conditional PUT*[^][conditional-write].
+*Viewpoint*[^][viewpoint] using a single streamed *conditional PUT*[^][conditional-write]
+with the image's content length.
 Keep one active backup and coalesce pending targets. Bound independent
 *Flow*[^][flow] copies to eight concurrent workers, preserving each
 *Flow*[^][flow] sequence and completing each *Milestone*[^][milestone] before
@@ -68,7 +69,7 @@ probe the next *Milestone*[^][milestone] first. Discover a newer
 *Datashed*[^][datashed] backup and refresh only when that successor exists.
 
 Test pinned-image equality against full frame replay, snapshot-plus-suffix
-recovery, delayed and multipart uploads, concurrent backup workers, interrupted copies, lost
+recovery, large and delayed uploads, concurrent backup workers, interrupted copies, lost
 replies, and corrupt backups. Run the *development checks*[^][development] and
 compare *background backup overhead*[^][0004-backup-overhead].
 
