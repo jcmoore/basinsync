@@ -932,7 +932,7 @@ fn make_capture(
 }
 
 fn decoded_event(bytes: &[u8]) -> Result<(Vec<FlowCommand>, Delta, Option<Feed>)> {
-    let envelopes = crate::envbuf::all(bytes)?;
+    let envelopes = crate::envbuf::readable(bytes)?;
     let root = envelopes
         .iter()
         .take(envelopes.len() - 1)

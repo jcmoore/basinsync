@@ -14,7 +14,10 @@ footer: content_length:u32le | format:3, alignment_power:5 | "vNE"
 ```
 
 The descriptor's high three bits select the format: `000` unknown/raw,
-`100` nested EnvBuf, `101` *FlexBuffers*[^][flexbuffers]; others are reserved.
+`100` nested EnvBuf, `101` *FlexBuffers*[^][flexbuffers], and `110` padding.
+`111` is reserved for platform extensions; other codes are reserved.
+Readers skip `110` payloads while validating their framing;
+`000` payloads remain readable.
 The low five bits encode the alignment as `1 << alignment_power`, defaulting
 to sixteen bytes (`00100`). Pad between content and footer with `0xee` so
 the complete envelope, including header and footer, is a multiple of that alignment:

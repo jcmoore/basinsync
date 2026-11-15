@@ -387,7 +387,7 @@ pub fn encode_wal(commands: Vec<FlowCommand>, delta: crate::turso::wal::Delta) -
 }
 
 fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
-    let envelopes = crate::envbuf::all(bytes)?;
+    let envelopes = crate::envbuf::readable(bytes)?;
     ensure!(
         envelopes.len() >= 2,
         "missing ingestion or range manifest envelope"
@@ -496,6 +496,31 @@ fn historical_ranges(bytes: &[u8]) -> Result<Vec<BlobRange>> {
 #[cfg(test)]
 mod envelope_tests {
     use super::*;
+    #[test]
+    fn padding_is_skipped_without_affecting_marker_ranges_or_recovery() -> Result<()> {
+        let commands = commands();
+        let mut writer = crate::turso::wal::Writer::open(&crate::turso::State::genesis()?.image)?;
+        let delta = writer.prepare(&0u8.into(), None, &commands)?;
+        let bytes = encode_wal(commands, delta)?;
+        let manifest_start = crate::envbuf::before(&bytes, bytes.len())?.start;
+        let mut padded = bytes[..manifest_start].to_vec();
+        crate::envbuf::append(&mut padded, &[255, 0, 1], crate::envbuf::PADDING)?;
+        let padding_end = padded.len();
+        padded.extend_from_slice(&bytes[manifest_start..]);
+        crate::envbuf::append(&mut padded, &[], crate::envbuf::PADDING)?;
+        assert_eq!(blob_ranges(&padded)?, blob_ranges(&bytes)?);
+        let mut recovered = crate::timeline::Datashed::default();
+        recovered.apply_entry(1u8.into(), &padded)?;
+        assert_eq!(recovered.database.unwrap().image, writer.image()?);
+        let mut bad = padded.clone();
+        bad[padding_end - 1] ^= 1;
+        assert!(decode_entry(&bad).is_err());
+        // Raw content is readable and cannot silently disappear from a command stream.
+        padded[manifest_start + 3] = 4;
+        padded[padding_end - 4] = 4;
+        assert!(decode_entry(&padded).is_err());
+        Ok(())
+    }
     fn commands() -> Vec<FlowCommand> {
         [0usize, 1, 7, 8, 15, 16, 17, 255, 256, 65535, 65536]
             .into_iter()

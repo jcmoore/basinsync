@@ -4,8 +4,8 @@
 
 # Range manifest
 
-The final *EnvBuf*[^][envbuf] in a command sequence. Its
-*FlexBuffers*[^][flexbuffers] payload indexes every preceding *envelope*[^][envbuf] by its
+The final non-padding *EnvBuf*[^][envbuf] in a command sequence. Its
+*FlexBuffers*[^][flexbuffers] payload indexes every preceding command *envelope*[^][envbuf] by its
 exclusive end offset in the containing object, encoded as positive
 *Lexidecimal*[^][lexidecimal]:
 
@@ -16,8 +16,9 @@ exclusive end offset in the containing object, encoded as positive
 ```
 
 Each value is a command prefix without its query payload. The manifest omits
-itself; locate it by reading backward from the object's final footer.
+itself and padding; locate it by reading backward from the object's final footer,
+skipping padding *envelopes*[^][envbuf].
 
 *FlexBuffers*[^][flexbuffers] sorts these keys lexicographically, so neighboring
-decoded offsets bound a complete *EnvBuf*[^][envbuf]: `[previous, current)`, with
+decoded offsets bound a complete *EnvBuf*[^][envbuf] plus any intervening padding: `[previous, current)`, with
 zero preceding the first key. Its HTTP Range is `bytes=previous-(current - 1)`.

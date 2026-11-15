@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { encode, toReference, type Reference } from "./flexbuffer";
-import { all, wrap, concat } from "./envbuf";
+import { readable, wrap, concat } from "./envbuf";
 import { encode as lex } from "./lexidecimal";
 
 export type Marker={viewpoint:string;sha384:string;blob:Uint8Array;edges:string[];context:Record<string,string>};
@@ -27,14 +27,14 @@ export function encodeWalEvent(commands:Record<string,Marker>[],delta:WalDelta):
   return encodeTuples([...commands.map(markers=>[Symbol.species,namespace,command,{markers}]),[Symbol.species,namespace,ingest,{turso:{"default.turso":delta}}]]);
 }
 export function eventTuples(bytes:Uint8Array):unknown[][] {
-  if(bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56)return all(bytes).map(e=>toReference(new Uint8Array(e.content).buffer).toObject() as unknown[]).slice(0,-1);
+  if(bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56)return readable(bytes).map(e=>toReference(new Uint8Array(e.content).buffer).toObject() as unknown[]).slice(0,-1);
   return toReference(new Uint8Array(bytes).buffer).toObject() as unknown[][];
 }
 function tuples(bytes:Uint8Array):{tuple:Reference;base:number}[] {
   let commands:{tuple:Reference;base:number}[];
   const enveloped=bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56;
   if(enveloped){
-    const frames=all(bytes);assert(frames.length>=2);
+    const frames=readable(bytes);assert(frames.length>=2);
     const refs=frames.map(e=>{assert.equal(e.format,5);return toReference(new Uint8Array(e.content).buffer);});
     const manifest=refs.pop()!;assert.equal(manifest.get(0).symbolValue(),Symbol.species);assert.equal(manifest.get(1).stringValue(),namespace);assert.equal(manifest.get(2).stringValue(),manifestPath);
     const index=manifest.get(3).get("envelopes").toObject() as Record<string,unknown>;

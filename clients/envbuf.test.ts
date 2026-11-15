@@ -1,18 +1,26 @@
 import { expect,test } from "bun:test";
-import { all,at,before,concat,wrap } from "./envbuf";
+import { all,at,before,concat,wrap,readable,PADDING,PLATFORM_EXTENSION } from "./envbuf";
 import { encodeWalEvent,rangesAt,eventTuples,deltasAt,type WalDelta } from "./events";
 import { sha384 } from "./client";
 
 test("default EnvBuf total lengths and concatenated boundaries are multiples of sixteen",()=>{
   const chunks=[];
   for(let length=0;length<=1024;length++){
-    const content=new Uint8Array(length).fill(0x42),frame=wrap(content,[0,4,5][length%3]);
+    const content=new Uint8Array(length).fill(0x42),frame=wrap(content,[0,4,5,PADDING][length%4]);
     expect(frame.length).toBe(16+Math.ceil(length/16)*16);
     expect(frame[3]&31).toBe(4);expect(at(frame,0).content).toEqual(content);chunks.push(frame);
   }
   const bytes=concat(chunks),frames=all(bytes);
   for(const frame of frames){expect(frame.start%16).toBe(0);expect(frame.end%16).toBe(0);expect(before(bytes,frame.end)).toEqual(frame);}
   expect([...wrap(new Uint8Array([1]))]).toEqual([0x65,0x6e,0x56,0xa4,1,0,0,0,1,...new Array(15).fill(0xee),1,0,0,0,0xa4,0x76,0x4e,0x45]);
+});
+test("padding is skipped, raw payloads remain readable, and platform extensions stay reserved",()=>{
+  const ignored=wrap(new TextEncoder().encode("ignored enV vNE"),PADDING),raw=wrap(new TextEncoder().encode("read me"),0);
+  const bytes=concat([ignored,raw,wrap(new Uint8Array(),PADDING)]),frames=all(bytes);
+  expect(frames.map(f=>f.format)).toEqual([6,0,6]);expect(before(bytes,bytes.length).format).toBe(PADDING);
+  expect(readable(bytes)).toEqual([at(bytes,ignored.length)]);expect(readable(bytes)[0].content).toEqual(new TextEncoder().encode("read me"));
+  const bad=new Uint8Array(bytes);bad[ignored.length-1]^=1;expect(()=>readable(bad)).toThrow();
+  for(const format of [1,2,3,PLATFORM_EXTENSION])expect(()=>wrap(new Uint8Array(),format)).toThrow();
 });
 test("EnvBuf still reads power-three frames",()=>{
   const frame=new Uint8Array([0x65,0x6e,0x56,0xa3,1,0,0,0,1,...new Array(7).fill(0xee),1,0,0,0,0xa3,0x76,0x4e,0x45]),bytes=concat([frame,frame]);
@@ -54,4 +62,15 @@ test("ingestion-only events have one indexed command and no marker ranges",()=>{
   expect(eventTuples(bytes).map(t=>t[2])).toEqual(["sts/0/databasin/ingestturso"]);
   expect(rangesAt(bytes)).toEqual([]);
   expect(deltasAt(bytes).turso["default.turso"]).toEqual(delta);
+});
+test("event readers skip validated padding without changing marker ranges or manifest coverage",()=>{
+  const delta:WalDelta={version:"test",logical:{base:null,header:new Uint8Array(),frames:[]},physical:{format:"sqlite-wal/1",base:"0",milestone:"1",parent:null,base_sha384:null,segments:[]}};
+  const marker={viewpoint:"0",sha384:sha384(new Uint8Array([1])),blob:new Uint8Array([1]),edges:[],context:{}};
+  const bytes=encodeWalEvent([{flow:marker}],delta),manifest=all(bytes).at(-1)!;
+  const padding=wrap(new Uint8Array([255,0,1]),PADDING);
+  const padded=concat([bytes.subarray(0,manifest.start),padding,bytes.subarray(manifest.start),padding]);
+  expect(eventTuples(padded)).toEqual(eventTuples(bytes));expect(rangesAt(padded)).toEqual(rangesAt(bytes));expect(deltasAt(padded).turso["default.turso"]).toEqual(delta);
+  const raw=concat([bytes.subarray(0,manifest.start),wrap(new Uint8Array([255,0,1]),0),bytes.subarray(manifest.start)]);
+  expect(()=>rangesAt(raw)).toThrow();
+  const bad=new Uint8Array(padded);bad[manifest.start+padding.length-1]^=1;expect(()=>rangesAt(bad)).toThrow();
 });

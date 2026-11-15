@@ -2,12 +2,14 @@
 use anyhow::{Context, Result, ensure};
 
 pub const FLEXBUFFERS: u8 = 5;
+pub const PADDING: u8 = 6;
+pub const PLATFORM_EXTENSION: u8 = 7;
 const ALIGNMENT_POWER: u8 = 4;
 const FRAME: usize = 8;
 
 fn alignment(descriptor: u8) -> Result<usize> {
     ensure!(
-        matches!(descriptor >> 5, 0 | 4 | 5),
+        matches!(descriptor >> 5, 0 | 4 | 5 | PADDING),
         "unsupported EnvBuf descriptor"
     );
     Ok(1usize << (descriptor & 31))
@@ -46,7 +48,10 @@ pub fn append_with_alignment(
         alignment_power <= 31,
         "EnvBuf alignment power exceeds five bits"
     );
-    ensure!(matches!(format, 0 | 4 | 5), "reserved EnvBuf format");
+    ensure!(
+        matches!(format, 0 | 4 | 5 | PADDING),
+        "reserved EnvBuf format"
+    );
     let descriptor = (format << 5) | alignment_power;
     let alignment = alignment(descriptor)?;
     ensure!(
@@ -136,10 +141,41 @@ pub fn all(bytes: &[u8]) -> Result<Vec<Envelope<'_>>> {
     Ok(result)
 }
 
+/// Validate every envelope, omitting padding from the readable contents.
+pub fn readable(bytes: &[u8]) -> Result<Vec<Envelope<'_>>> {
+    Ok(all(bytes)?
+        .into_iter()
+        .filter(|envelope| envelope.format != PADDING)
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    #[test]
+    fn padding_is_skipped_but_raw_content_is_readable() -> Result<()> {
+        let mut bytes = vec![];
+        append(&mut bytes, b"ignored enV vNE", PADDING)?;
+        let raw_start = bytes.len();
+        append(&mut bytes, b"read me", 0)?;
+        append(&mut bytes, &[], PADDING)?;
+        let frames = all(&bytes)?;
+        assert_eq!(
+            frames.iter().map(|e| e.format).collect::<Vec<_>>(),
+            [6, 0, 6]
+        );
+        assert_eq!(before(&bytes, bytes.len())?.format, PADDING);
+        assert_eq!(readable(&bytes)?, [at(&bytes, raw_start)?]);
+        assert_eq!(readable(&bytes)?[0].content, b"read me");
+        let mut bad = bytes.clone();
+        bad[frames[0].end - 1] ^= 1;
+        assert!(readable(&bad).is_err());
+        for format in [1, 2, 3, PLATFORM_EXTENSION] {
+            assert!(append(&mut vec![], &[], format).is_err());
+        }
+        Ok(())
+    }
     #[test]
     fn known_frame_and_bidirectional_concatenation() -> Result<()> {
         let mut bytes = vec![];
@@ -177,7 +213,7 @@ mod tests {
         for length in 0..=1024 {
             let start = bytes.len();
             let content = vec![0x42; length];
-            let end = append(&mut bytes, &content, [0, 4, 5][length % 3])?;
+            let end = append(&mut bytes, &content, [0, 4, 5, PADDING][length % 4])?;
             assert_eq!(end - start, 16 + length.next_multiple_of(16));
             assert_eq!(start % 16, 0);
             assert_eq!(end % 16, 0);
