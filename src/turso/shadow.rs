@@ -691,6 +691,7 @@ fn run_pipeline(
     warmup: usize,
     window: usize,
     initial_head: String,
+    empty_etag: Option<String>,
     shadow_delay: Duration,
     progress: Arc<AtomicU64>,
     mut publish: impl FnMut(u64, Vec<u8>) -> Result<()>,
@@ -821,7 +822,10 @@ fn run_pipeline(
                 .delta
                 .physical
                 .validate_binding(&cursor.into(), Some(&parent))?;
-            let bytes = encode(&draft.commands, &draft.delta, draft.feed.as_ref())?;
+            let mut bytes = encode(&draft.commands, &draft.delta, draft.feed.as_ref())?;
+            if let Some(etag) = &empty_etag {
+                crate::envbuf::seal(&mut bytes, etag)?;
+            }
             let digest = event::digest(&bytes);
             let event_bytes = bytes.len();
             let encode_us = encoding.elapsed().as_secs_f64() * 1e6;
@@ -1108,6 +1112,7 @@ fn pipeline_overlap_is_bounded_and_publication_gates_completion() -> Result<()> 
                 1,
                 4,
                 head,
+                None,
                 Duration::ZERO,
                 progress,
                 |milestone, bytes| {
@@ -1183,6 +1188,7 @@ fn publication_failure_discards_speculation_and_keeps_recoverable_prefix() -> Re
             1,
             4,
             event::digest(&seed),
+            None,
             Duration::ZERO,
             Arc::new(AtomicU64::new(0)),
             |milestone, bytes| {
@@ -1266,7 +1272,7 @@ fn measure_disk() -> Result<()> {
     let primary = dir.path("primary.turso");
     fs::copy(env::var("DISK_SEED")?, &primary)?;
     let initial_bytes = fs::metadata(&primary)?.len();
-    let seed = fs::read(env::var("DISK_SEED_EVENT")?)?;
+    let mut seed = fs::read(env::var("DISK_SEED_EVENT")?)?;
     let setup = Instant::now();
     let capture = make_capture(&kind, &dir, &env::var("DISK_SEED")?, &primary)?;
     let put_delay_ms: u64 = env::var("DISK_PUT_DELAY_MS")
@@ -1303,6 +1309,13 @@ fn measure_disk() -> Result<()> {
     } else {
         None
     };
+    let empty_etag = bucket
+        .as_ref()
+        .map(|bucket| runtime.block_on(crate::sequence::initialize(bucket)))
+        .transpose()?;
+    if let Some(etag) = &empty_etag {
+        crate::envbuf::seal(&mut seed, etag)?;
+    }
     if let Some(bucket) = &bucket {
         runtime.block_on(async {
             let r = bucket
@@ -1325,6 +1338,7 @@ fn measure_disk() -> Result<()> {
         warmup,
         window,
         event::digest(&seed),
+        empty_etag,
         Duration::ZERO,
         Arc::new(AtomicU64::new(0)),
         |milestone, bytes| {

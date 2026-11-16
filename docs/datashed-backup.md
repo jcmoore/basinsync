@@ -2,6 +2,8 @@
 [conditional-write]: <glossary/conditional-write.md>
 [context]: <glossary/context.md>
 [datashed]: <glossary/datashed.md>
+[empty-sentinel]: <glossary/empty-sentinel.md>
+[envbuf]: <glossary/envbuf.md>
 [epilogue]: <glossary/epilogue.md>
 [epilogue-compaction]: <glossary/epilogue-compaction.md>
 [flow]: <glossary/flow.md>
@@ -37,7 +39,7 @@ x-amz-meta-sha384: <digest of CommitMarker bytes>
 x-amz-meta-turso-version: <engine release and revision>
 ```
 
-Digests are hexadecimal *SHA-384*[^][sha384]. Validate metadata, checksum,
+Digests are hexadecimal *SHA-384*[^][sha384]. Unwrap the raw *EnvBuf message*[^][envbuf], then validate metadata, its checksum,
 *Turso*[^][turso] version, and the image's recorded *Milestone*[^][milestone].
 
 Before publishing a *Datashed*[^][datashed] *CommitMarker*[^][commit-marker], replicate
@@ -52,8 +54,8 @@ available prefix of stored *CommitMarker*[^][commit-marker]/*PromotionSign*[^][p
 pairs. *Markers*[^][commit-marker] must have reached their *Epilogues*[^][epilogue]
 from the *Datashed*[^][datashed] *Timeline*[^][timeline]; a recovery anchor alone
 is insufficient. Compact up to, but not through, the retained *Viewpoint*[^][viewpoint].
-Tombstone compacted *markers*[^][commit-marker] with zero-length objects to preserve
-*conditional-write barriers*[^][conditional-write], and DELETE their
+Tombstone compacted *markers*[^][commit-marker] with *empty sentinels*[^][empty-sentinel],
+retaining their keys and metadata, and DELETE their
 *PromotionSigns*[^][promotion-sign]. A sign LISTer checks the corresponding
 *marker*[^][commit-marker] metadata, deleting and skipping stale signs on demand
 before selecting the oldest available snapshot; see *compaction*[^][epilogue-compaction].

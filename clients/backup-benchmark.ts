@@ -1,3 +1,4 @@
+import {message} from "./envbuf";
 import {s3Fixture,s3FixtureVersion} from "./s3-fixture";
 // Real HTTP/S3 comparison of background backup cost; all state caches live on disk.
 import assert from "node:assert/strict";
@@ -47,7 +48,7 @@ try{
       for(let n=lane;n<seedFlows;n+=32){const r=await commit(url,`seed-${n.toString().padStart(5,"0")}-${"x".repeat(140)}`,new Uint8Array(),0n);assert.equal(r.status,201);await r.text();}
     }));void seed;
     const seeded=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"timeline/"}));assert(!seeded.IsTruncated);const seedTail=BigInt(seeded.KeyCount!);
-    await until(async()=>{if(!config.interval)return true;const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));await r.Body!.transformToByteArray();return BigInt(r.Metadata!.milestone)===seedTail;});
+    await until(async()=>{if(!config.interval)return true;const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));await r.Body!.transformToByteArray();return BigInt(r.Metadata!.milestone)>=seedTail;});
     backupPuts=0;
     const latencies:number[]=[],start=performance.now();
     await Promise.all(Array.from({length:flows},async(_,flow)=>{
@@ -57,11 +58,11 @@ try{
     const seconds=(performance.now()-start)/1000,putsDuringRequests=backupPuts;
     const events=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"timeline/"}));assert(!events.IsTruncated,"raise listing bound for this workload");const tail=BigInt(events.KeyCount!);
     if(config.interval){
-      await until(async()=>{const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));const bytes=await r.Body!.transformToByteArray();assert.equal(r.Metadata!.sha384,sha384(bytes));return BigInt(r.Metadata!.milestone)===tail;});
+      await until(async()=>{const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));const bytes=await r.Body!.transformToByteArray();assert.equal(r.Metadata!.sha384,sha384(message(bytes)));return BigInt(r.Metadata!.milestone)>=tail;});
       for(let flow=0;flow<flows;flow++){
         const state=await epilogueStatus(url,`live-${flow}`);assert.equal(state.latest?.viewpoint,BigInt(perFlow-1));
-        assert(state.latest?.url);assert(!state.latest.headers?.Range,"backup copied the Flow marker");
-        const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:decodeURIComponent(new URL(state.latest!.url!).pathname.slice(bucket.length+2))}));assert.deepEqual(await r.Body!.transformToByteArray(),new Uint8Array(1024).fill(flow));
+        assert(state.latest?.url);assert(state.latest.headers?.Range,"copied marker capabilities select the envelope message");assert(new URL(state.latest.url).pathname.includes("/flows/"));
+        const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:decodeURIComponent(new URL(state.latest!.url!).pathname.slice(bucket.length+2)),Range:state.latest.headers?.Range}));assert.deepEqual(await r.Body!.transformToByteArray(),new Uint8Array(1024).fill(flow));
       }
     }
     samples.push({round,mode:config.name,requests:flows*perFlow,seconds,rps:flows*perFlow/seconds,p50:quantile(latencies,.5),p95:quantile(latencies,.95),backups:putsDuringRequests});

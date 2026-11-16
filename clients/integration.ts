@@ -12,7 +12,7 @@ import { key, fromKey } from "./diffuse16";
 import { key as epilogueKey, encode as lex, decode as unlex } from "./lexidecimal";
 import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, type WalDelta, type Marker } from "./events";
 import { ingestWal } from "./wal";
-import { all as envelopes, before as previousEnvelope } from "./envbuf";
+import { all as envelopes, before as previousEnvelope, message as envelopeMessage, wrap as wrapEnvelope } from "./envbuf";
 import { stress } from "./stress";
 import { s3Fixture } from "./s3-fixture";
 
@@ -188,7 +188,7 @@ async function flowKey(b:string,flow:string,vp:bigint){return `${await flowPrefi
 async function flowBlob(bucket:string,flow:string,viewpoint:bigint):Promise<Uint8Array|null>{
   try{
     const response=await s3.send(new GetObjectCommand({Bucket:bucket,Key:await flowKey(bucket,flow,viewpoint)}));
-    return await response.Body!.transformToByteArray();
+    return envelopeMessage(await response.Body!.transformToByteArray());
   }catch(error){
     if((error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode===404)return null;
     throw error;
@@ -200,10 +200,11 @@ async function eventually<T>(read:()=>Promise<T>,done:(value:T)=>boolean):Promis
   throw new Error(`condition not reached: ${JSON.stringify(last,(_key,value)=>typeof value==="bigint"?value.toString():value)}; ${artifacts}`);
 }
 async function datashedBackup(bucket:string){
-  const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/",MaxKeys:1}));
-  const key=list.Contents?.[0]?.Key;if(!key)return null;
+  const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/"}));
+  const key=list.Contents?.find(o=>o.Size!>0&&o.Key!.startsWith("epilogue/0y"))?.Key;if(!key)return null;
   const response=await s3.send(new GetObjectCommand({Bucket:bucket,Key:key}));
-  return {key,milestone:BigInt(response.Metadata!.milestone),metadata:response.Metadata!,blob:await response.Body!.transformToByteArray()};
+  const object=await response.Body!.transformToByteArray();
+  return {key,milestone:BigInt(response.Metadata!.milestone),metadata:response.Metadata!,object,blob:envelopeMessage(object)};
 }
 async function inspectImage(blob:Uint8Array){
   const path=`${artifacts}/inspect-${serial++}.turso`;writeFileSync(path,blob);
@@ -235,6 +236,71 @@ try {
     await assert.rejects(s3.send(new CopyObjectCommand({Bucket:b,Key,CopySource:`${b}/${winner.Key}`,IfMatch:'"incorrect"'})),(error:any)=>error.$metadata?.httpStatusCode===412);
     console.log("put of success: COPY enforces source ETags and atomic destination preconditions");
   }
+  const probeBucket=await bucket();
+  const reference=await s3.send(new PutObjectCommand({Bucket:probeBucket,Key:"sentinel/empty",Body:new Uint8Array(),IfNoneMatch:"*"}));
+  const emptyETag=reference.ETag!;assert(emptyETag);
+  // Bootstrap learns opaque validators, preserves an existing reference, and rejects a nonempty one.
+  {
+    const name=await bucket(),opaque='"bucket-empty-validator"';let probes=0;
+    await s3.send(new PutObjectCommand({Bucket:name,Key:"sentinel/empty",Body:new Uint8Array(),Metadata:{preserved:"yes"}}));
+    await s3.send(new PutObjectCommand({Bucket:name,Key:key(1n),Body:new Uint8Array()}));
+    const proxy=relay((request,response)=>{
+      const path=new URL(request.url).pathname;
+      if(request.method==="HEAD"&&path.endsWith("/sentinel/empty")&&response.status===200){const headers=new Headers(response.headers);headers.set("etag",opaque);return new Response(null,{status:200,headers});}
+      if(request.method==="HEAD"&&path.includes("/timeline/")&&request.headers.has("if-none-match")){assert.equal(request.headers.get("if-none-match"),opaque);probes++;}
+      return response;
+    });
+    const app=await server(name,proxy.url);await status(await commit(app.url,"opaque-validator",bytes("data"),0n),201);await stop(app.process);assert(probes>0);
+    assert.equal((await s3.send(new HeadObjectCommand({Bucket:name,Key:"sentinel/empty"}))).Metadata!.preserved,"yes");
+    const invalid=await bucket();await s3.send(new PutObjectCommand({Bucket:invalid,Key:"sentinel/empty",Body:bytes("not empty")}));await badStartup(invalid);
+    assert.deepEqual(await (await s3.send(new GetObjectCommand({Bucket:invalid,Key:"sentinel/empty"}))).Body!.transformToByteArray(),bytes("not empty"));
+  }
+  // Sequence sentinels are excluded from search and replaced only with their observed ETag.
+  {
+    const b=await bucket(),replaced=new Set<string>();
+    async function sentinel(Key:string){const r=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:new Uint8Array(),Metadata:{reserved:"yes"}}));assert.equal(r.ETag,emptyETag);}
+    await sentinel(key(1n));await sentinel(epilogueKey(0n));await sentinel(`epilogue/${lex(0n)}`);
+    const proxy=relay((request,response)=>{
+      if(request.method==="PUT"&&request.headers.get("if-match")===emptyETag)replaced.add(decodeURIComponent(new URL(request.url).pathname.slice(b.length+2)));
+      return response;
+    });
+    let app=await server(b,proxy.url);
+    assert.equal((await fullStatus(app.url,"sentinel")).latest,null);
+    await status(await commit(app.url,"sentinel",new Uint8Array(),0n),201);
+    const markerKey=await flowKey(b,"sentinel",0n),sign=await signKey(b,"sentinel",0n);
+    await sentinel(markerKey);await sentinel(sign);await stop(app.process);
+    app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10",BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
+    await eventually(()=>datashedBackup(b),Boolean);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),r=>r.ContentLength===16);
+    const markerObject=await s3.send(new GetObjectCommand({Bucket:b,Key:markerKey}));
+    const markerBytes=await markerObject.Body!.transformToByteArray();assert.equal(envelopeMessage(markerBytes).length,0);assert(markerBytes.length>0);assert.notEqual(markerObject.ETag,emptyETag);
+    for(const signKey of [sign,`epilogue/${lex(0n)}`]){
+      const signObject=await s3.send(new GetObjectCommand({Bucket:b,Key:signKey}));const frames=envelopes(await signObject.Body!.transformToByteArray());assert.equal(frames.length,1);assert.equal(frames[0].format,6);assert.equal(frames[0].content.length,0);assert.notEqual(signObject.ETag,emptyETag);
+    }
+    await stop(app.process);
+    for(const Key of [key(1n),epilogueKey(0n),`epilogue/${lex(0n)}`,markerKey,sign])assert(replaced.has(Key),`ETag-guarded replacement: ${Key}`);
+    const saved=await datashedBackup(b);assert(saved);await sentinel(epilogueKey((~unlex(saved.key.slice(9)))+1n));
+    const restored=await server(b);assert.equal((await fullStatus(restored.url,"sentinel")).latest?.viewpoint,0n);await stop(restored.process);
+  }
+  {
+    const b=await bucket(),writer=await server(b);
+    for(let n=0;n<3;n++)await status(await commit(writer.url,"bounds",bytes(`marker-${n}`),BigInt(n)),201);
+    await stop(writer.process);
+    for(const n of [4n,16n])await s3.send(new PutObjectCommand({Bucket:b,Key:key(n),Body:new Uint8Array()}));
+    // Diffuse16(16) sorts before the live seed. Ignore conditional reads to exercise length-based detection too.
+    const proxy=relay((request,response)=>request.method==="HEAD"&&response.status===304?new Response(null,{status:200,headers:{"content-length":"0"}}):response);
+    const restored=await server(b,proxy.url);assert.equal((await fullStatus(restored.url,"bounds")).latest?.viewpoint,2n);
+    await status(await commit(restored.url,"bounds",bytes("marker-3"),3n),201);
+    assert.equal(markerAt(await get(b,4n),"bounds").viewpoint,"3");await stop(restored.process);
+  }
+  {
+    const b=await bucket(),Key=epilogueKey(42n);
+    const original=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:new Uint8Array(),Metadata:{owner:"first"}}));assert.equal(original.ETag,emptyETag);
+    const updated=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:new Uint8Array(),IfMatch:original.ETag,Metadata:{owner:"second"}}));assert.equal(updated.ETag,original.ETag,"metadata-only changes do not supply a new fencing token");
+    const outcomes=await Promise.all(Array.from({length:8},async(_,n)=>{try{await s3.send(new PutObjectCommand({Bucket:b,Key,Body:wrapEnvelope(bytes(`winner-${n}`),0),IfMatch:original.ETag}));return 200;}catch(e){return (e as {$metadata:{httpStatusCode:number}}).$metadata.httpStatusCode;}}));
+    assert.equal(outcomes.filter(s=>s===200).length,1);assert.equal(outcomes.filter(s=>s===412).length,7);
+    await assert.rejects(s3.send(new PutObjectCommand({Bucket:b,Key,Body:wrapEnvelope(bytes("stale"),0),IfMatch:original.ETag})),(e:any)=>e.$metadata.httpStatusCode===412);
+  }
+  console.log("put of success: bucket-derived empty sentinel validators, atomic conditional replacement, metadata-only ETag caveat, exclusive search bounds, wrapped empty markers, padding signs, and snapshot recovery");
   // Flow Epilogue contents must never become a source of Datashed state.
   await s3.send(new PutObjectCommand({Bucket:b,Key:"flows/unrelated/epilogue/0",Body:bytes("legacy, not a Timeline")}));
   const trace: {method:string;url:URL}[] = [];
@@ -402,7 +468,7 @@ try {
     const raceBucket=await bucket(); let armed=false,arrived=0;
     const gate=Promise.withResolvers<void>();
     const proxy=relay(async(r,response)=>{
-      if(armed&&r.method==="HEAD"&&new URL(r.url).pathname.endsWith(`/${key(1n)}`)){
+      if(armed&&arrived<3&&r.method==="HEAD"&&new URL(r.url).pathname.endsWith(`/${key(1n)}`)){
         assert.equal(response.status,404);
         if(++arrived===3)gate.resolve(); await timeout(gate.promise);
       }
@@ -430,11 +496,11 @@ try {
     const batchBucket=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let puts=0,active=0,peak=0;
     const proxy=relay(async(request,response)=>{
-      if(request.method==="PUT"){
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/")){
         active--;if(fail){assert.equal(response.status,200);await response.arrayBuffer();return new Response("durable reply lost",{status:503});}
       }
       return response;
-    },async request=>{if(request.method==="PUT"){puts++;active++;peak=Math.max(peak,active);entered.resolve();await gate.promise;}});
+    },async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/")){puts++;active++;peak=Math.max(peak,active);entered.resolve();await gate.promise;}});
     const app=await server(batchBucket,proxy.url,{BASINSYNC_BATCH_MAX:"4",BASINSYNC_BATCH_WAIT_MS:"1000",RUST_LOG:"basinsync=debug"});
     const flow=`ordered-${fail?"lost":"ok"}`;let completed=0;
     const requests:Promise<Response>[]=[];
@@ -482,11 +548,11 @@ try {
     const pipelineBucket=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let puts=0,active=0,peak=0,completed=0;
     const proxy=relay(async(request,response)=>{
-      if(request.method==="PUT"){
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/")){
         active--;if(fault==="after"){assert.equal(response.status,200);await response.arrayBuffer();return new Response("durable reply lost",{status:503});}
       }
       return response;
-    },async request=>{if(request.method==="PUT"){
+    },async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/")){
       puts++;active++;peak=Math.max(peak,active);
       if(puts===1){entered.resolve();await gate.promise;}
       if(fault==="before"){active--;return new Response("not stored",{status:503});}
@@ -527,9 +593,9 @@ try {
     const mismatchBucket=await bucket();const second=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let puts=0;
     const proxy=relay(async(request,response)=>{
-      if(request.method==="PUT"&&puts===2&&fail){await response.arrayBuffer();return new Response("second reply lost",{status:503});}
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/")&&puts===2&&fail){await response.arrayBuffer();return new Response("second reply lost",{status:503});}
       return response;
-    },async request=>{if(request.method==="PUT"&&++puts===2){entered.resolve();await second.promise;}});
+    },async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/")&&++puts===2){entered.resolve();await second.promise;}});
     const app=await server(mismatchBucket,proxy.url,{BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});
     await status(await commit(app.url,"deferred-mismatch",a,0n),201);
     const next=commit(app.url,"deferred-mismatch",a,1n);await timeout(entered.promise);
@@ -544,7 +610,7 @@ try {
   }
   {
     const full=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let puts=0;
-    const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"&&++puts===1){entered.resolve();await gate.promise;}});
+    const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"&&new URL(r.url).pathname.includes("/timeline/")&&++puts===1){entered.resolve();await gate.promise;}});
     const app=await server(full,proxy.url,{BASINSYNC_BATCH_WAIT_MS:"1000",RUST_LOG:"basinsync=debug"});
     const first=Array.from({length:32},(_,n)=>commit(app.url,`full-${n}`,a,0n));await timeout(entered.promise);
     const next=Array.from({length:32},(_,n)=>commit(app.url,`full-${n+32}`,a,0n));await batchLogged(app.log,2);
@@ -575,7 +641,7 @@ try {
   // Dropping an HTTP caller after admission does not cancel its owned batch.
   {
     const disconnected=await bucket(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
-    const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"){entered.resolve();await gate.promise}});
+    const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"&&new URL(r.url).pathname.includes("/timeline/")){entered.resolve();await gate.promise}});
     const app=await server(disconnected,proxy.url,{BASINSYNC_BATCH_MAX:"1",RUST_LOG:"basinsync=debug"});
     const abort=new AbortController();
     const request=fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("disconnected",a,0n),signal:abort.signal});
@@ -646,7 +712,7 @@ try {
 
   const uncertain=await bucket();let puts=0;
   const faulty=relay(async(r,response)=>{
-    if(r.method==="PUT") {puts++;assert.equal(response.status,200);await response.arrayBuffer();return new Response("lost durable reply",{status:503})}
+    if(r.method==="PUT"&&new URL(r.url).pathname.includes("/timeline/")&&new URL(r.url).pathname.includes("/timeline/")) {puts++;assert.equal(response.status,200);await response.arrayBuffer();return new Response("lost durable reply",{status:503})}
     return response;
   });
   const failed=await server(uncertain,faulty.url);
@@ -666,7 +732,7 @@ try {
       if(!isDatashedPut(request))return;
       assert.equal(request.headers.get("if-none-match"),"*");active++;peak=Math.max(peak,active);
       const metadata=Object.fromEntries([...request.headers].filter(([name])=>name.startsWith("x-amz-meta-")).map(([name,value])=>[name.slice(11),value]));
-      submitted.push({milestone:BigInt(metadata.milestone),blob:new Uint8Array(await request.clone().arrayBuffer()),metadata});
+      submitted.push({milestone:BigInt(metadata.milestone),blob:envelopeMessage(new Uint8Array(await request.clone().arrayBuffer())),metadata});
       if(submitted.length===1){entered.resolve();await gate.promise;}
     });
     const observer=await server(b);
@@ -709,7 +775,7 @@ try {
     await status(await commit(restored.url,flow,bytes("after restore"),3n),201);await stop(restored.process);
     // The full image is sufficient even when the pre-snapshot Timeline is unavailable.
     const snapshotOnly=await bucket();
-    await s3.send(new PutObjectCommand({Bucket:snapshotOnly,Key:checkpoint.key,Body:checkpoint.blob,Metadata:checkpoint.metadata}));
+    await s3.send(new PutObjectCommand({Bucket:snapshotOnly,Key:checkpoint.key,Body:checkpoint.object,Metadata:checkpoint.metadata}));
     const anchored=await server(snapshotOnly);assert.equal((await epilogueStatus(anchored.url,flow)).latest?.viewpoint,1n);
     await status(await commit(anchored.url,flow,bytes("new suffix"),2n),201);await stop(anchored.process);
     assert.equal((deltasAt(await get(snapshotOnly,15n)).turso["default.turso"] as WalDelta).physical.parent,checkpoint.metadata["event-sha384"]);
@@ -721,7 +787,7 @@ try {
       if(fault==="cursor")metadata.milestone="13";
       if(fault==="digest")metadata["event-sha384"]="not-a-digest";
       if(fault==="missing")delete metadata.milestone;
-      await s3.send(new PutObjectCommand({Bucket:invalid,Key:checkpoint.key,Body:body,Metadata:metadata}));await badStartup(invalid);
+      await s3.send(new PutObjectCommand({Bucket:invalid,Key:checkpoint.key,Body:wrapEnvelope(body,0),Metadata:metadata}));await badStartup(invalid);
     }
   }
   console.log("put of success: pinned full-file backups, nonblocking coalesced uploads, exact TS WAL equivalence, snapshot-plus-suffix recovery, and corrupt-anchor rejection");
@@ -893,17 +959,17 @@ try {
     await stop(app.process);
     const restarted=await server(b);assert.deepEqual(await latestBlob((await fullStatus(restarted.url,"public")).latest!),target);await stop(restarted.process);
     // Hold downstream copying: the URL must stay range-bound until the exact
-    // marker is stored, then it may use the Flow's whole-object URL.
+    // marker is stored, then it uses the message range in the Flow's envelope.
     const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     const proxy=relay((_,response)=>response,async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/flows/")){entered.resolve();await gate.promise;}});
     const copying=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await timeout(entered.promise);
     assert.deepEqual(await latestBlob((await fullStatus(copying.url,"public")).latest!),target);
     gate.resolve();
     await eventually(()=>flowBlob(b,"public",1n),blob=>blob!==null);
-    const complete=await eventually(()=>fullStatus(copying.url,"public"),s=>!!s.latest?.url&&!s.latest.headers?.Range);
+    const complete=await eventually(()=>fullStatus(copying.url,"public"),s=>!!s.latest?.url&&new URL(s.latest.url).pathname.includes("/flows/"));
     assert(new URL(complete.latest!.url!).pathname.endsWith(`/${await flowKey(b,"public",1n)}`));
-    assert.deepEqual(complete.latest!.headers,{"If-Match":"*"});assert.deepEqual(await latestBlob(complete.latest!),target);
-    assert.equal(new URL(complete.latest!.url!).searchParams.get("X-Amz-SignedHeaders"),"host;if-match");
+    assert.deepEqual(complete.latest!.headers,{"If-Match":"*",Range:`bytes=8-${8+target.length-1}`});assert.deepEqual(await latestBlob(complete.latest!),target);
+    assert.equal(new URL(complete.latest!.url!).searchParams.get("X-Amz-SignedHeaders"),"host;if-match;range");
     const unguarded=await fetch(complete.latest!.url!);assert(unguarded.status>=400,"a missing signed condition must fail authentication");await unguarded.arrayBuffer();
     assert(!("url" in (await fullStatus(copying.url,"empty")).latest!));
     const checkpoint=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===1n);assert(checkpoint);
@@ -954,10 +1020,10 @@ try {
     await eventually(()=>datashedBackup(b),cp=>cp?.milestone===5n);
     assert.deepEqual(await flowBlob(b,"known",3n),bytes("fourth"));
     const stored=(await checkedStatus("known",true)).latest!;
-    assert.equal(stored.viewpoint,3n);assert.deepEqual(stored.headers,{"If-Match":"*"});
+    assert.equal(stored.viewpoint,3n);assert.deepEqual(stored.headers,{"If-Match":"*",Range:"bytes=8-13"});
     assert(!reads.some(r=>r.method==="GET"&&r.url.pathname.includes("/timeline/")),"load the newer snapshot instead of replaying its prefix");
     assert.deepEqual(await latestBlob(stored),bytes("fourth"));
-    assert.deepEqual((await checkedStatus("known")).latest?.headers,{"If-Match":"*"});
+    assert.deepEqual((await checkedStatus("known")).latest?.headers,{"If-Match":"*",Range:"bytes=8-13"});
     await status(await commit(copying.url,"known",bytes("suffix"),4n),201);
     const suffix=(await checkedStatus("known",true)).latest!;
     assert.equal(suffix.viewpoint,4n);assert.deepEqual(await latestBlob(suffix),bytes("suffix"));
@@ -1016,7 +1082,7 @@ try {
     await stop(writer.process);await stop(observer.process);
   }
   console.log("put of success: bounded probe freshness, causal-reverse detection across instances, and durable response positions for writes, status, and errors");
-  // Real conditional HEADs yield 304 for present keys. Exercise both missing-key
+  // Conditional sequence HEADs distinguish live entries from empty sentinels. Exercise both missing-key
   // responses, an endpoint ignoring conditions, and failures that must not look absent.
   for(const mode of ["native","missing-412","ignored","denied","unavailable"]){
     const b=await bucket();let present=0,absent=0;
@@ -1026,10 +1092,10 @@ try {
       if(request.method!=="HEAD"||!object)return response;
       const probe=url.pathname.includes("/timeline/");
       if(probe){
-        assert.equal(request.headers.get("if-none-match"),"*");
+        assert.equal(request.headers.get("if-none-match"),emptyETag);
         if(mode==="denied")return new Response(null,{status:403});
         if(mode==="unavailable")return new Response(null,{status:500});
-        if(response.status===304){present++;if(mode==="ignored")return new Response(null,{status:200});}
+        if(response.status===200){present++;if(mode==="ignored")return new Response(null,{status:200,headers:response.headers});}
       }
       if(response.status===404){absent++;if(mode==="missing-412")return new Response(null,{status:412});}
       return response;
@@ -1503,11 +1569,11 @@ try {
     await stop(app.process);const before=puts;confirm=true;
     for(const metadata of [{},{upstream:"999"}] as Record<string,string>[]){
       mismatch=Promise.withResolvers<void>();
-      await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:new Uint8Array(),Metadata:metadata}));
+      await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:wrapEnvelope(new Uint8Array(),6),Metadata:metadata}));
       app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});await timeout(mismatch.promise);
       assert((await counts()).marking_tasks>=1,"sign upstream must match its source Milestone");await stop(app.process);
     }
-    await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:new Uint8Array(),Metadata:{upstream:"1"}}));
+    await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:wrapEnvelope(new Uint8Array(),6),Metadata:{upstream:"1"}}));
     app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     await eventually(counts,r=>r.marking_tasks===0&&r.sweeping_tasks===0);
     assert.equal(puts,before,"restart confirms an existing sign without rewriting it");
@@ -1555,7 +1621,7 @@ try {
     const firstKey=await flowKey(b,flow,0n),secondKey=await flowKey(b,flow,1n);
     assert(firstKey.includes(`/${initial}/epilogue/`));
     const stored=await s3.send(new GetObjectCommand({Bucket:b,Key:firstKey}));
-    assert.deepEqual(await stored.Body!.transformToByteArray(),body);
+    assert.deepEqual(envelopeMessage(await stored.Body!.transformToByteArray()),body);
     assert.deepEqual(stored.Metadata,{sha384:sha384(body),"ctx-kind":"0x-literal","ctx-owner":"alice","ctx-empty":"","ctx-0-key":"0"});
     const latest=await fullStatus(app.url,flow);assert(new URL(latest.latest!.url!).pathname.endsWith(`/${secondKey}`));
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:secondKey}))).Metadata!["ctx-owner"],"bob");

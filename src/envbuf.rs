@@ -149,10 +149,118 @@ pub fn readable(bytes: &[u8]) -> Result<Vec<Envelope<'_>>> {
         .collect())
 }
 
+/// Append padding when MD5 predicts the bucket's reserved empty-object validator.
+pub fn seal(bytes: &mut Vec<u8>, empty_etag: &str) -> Result<()> {
+    while format!("\"{:x}\"", md5::compute(&*bytes)) == empty_etag {
+        append(bytes, &[], PADDING)?;
+    }
+    Ok(())
+}
+
+pub fn wrap(message: &[u8], empty_etag: &str) -> Result<Vec<u8>> {
+    let mut bytes = vec![];
+    append(&mut bytes, message, 0)?;
+    seal(&mut bytes, empty_etag)?;
+    Ok(bytes)
+}
+
+pub fn message(bytes: &[u8]) -> Result<&[u8]> {
+    let frames = readable(bytes)?;
+    ensure!(
+        frames.len() == 1 && frames[0].format == 0 && frames[0].start == 0,
+        "expected one raw EnvBuf message"
+    );
+    Ok(frames[0].content)
+}
+
+pub fn encoded_length(message_length: u64) -> Result<u64> {
+    let length = usize::try_from(message_length)?;
+    u32::try_from(length).context("EnvBuf message exceeds u32 length")?;
+    Ok(frame_length(length, 1 << ALIGNMENT_POWER)? as u64)
+}
+
+/// Wrap an exported image on disk, retaining bounded memory and one PUT.
+pub fn wrap_file(path: &std::path::Path, empty_etag: &str) -> Result<tempfile::NamedTempFile> {
+    use std::io::{Read, Write};
+    let mut source = std::fs::File::open(path)?;
+    let length = source.metadata()?.len();
+    let end = encoded_length(length)?;
+    let word = u32::try_from(length)?.to_le_bytes();
+    let mut output = tempfile::NamedTempFile::new()?;
+    let mut hash = md5::Context::new();
+    let mut write = |bytes: &[u8]| -> Result<()> {
+        output.write_all(bytes)?;
+        hash.consume(bytes);
+        Ok(())
+    };
+    write(b"enV")?;
+    write(&[ALIGNMENT_POWER])?;
+    write(&word)?;
+    let mut buffer = [0u8; 64 * 1024];
+    let mut copied = 0;
+    loop {
+        let n = source.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        write(&buffer[..n])?;
+        copied += n as u64;
+    }
+    ensure!(copied == length, "snapshot image changed while enveloping");
+    write(&vec![0xee; (end - length - 16) as usize])?;
+    write(&word)?;
+    write(&[ALIGNMENT_POWER])?;
+    write(b"vNE")?;
+    while format!("\"{:x}\"", hash.clone().finalize()) == empty_etag {
+        let mut padding = vec![];
+        append(&mut padding, &[], PADDING)?;
+        output.write_all(&padding)?;
+        hash.consume(&padding);
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    #[test]
+    fn empty_sentinel_and_wrapped_messages_are_distinct() -> Result<()> {
+        use std::io::Write;
+        let empty_etag = format!("\"{:x}\"", md5::compute([]));
+        let mut empty_feed = vec![];
+        seal(&mut empty_feed, &empty_etag)?;
+        assert_eq!(all(&empty_feed)?.len(), 1);
+        assert_eq!(all(&empty_feed)?[0].format, PADDING);
+        assert!(all(&empty_feed)?[0].content.is_empty());
+        for length in [0, 1, 7, 8, 15, 16, 17, 65536] {
+            let original = vec![42; length];
+            let bytes = wrap(&original, &empty_etag)?;
+            assert_eq!(message(&bytes)?, original);
+            assert_eq!(bytes.len() as u64, encoded_length(length as u64)?);
+            assert_ne!(format!("\"{:x}\"", md5::compute(&bytes)), empty_etag);
+            let mut raw = tempfile::NamedTempFile::new()?;
+            raw.write_all(&original)?;
+            let file = wrap_file(raw.path(), &empty_etag)?;
+            assert_eq!(std::fs::read(file.path())?, bytes);
+            let collision = format!("\"{:x}\"", md5::compute(&bytes));
+            let mut sealed = bytes.clone();
+            seal(&mut sealed, &collision)?;
+            assert_eq!(sealed[..bytes.len()], bytes);
+            assert_eq!(before(&sealed, sealed.len())?.format, PADDING);
+            assert_eq!(message(&sealed)?, original);
+            let file = wrap_file(raw.path(), &collision)?;
+            assert_eq!(std::fs::read(file.path())?, sealed);
+        }
+        let prefixed = [empty_feed.clone(), wrap(b"data", &empty_etag)?].concat();
+        assert!(
+            message(&prefixed).is_err(),
+            "marker message must begin at byte eight"
+        );
+        assert!(message(&empty_feed).is_err());
+        assert!(encoded_length(u32::MAX as u64 + 1).is_err());
+        Ok(())
+    }
     #[test]
     fn padding_is_skipped_but_raw_content_is_readable() -> Result<()> {
         let mut bytes = vec![];

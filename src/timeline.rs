@@ -11,9 +11,16 @@ pub struct Datashed {
     pub stopped: bool,
     pub writer: Option<crate::turso::wal::Writer>,
     pub head: Option<String>,
+    pub empty_etag: Option<String>,
 }
 
 impl Datashed {
+    fn seal_entry(&self, bytes: &mut Vec<u8>) -> Result<()> {
+        if let Some(etag) = &self.empty_etag {
+            crate::envbuf::seal(bytes, etag)?;
+        }
+        Ok(())
+    }
     pub fn flow_revision(&self, flow: &str) -> Result<Option<uuid::Uuid>> {
         if let Some(writer) = &self.writer {
             ensure!(
@@ -249,7 +256,8 @@ impl Stager {
         else {
             return Ok(None);
         };
-        let bytes = event::encode_wal(vec![], delta)?;
+        let mut bytes = event::encode_wal(vec![], delta)?;
+        self.state.seal_entry(&mut bytes)?;
         let prepared = Prepared {
             digest: event::digest(&bytes),
             bytes,
@@ -272,7 +280,8 @@ impl Stager {
             request,
         )?;
         let prepared = if let Some((_command, delta)) = captured {
-            let bytes = event::encode_wal(vec![], delta)?;
+            let mut bytes = event::encode_wal(vec![], delta)?;
+            self.state.seal_entry(&mut bytes)?;
             let prepared = Prepared {
                 digest: event::digest(&bytes),
                 bytes,
@@ -301,7 +310,8 @@ impl Stager {
         let Some((_command, delta)) = captured else {
             return Ok(None);
         };
-        let bytes = event::encode_wal(vec![], delta)?;
+        let mut bytes = event::encode_wal(vec![], delta)?;
+        self.state.seal_entry(&mut bytes)?;
         let prepared = Prepared {
             digest: event::digest(&bytes),
             bytes,
@@ -356,13 +366,13 @@ impl Prepared {
             self.milestone == &prefix.milestone + 1u8 && self.parent == prefix.digest,
             "publication prefix mismatch"
         );
-        let response = bucket
-            .put_object_with_headers(
-                diffuse16::key(&self.milestone)?,
-                &self.bytes,
-                Some(entry_headers(&self.bytes)?),
-            )
-            .await?;
+        let response = crate::sequence::put(
+            bucket,
+            &diffuse16::key(&self.milestone)?,
+            &self.bytes,
+            entry_headers(&self.bytes)?,
+        )
+        .await?;
         ensure!(
             (200..300).contains(&response.status_code()),
             "conditional PUT returned HTTP {}",
@@ -447,7 +457,8 @@ impl Datashed {
             &commands,
             chunks.ranges(),
         )?;
-        let bytes = chunks.finish(delta)?;
+        let mut bytes = chunks.finish(delta)?;
+        self.seal_entry(&mut bytes)?;
         let digest = event::digest(&bytes);
         Ok(Prepared {
             bytes,
@@ -628,6 +639,7 @@ pub async fn check_write_base(bucket: &Bucket, prefix: &Prefix) -> Result<()> {
 }
 
 pub async fn recover(bucket: &Bucket) -> Result<Datashed> {
+    crate::sequence::initialize(bucket).await?;
     let mut state = Datashed::default();
     refresh(bucket, &mut state).await?;
     Ok(state)
@@ -643,6 +655,7 @@ pub async fn refresh_if_advanced(bucket: &Bucket, state: &mut Datashed) -> Resul
 }
 
 pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
+    let empty_etag = crate::sequence::reference(bucket)?;
     if let Some(checkpoint) = crate::epilogue::latest_checkpoint(bucket).await? {
         if checkpoint.milestone > state.milestone {
             *state = checkpoint.load(bucket).await?;
@@ -653,6 +666,8 @@ pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
             );
         }
     }
+    state.empty_etag = Some(empty_etag);
+
     // A Datashed Epilogue supplies the seed directly; no Timeline listing is needed.
     // Genesis has no anchor yet, so discover a seed with one minimum-sized LIST.
     let seed = if state.milestone == 0u8.into() {
@@ -668,7 +683,21 @@ pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
         Some(state.milestone.clone())
     };
     if let Some(seed) = seed {
-        let tail = last_existing(seed, |m| async move { exists(bucket, &m).await }).await?;
+        let tail = if seed == state.milestone || exists(bucket, &seed).await? {
+            last_existing(seed, |m| async move { exists(bucket, &m).await }).await?
+        } else {
+            let mut low = BigUint::from(0u8);
+            let mut high = seed;
+            while &low + 1u8 < high {
+                let mid = (&low + &high) >> 1usize;
+                if exists(bucket, &mid).await? {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+            low
+        };
         replay(bucket, state, tail).await?;
     }
     Ok(())

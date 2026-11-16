@@ -886,6 +886,10 @@ fn measure() -> Result<()> {
     } else {
         None
     };
+    let empty_etag = bucket
+        .as_ref()
+        .map(|bucket| runtime.block_on(crate::sequence::initialize(bucket)))
+        .transpose()?;
     let blob: Vec<_> = (0..4096).map(|n| (n % 251) as u8).collect();
     let mut parent = Some("seed".into());
     let mut samples = Vec::new();
@@ -930,11 +934,14 @@ fn measure() -> Result<()> {
         if variant == "cdc" {
             feed = Some(cdc_feed(&writer.state.native, &schema, &mut watermark)?);
         }
-        let encoded = if variant == "hook-cache-record" {
+        let mut encoded = if variant == "hook-cache-record" {
             encode(&commands, &delta, record_feed.as_ref())?
         } else {
             encode(&commands, &delta, feed.as_ref())?
         };
+        if let Some(etag) = &empty_etag {
+            crate::envbuf::seal(&mut encoded, etag)?;
+        }
         let digest = event::digest(&encoded);
         let cpu = start.elapsed();
         let put = Instant::now();

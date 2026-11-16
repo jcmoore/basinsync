@@ -101,29 +101,17 @@ pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
         sha384,
         version: turso::VERSION.into(),
     };
-    let reader = tokio::fs::File::open(file.path()).await?;
-    let length = reader.metadata().await?.len();
-    let mut headers = checkpoint
-        .headers()?
-        .iter()
-        .map(|(name, value)| Ok((name.to_string(), value.to_str()?.to_owned())))
-        .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
-    headers.insert("Content-Length".into(), length.to_string());
-    let access =
-        crate::range_get::signed_request(bucket, &checkpoint.viewpoint.key()?, "PUT", headers)
-            .await?;
-    // A known-length file body streams through one PUT without buffering the image.
-    let mut request = bucket.http_client().put(&access.url).body(reader);
-    for (name, value) in access.headers {
-        request = request.header(name, value);
-    }
-    if let Some(timeout) = bucket.request_timeout {
-        request = request.timeout(timeout);
-    }
-    let response = request.send().await?;
-    let status = response.status();
-    response.bytes().await?;
-    ensure!(status.as_u16() == 200, "backup PUT returned HTTP {status}");
+    let empty_etag = crate::sequence::reference(bucket)?;
+    let wrapped =
+        tokio::task::spawn_blocking(move || crate::envbuf::wrap_file(file.path(), &empty_etag))
+            .await??;
+    crate::sequence::put_file(
+        bucket,
+        &checkpoint.viewpoint.key()?,
+        wrapped.path(),
+        checkpoint.headers()?,
+    )
+    .await?;
     epilogue::confirm_promotion_sign(
         bucket,
         &epilogue::promotion_key(epilogue::DATASHED_PREFIX, &checkpoint.viewpoint)?,

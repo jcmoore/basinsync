@@ -4,6 +4,8 @@
 [derived-subkey]: <glossary/derived-subkey.md>
 [differential-event]: <glossary/differential-event.md>
 [diffuse16]: <glossary/diffuse16.md>
+[empty-sentinel]: <glossary/empty-sentinel.md>
+[envbuf]: <glossary/envbuf.md>
 [flow]: <glossary/flow.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [milestone]: <glossary/milestone.md>
@@ -14,6 +16,7 @@
 [retainer]: <glossary/retainer.md>
 [revision]: <glossary/revision.md>
 [sha384]: <glossary/sha384.md>
+[userheap]: <glossary/userheap.md>
 [viewpoint]: <glossary/viewpoint.md>
 [young-generation]: <glossary/young-generation.md>
 
@@ -23,6 +26,7 @@ All implemented S3 key patterns, relative to the configured bucket:
 
 | Object | Key |
 | --- | --- |
+| Empty-validator reference | `sentinel/empty` |
 | *Datashed*[^][datashed] *DifferentialEvent*[^][differential-event] | `timeline/${diffuse16(milestone)}` |
 | *Datashed*[^][datashed] backup *CommitMarker*[^][commit-marker] | `epilogue/${lex(~viewpoint)}` |
 | *Datashed*[^][datashed] *PromotionSign*[^][promotion-sign] | `epilogue/${lex(viewpoint)}` |
@@ -70,3 +74,13 @@ An outgoing *node*[^][node] edge uses the parent's `node_id` as its
 *retainer*[^][retainer]. Require `retainer < node`; `_a_`/`_m_` precede `n-`,
 and complemented *heights*[^][node-height] order parents before children.
 Reserve `_r_` for future *retainers*[^][retainer].
+
+## Object bodies
+
+Sequence objects reserve zero bytes for *empty sentinels*[^][empty-sentinel].
+*DifferentialEvents*[^][differential-event] are *EnvBuf feeds*[^][envbuf];
+*CommitMarkers*[^][commit-marker], including database backups, wrap their blob in
+one raw message; *PromotionSigns*[^][promotion-sign] use a padding envelope with
+message length zero. Their framing keeps valid empty messages distinct from
+sentinels. *UserHeap*[^][userheap] objects stay opaque, including valid empty blobs.
+The reference object is always zero bytes and is created only if absent.

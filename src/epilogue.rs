@@ -44,7 +44,7 @@ pub fn flow_promotion_key(
     event::valid_flow(flow)?;
     promotion_key(&flow_prefix(flow, revision), viewpoint)
 }
-/// A sign is an immutable, empty object; confirmation also resolves ambiguous PUT replies.
+/// A sign is an immutable padding envelope with an empty message; confirmation also resolves ambiguous PUT replies.
 pub async fn confirm_promotion_sign(bucket: &Bucket, key: &str, upstream: &BigUint) -> Result<()> {
     ensure!(
         upstream > &BigUint::from(0u8),
@@ -55,9 +55,10 @@ pub async fn confirm_promotion_sign(bucket: &Bucket, key: &str, upstream: &BigUi
     }
     let mut headers = conditional_headers();
     headers.insert("x-amz-meta-upstream", upstream.to_string().parse()?);
-    let result = bucket
-        .put_object_with_headers(key, &[], Some(headers))
-        .await;
+    let mut bytes = vec![];
+    crate::envbuf::append(&mut bytes, &[], crate::envbuf::PADDING)?;
+    crate::envbuf::seal(&mut bytes, &crate::sequence::reference(bucket)?)?;
+    let result = crate::sequence::put(bucket, key, &bytes, headers).await;
     ensure!(
         promotion_sign_matches(bucket, key, upstream).await?,
         "PromotionSign not confirmed: {result:?}"
@@ -69,7 +70,12 @@ async fn promotion_sign_matches(bucket: &Bucket, key: &str, upstream: &BigUint) 
         .head_object(key)
         .await?;
     match status {
+        200 if head.content_length == Some(0) => Ok(false),
         200 => {
+            ensure!(
+                head.content_length == Some(16),
+                "invalid PromotionSign envelope length"
+            );
             ensure!(
                 head.metadata.as_ref().and_then(|m| m.get("upstream"))
                     == Some(&upstream.to_string()),
@@ -90,25 +96,35 @@ pub fn conditional_headers() -> HeaderMap {
 }
 
 pub async fn latest_key(bucket: &Bucket, prefix: &str) -> Result<Option<(String, Viewpoint)>> {
-    let (page, status) = bucket
-        .list_page(prefix.into(), None, None, None, Some(1))
-        .await?;
-    ensure!(status == 200, "Epilogue LIST returned HTTP {status}");
-    let Some(object) = page.contents.first() else {
-        return Ok(None);
-    };
-    let suffix = object
-        .key
-        .strip_prefix(prefix)
-        .context("invalid Epilogue key")?;
-    // All complemented markers sort before all uncomplemented signs. A sign
-    // at the minimum therefore means this Epilogue currently has no markers.
-    if suffix.starts_with("0z") {
-        crate::lexidecimal::decode(suffix)?;
-        return Ok(None);
+    let mut after = None;
+    loop {
+        let (page, status) = bucket
+            .list_page(prefix.into(), None, None, after.clone(), Some(1))
+            .await?;
+        ensure!(status == 200, "Epilogue LIST returned HTTP {status}");
+        let Some(object) = page.contents.first() else {
+            return Ok(None);
+        };
+        ensure!(
+            after.as_ref().is_none_or(|key: &String| object.key > *key),
+            "Epilogue LIST did not advance"
+        );
+        let suffix = object
+            .key
+            .strip_prefix(prefix)
+            .context("invalid Epilogue key")?;
+        // All complemented markers precede uncomplemented signs.
+        if suffix.starts_with("0z") {
+            crate::lexidecimal::decode(suffix)?;
+            return Ok(None);
+        }
+        let viewpoint = Viewpoint::from_key(&format!("{DATASHED_PREFIX}{suffix}"))?;
+        if object.size > 0 {
+            return Ok(Some((object.key.clone(), viewpoint)));
+        }
+        // A metadata-only sentinel is an exclusive bound, never a recovery anchor.
+        after = Some(object.key.clone());
     }
-    let viewpoint = Viewpoint::from_key(&format!("{DATASHED_PREFIX}{suffix}"))?;
-    Ok(Some((object.key.clone(), viewpoint)))
 }
 
 #[derive(Clone, Debug)]
@@ -184,7 +200,7 @@ impl Checkpoint {
                 && actual.sha384 == self.sha384,
             "backup metadata changed"
         );
-        let image = response.as_slice().to_vec();
+        let image = crate::envbuf::message(response.as_slice())?.to_vec();
         ensure!(
             event::digest(&image) == self.sha384,
             "backup checksum mismatch"
@@ -205,20 +221,25 @@ impl Checkpoint {
 }
 
 pub async fn latest_checkpoint(bucket: &Bucket) -> Result<Option<Checkpoint>> {
-    let Some((key, viewpoint)) = latest_key(bucket, DATASHED_PREFIX).await? else {
-        return Ok(None);
-    };
-    let (head, status) = crate::object_read::if_present(bucket)?
-        .head_object(key)
-        .await?;
-    ensure!(status == 200, "backup HEAD returned HTTP {status}");
-    let headers = head
-        .metadata
-        .context("missing backup metadata")?
-        .into_iter()
-        .map(|(key, value)| (format!("x-amz-meta-{key}"), value))
-        .collect();
-    Ok(Some(Checkpoint::from_headers(viewpoint, &headers)?))
+    loop {
+        let Some((key, viewpoint)) = latest_key(bucket, DATASHED_PREFIX).await? else {
+            return Ok(None);
+        };
+        let (head, status) = crate::object_read::if_present(bucket)?
+            .head_object(key)
+            .await?;
+        ensure!(status == 200, "backup HEAD returned HTTP {status}");
+        if head.content_length == Some(0) {
+            continue;
+        }
+        let headers = head
+            .metadata
+            .context("missing backup metadata")?
+            .into_iter()
+            .map(|(key, value)| (format!("x-amz-meta-{key}"), value))
+            .collect();
+        return Ok(Some(Checkpoint::from_headers(viewpoint, &headers)?));
+    }
 }
 
 pub async fn replicate(
@@ -232,9 +253,8 @@ pub async fn replicate(
     let mut headers = conditional_headers();
     headers.insert("x-amz-meta-sha384", marker.sha384.parse()?);
     headers.extend(crate::details::context_headers(&marker.context)?);
-    let result = bucket
-        .put_object_with_headers(&key, &marker.blob, Some(headers))
-        .await;
+    let bytes = crate::envbuf::wrap(&marker.blob, &crate::sequence::reference(bucket)?)?;
+    let result = crate::sequence::put(bucket, &key, &bytes, headers).await;
     match result {
         Ok(response) if (200..300).contains(&response.status_code()) => return Ok(()),
         // Resolve conflicts and ambiguous replies by verifying the immutable object.
@@ -247,7 +267,7 @@ pub async fn replicate(
                 "Flow replication failed: {result:?}"
             );
             ensure!(
-                existing.as_slice() == marker.blob,
+                crate::envbuf::message(existing.as_slice())? == marker.blob,
                 "conflicting stored Flow CommitMarker"
             );
             let actual: std::collections::BTreeMap<_, _> = existing
@@ -293,7 +313,13 @@ pub async fn matches_marker(
         "Flow HEAD returned HTTP {status}"
     );
     Ok(status == 200
-        && head.content_length.and_then(|n| u64::try_from(n).ok()) == Some(location.length)
+        && head
+            .content_length
+            .and_then(|n| u64::try_from(n).ok())
+            .is_some_and(|length| {
+                crate::envbuf::encoded_length(location.length)
+                    .is_ok_and(|minimum| length >= minimum && length % 16 == 0)
+            })
         && head
             .metadata
             .as_ref()

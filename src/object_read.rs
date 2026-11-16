@@ -11,11 +11,15 @@ pub fn if_present(bucket: &Bucket) -> Result<Bucket> {
 
 pub async fn exists(bucket: &Bucket, key: &str) -> Result<bool> {
     let mut probe = if_present(bucket)?;
-    probe.add_header("if-none-match", "*");
-    let (_, status) = probe.head_object(key).await?;
+    probe.add_header("if-none-match", &crate::sequence::reference(bucket)?);
+    let (head, status) = probe.head_object(key).await?;
     match status {
         // A provider that ignores preconditions can still answer correctly.
-        200 | 304 => Ok(true),
+        200 => match head.content_length {
+            Some(length) if length >= 0 => Ok(length > 0),
+            _ => bail!("sequence HEAD has no valid content length"),
+        },
+        304 => Ok(false),
         // Some providers check If-Match before absence; others return 404 first.
         404 | 412 => Ok(false),
         _ => bail!("object existence HEAD returned HTTP {status}"),

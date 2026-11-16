@@ -4,8 +4,8 @@
 
 # Range manifest
 
-The final non-padding *EnvBuf*[^][envbuf] in a command sequence. Its
-*FlexBuffers*[^][flexbuffers] payload indexes preceding command *envelopes*[^][envbuf] and padding runs by their
+The final non-padding *EnvBuf*[^][envbuf] in a command feed. Its
+*FlexBuffers*[^][flexbuffers] message indexes preceding command *envelopes*[^][envbuf] and padding runs by their
 exclusive end offset in the containing object, encoded as positive
 *Lexidecimal*[^][lexidecimal]:
 

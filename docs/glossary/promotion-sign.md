@@ -1,4 +1,6 @@
 [commit-marker]: <commit-marker.md>
+[empty-sentinel]: <empty-sentinel.md>
+[envbuf]: <envbuf.md>
 [epilogue]: <epilogue.md>
 [epilogue-compaction]: <epilogue-compaction.md>
 [lexidecimal]: <lexidecimal.md>
@@ -13,7 +15,8 @@
 The S3 complement of a *CommitMarker*[^][commit-marker], stored in the same
 *Epilogue*[^][epilogue] using its uncomplemented *Lexidecimal*[^][lexidecimal]
 *Viewpoint*[^][viewpoint]; see the *object-key patterns*[^][object-keys].
-Its presence certifies that the entire graph has completed *promotion*[^][node-promotion],
+Its object is a padding *EnvBuf*[^][envbuf] (`110`) with message length zero,
+rather than a zero-byte *sentinel*[^][empty-sentinel]. Its presence certifies that the entire graph has completed *promotion*[^][node-promotion],
 including an empty graph. Its `x-amz-meta-upstream` records the source
 *upstream*[^][upstream] *Milestone*[^][milestone] as canonical decimal.
 *Epilogue compaction*[^][epilogue-compaction] is expected to use a contiguous available prefix

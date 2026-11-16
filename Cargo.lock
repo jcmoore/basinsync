@@ -290,6 +290,7 @@ dependencies = [
  "base64 0.22.1",
  "flexbuffers",
  "hmac",
+ "md5",
  "num-bigint",
  "proptest",
  "redb",

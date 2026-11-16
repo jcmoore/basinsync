@@ -11,6 +11,7 @@ prerequisites:
 [differential-event]: <../glossary/differential-event.md>
 [diffuse16]: <../glossary/diffuse16.md>
 [downstream]: <../glossary/downstream.md>
+[empty-sentinel]: <../glossary/empty-sentinel.md>
 [envbuf]: <../glossary/envbuf.md>
 [epilogue]: <../glossary/epilogue.md>
 [epilogue-protocol]: <../epilogue-protocol.md>
@@ -32,7 +33,8 @@ Give the *Datashed*[^][datashed] a shared *Timeline*[^][timeline] for changes ac
 and refresh.
 
 1. Number *Milestones*[^][milestone] from one; name objects with *Diffuse16*[^][diffuse16].
-   List a seed, then search exponentially upward to find the latest.
+   List a seed, then search exponentially upward to find the latest; *empty
+   sentinels*[^][empty-sentinel] are exclusive bounds, including a listed seed.
 2. Replay every *DifferentialEvent*[^][differential-event] to recover the mapping
    from *Flow*[^][flow] id to latest *Viewpoint*[^][viewpoint].
 3. Add `flow` to the multipart `details` field. Race to conditionally append the
@@ -47,7 +49,7 @@ and refresh.
    *Milestone*[^][milestone] before refreshing; absence confirms the materialized
    state is current.
 
-Start each *DifferentialEvent*[^][differential-event] with one
+Start each *DifferentialEvent*[^][differential-event] feed with one
 *EnvBuf-wrapped*[^][envbuf] *FlexBuffers*[^][flexbuffers]
 *commitflow tuple*[^][datashed-timeline]:
 

@@ -4,6 +4,7 @@
 [context]: <glossary/context.md>
 [datashed]: <glossary/datashed.md>
 [differential-event]: <glossary/differential-event.md>
+[envbuf]: <glossary/envbuf.md>
 [json0]: <glossary/json0.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [milestone]: <glossary/milestone.md>
@@ -56,7 +57,8 @@ For `latest`, send the returned `headers` with its URL, including the signed
 *conditional read*[^][conditional-read] header. A
 *Range GET*[^][range-get] must be cryptographically restricted to the expected
 *marker*[^][commit-marker] bytes. When the matching stored
-*marker*[^][commit-marker] supplies the URL, `headers` is `{"If-Match":"*"}`. For zero length,
+*marker*[^][commit-marker] supplies the URL, its signed Range starts at byte eight
+and selects only the raw *EnvBuf message*[^][envbuf]. For zero length,
 omit `url` and `headers` and use empty bytes without fetching.
 
 With no committed *marker*[^][commit-marker], `latest` is `null`.

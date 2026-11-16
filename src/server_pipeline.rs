@@ -395,9 +395,11 @@ impl Preparation {
                         .await?
                         {
                             Some(
-                                basinsync::range_get::presign_whole(
+                                basinsync::range_get::presign(
                                     &self.bucket,
                                     &basinsync::epilogue::flow_key(&flow, &revision, &viewpoint)?,
+                                    8,
+                                    location.length,
                                 )
                                 .await?,
                             )

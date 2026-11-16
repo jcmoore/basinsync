@@ -7,6 +7,7 @@
 [datashed-backup]: <datashed-backup.md>
 [differential-event]: <glossary/differential-event.md>
 [diffuse16]: <glossary/diffuse16.md>
+[empty-sentinel]: <glossary/empty-sentinel.md>
 [envbuf]: <glossary/envbuf.md>
 [epilogue-protocol]: <epilogue-protocol.md>
 [flexbuffers]: <glossary/flexbuffers.md>
@@ -31,7 +32,8 @@ recorded *Milestone*[^][milestone] seeds exponential search for the tail.
 Without a *CommitMarker*[^][commit-marker], list a seed in the
 *Timeline*[^][timeline] keyspace and replay from the beginning.
 *Diffuse16*[^][diffuse16] key order does not reveal the latest.
-An empty *Timeline*[^][timeline] expects *Milestone*[^][milestone] one.
+Treat *empty sentinels*[^][empty-sentinel] as exclusive search bounds, never seeds
+or replayable entries. An empty *Timeline*[^][timeline] expects *Milestone*[^][milestone] one.
 Use *conditional reads*[^][conditional-read] for GETs and HEADs, including search probes.
 
 Commitflow tuples begin with `Symbol.species`, using the

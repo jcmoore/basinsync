@@ -1,4 +1,5 @@
 [SKILL]: <skills/basinsync-tutorial-dag/SKILL.md>
+[envbuf]: <glossary/envbuf.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [object-keys]: <object-keys.md>
 
@@ -19,7 +20,8 @@ concepts and interfaces.
 
 Use `Basin` for the tenancy domain and `Datashed` for the data-state `Reservoir`.
 Use `UserHeap` for client-driven `Flow` nodes and `KernelHeap` for server-driven
-`Datashed` nodes.
+`Datashed` nodes. Call concatenated *EnvBufs*[^][envbuf] a feed and their enclosed
+bytes a message (`message_length`), distinguishing that count from S3 `Content-Length`.
 
 # Tutorial dependencies
 

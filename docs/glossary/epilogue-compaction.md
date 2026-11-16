@@ -1,4 +1,6 @@
 [commit-marker]: <commit-marker.md>
+[empty-sentinel]: <empty-sentinel.md>
+[envbuf]: <envbuf.md>
 [epilogue]: <epilogue.md>
 [promotion-sign]: <promotion-sign.md>
 [viewpoint]: <viewpoint.md>
@@ -10,8 +12,9 @@ up to, but not through, a retained *Viewpoint*[^][viewpoint].
 
 Plan for a contiguous available prefix of stored *CommitMarker*[^][commit-marker]/
 *PromotionSign*[^][promotion-sign] pairs. Tombstone compacted *markers*[^][commit-marker]
-with zero-length objects and explicit metadata, such as `x-amz-meta-compacted-at`;
-empty payloads alone are valid *markers*[^][commit-marker]. Then DELETE their signs.
+with *empty sentinels*[^][empty-sentinel] and explicit metadata, such as
+`x-amz-meta-compacted-at`; valid empty *markers*[^][commit-marker] retain their
+*EnvBuf*[^][envbuf] framing. Then DELETE their signs.
 
 Sign publishers check for tombstones before and after PUT, removing their sign
 if compaction overtook publication. LISTers validate the corresponding

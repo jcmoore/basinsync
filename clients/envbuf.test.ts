@@ -1,5 +1,6 @@
+import {createHash} from "node:crypto";
 import { expect,test } from "bun:test";
-import { all,at,before,concat,wrap,readable,PADDING,PLATFORM_EXTENSION } from "./envbuf";
+import { all,at,before,concat,wrap,readable,PADDING,PLATFORM_EXTENSION, seal, message } from "./envbuf";
 import { encodeWalEvent,encodeTuples,manifestPath,rangesAt,eventTuples,deltasAt,type WalDelta } from "./events";
 import { encode,toObject } from "./flexbuffer";
 import { encode as lex } from "./lexidecimal";
@@ -91,4 +92,12 @@ test("range manifests index each consecutive padding run once at its exclusive e
     expect(()=>rangesAt(bad)).toThrow();
   }
   const bad=new Uint8Array(padded);bad[frames[0].end-1]^=1;expect(()=>rangesAt(bad)).toThrow();
+});
+
+test("empty sentinels differ from sealed feeds and empty raw messages",()=>{
+  const emptyETag=`"${createHash("md5").update(new Uint8Array()).digest("hex")}"`;
+  const padding=seal(new Uint8Array(),emptyETag);expect(all(padding)).toHaveLength(1);expect(all(padding)[0].format).toBe(PADDING);expect(all(padding)[0].content.length).toBe(0);
+  for(const length of [0,1,15,16,17,65536]){
+    const raw=new Uint8Array(length).fill(42),encoded=seal(wrap(raw,0),emptyETag);expect(message(encoded)).toEqual(raw);expect(`"${createHash("md5").update(encoded).digest("hex")}"`).not.toBe(emptyETag);
+  }
 });

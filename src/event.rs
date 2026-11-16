@@ -668,7 +668,7 @@ mod envelope_tests {
         let mut bad = padded.clone();
         bad[first_padding_end - 1] ^= 1;
         assert!(decode_entry(&bad).is_err());
-        // Raw content is readable and cannot silently disappear from a command stream.
+        // Raw content is readable and cannot silently disappear from a command feed.
         padded[3] = 4;
         padded[first_padding_end - 4] = 4;
         assert!(decode_entry(&padded).is_err());

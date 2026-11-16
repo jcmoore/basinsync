@@ -8,6 +8,7 @@ prerequisites:
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-read]: <../glossary/conditional-read.md>
 [development]: <../development.md>
+[envbuf]: <../glossary/envbuf.md>
 [epilogue]: <../glossary/epilogue.md>
 [epilogue-compaction]: <../glossary/epilogue-compaction.md>
 [epilogue-protocol]: <../epilogue-protocol.md>
@@ -79,7 +80,8 @@ Keep object I/O outside the writer;
 journal mutations through *Timeline*[^][timeline] ingestion frames.
 
 Once the entire graph is promoted, conditionally create its *PromotionSign*[^][promotion-sign]
-at the uncomplemented position in the same *Epilogue*[^][epilogue], recording
+as a padding *EnvBuf*[^][envbuf] with message length zero at the uncomplemented
+position in the same *Epilogue*[^][epilogue], recording
 `x-amz-meta-upstream` as canonical decimal. Confirm presence and matching metadata before
 removing the *marking task*[^][marking-task], including for empty graphs. The sign
 certifies completed promotion; future *compaction*[^][epilogue-compaction] is expected to require
