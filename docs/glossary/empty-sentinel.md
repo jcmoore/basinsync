@@ -23,6 +23,4 @@ postcondition: append one bucket-proven padding *EnvBuf*[^][envbuf]
 and retry with `If-Match` on that observed validator. At startup, conditionally
 probe single padding *EnvBufs*[^][envbuf] with message lengths 1 through 8,
 in order, using `0xee` message bytes (each envelope is 32 bytes); fail startup
-if none has a distinct validator. Reuse each fixed *probe key*[^][object-keys],
-advancing colliding candidates with `If-Match` and verifying the selected bytes
-on later boots. Opaque user blobs outside sequences may still be empty.
+if none has a distinct validator. Opaque user blobs outside sequences may still be empty.

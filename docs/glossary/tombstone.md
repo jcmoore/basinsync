@@ -14,4 +14,4 @@ if no shorter candidate works.
 Tombstones remain below the sixteen-byte *EnvBuf*[^][envbuf] floor. They occupy
 older positions as exclusive lower bounds; they are neither published data nor
 eligible for sentinel replacement. Keep their keys and retirement metadata.
-The *probe key*[^][object-keys] preserves the bucket's chosen representation.
+The *probe keys*[^][object-keys] preserve the bucket's chosen representation.

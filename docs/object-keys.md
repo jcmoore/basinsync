@@ -28,8 +28,8 @@ All implemented S3 key patterns, relative to the configured bucket:
 | Object | Key |
 | --- | --- |
 | Empty-validator reference | `sentinel/empty` |
-| *Tombstone*[^][tombstone] probes | `sentinel/tombstone` |
-| Padding probes | `sentinel/padding` |
+| *Tombstone*[^][tombstone] probes | `sentinel/tombstone/${length}` |
+| Padding probes | `sentinel/padding/${message_length}` |
 | *Datashed*[^][datashed] *DifferentialEvent*[^][differential-event] | `timeline/${diffuse16(milestone)}` |
 | *Datashed*[^][datashed] backup *CommitMarker*[^][commit-marker] | `epilogue/${lex(~viewpoint)}` |
 | *Datashed*[^][datashed] *PromotionSign*[^][promotion-sign] | `epilogue/${lex(viewpoint)}` |
@@ -86,7 +86,7 @@ Sequence objects reserve zero bytes for *empty sentinels*[^][empty-sentinel].
 one raw message; *PromotionSigns*[^][promotion-sign] use a padding envelope with
 message length 1–8. Their framing keeps valid empty messages distinct from
 *sentinels*[^][empty-sentinel]. *UserHeap*[^][userheap] objects stay opaque, including valid empty blobs.
-The empty reference is always zero bytes. Create each probe key only if absent;
-advance colliding candidates with `If-Match` and verify distinct candidates on reuse.
-*Tombstone*[^][tombstone] probe lengths are 2, 4, …, 14; sixteen-byte candidates are refused. Padding probes each contain a single
+The empty reference is always zero bytes. Probe objects are created only if
+absent and verified on reuse. *Tombstone*[^][tombstone] probe lengths are decimal
+2, 4, …, 14; sixteen-byte candidates are refused. Padding probes each contain a single
 32-byte *EnvBuf*[^][envbuf], with `message_length` from 1 through 8 and `0xee` message bytes.
