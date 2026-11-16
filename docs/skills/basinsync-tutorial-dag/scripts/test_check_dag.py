@@ -86,12 +86,56 @@ class TutorialDagTests(unittest.TestCase):
         with fixture({first: frontmatter([]), second: frontmatter([first])}) as directory:
             errors = lint_tutorials(directory)["errors"]
             self.assertEqual(len(errors), 1)
-            self.assertIn('duplicate tutorial slug "shared-topic"', errors[0])
+            self.assertIn('duplicate folder name "shared-topic"', errors[0])
             self.assertIn(first, errors[0])
             self.assertIn(second, errors[0])
             result = cli(directory)
             self.assertEqual(result.returncode, 1)
-            self.assertIn("duplicate tutorial slug", result.stderr)
+            self.assertIn("duplicate folder name", result.stderr)
+
+    def test_nested_tutorials_and_repeated_height_names(self):
+        independent = "0z000/independent"
+        left = ROOT + "/0z001/left"
+        right = independent + "/0z001/right"
+        merge = left + "/0z002/merge"
+        with fixture({ROOT: frontmatter([]), independent: frontmatter([]),
+                      left: frontmatter([ROOT]), right: frontmatter([independent]),
+                      merge: frontmatter([left, right])}) as directory:
+            self.assertEqual(lint_tutorials(directory), {"errors": [], "tutorials": 5, "edges": 4})
+            write(directory, left, frontmatter([merge]))
+            errors = "\n".join(lint_tutorials(directory)["errors"])
+            self.assertIn("must exceed", errors)
+            self.assertIn("prerequisite cycle", errors)
+
+    def test_folder_names_cannot_repeat_at_any_nesting_level(self):
+        for duplicate in [ROOT + "/0z001/root", ROOT + "/0z001/left"]:
+            with self.subTest(duplicate=duplicate), fixture({ROOT: frontmatter([]),
+                    LEFT: frontmatter([ROOT]), duplicate: frontmatter([ROOT])}) as directory:
+                self.assertIn("duplicate folder name", "\n".join(lint_tutorials(directory)["errors"]))
+
+    def test_height_shaped_tutorial_names_are_not_exempt(self):
+        first, second = "0z000/0z001", "0z001/0z001"
+        with fixture({first: frontmatter([]), second: frontmatter([first])}) as directory:
+            self.assertIn('duplicate folder name "0z001"', "\n".join(lint_tutorials(directory)["errors"]))
+
+    def test_asset_folder_names_are_globally_unique_too(self):
+        for first, second in [(ROOT + "/assets", LEFT + "/assets"),
+                              (ROOT + "/left", LEFT),
+                              (ROOT + "/assets/archive", LEFT + "/media/archive")]:
+            with self.subTest(first=first, second=second), fixture({ROOT: frontmatter([]),
+                    LEFT: frontmatter([ROOT])}) as directory:
+                (directory / first).mkdir(parents=True, exist_ok=True)
+                (directory / second).mkdir(parents=True, exist_ok=True)
+                self.assertIn("duplicate folder name", "\n".join(lint_tutorials(directory)["errors"]))
+
+    def test_default_namespace_includes_other_documentation_folders(self):
+        with fixture({}) as directory:
+            docs = directory / "docs"
+            write(docs / "diy", "0z000/glossary", frontmatter([]))
+            (docs / "glossary").mkdir()
+            result = lint_tutorials(docs / "diy", folder_root=docs)
+            self.assertIn('duplicate folder name "glossary"', "\n".join(result["errors"]))
+            self.assertEqual(result["tutorials"], 1)
 
     def test_distinct_slugs_may_share_trailing_words(self):
         with fixture({"0z000/shared-topic": frontmatter([]),
@@ -116,6 +160,8 @@ class TutorialDagTests(unittest.TestCase):
             ("case mismatch", {"0z000/Root": frontmatter([]), LEFT: frontmatter([ROOT])}, "missing prerequisite"),
             ("old flat layout", {"0z000-root.md": frontmatter([])}, "unsigned-Lexidecimal-height"),
             ("nested folder", {"0z000/nested/root/README.md": frontmatter([])}, "missing README.md"),
+            ("missing nested height", {ROOT: frontmatter([]), ROOT + "/child": frontmatter([ROOT])}, "alternating"),
+            ("noncanonical nested height", {ROOT: frontmatter([]), ROOT + "/0z0100/child": frontmatter([ROOT])}, "noncanonical"),
             ("missing frontmatter", {ROOT: "# No metadata\n"}, "missing frontmatter"),
             ("unclosed frontmatter", {ROOT: "---\nprerequisites: []\n"}, "unterminated"),
             ("missing prerequisites", {ROOT: "---\ntitle: root\n---\n"}, "expected prerequisites"),
@@ -184,8 +230,13 @@ class TutorialDagTests(unittest.TestCase):
             skill = docs / "skills/basinsync-tutorial-dag"
             shutil.copytree(SCRIPTS.parent, skill, ignore=shutil.ignore_patterns("__pycache__"))
             write(docs / "diy", ROOT, frontmatter([]))
+            write(docs / "diy", ROOT + "/0z001/child", frontmatter([ROOT]))
             result = cli(script=skill / "scripts/check_dag.py")
             self.assertEqual(result.returncode, 0, result.stderr)
+            (docs / "child").mkdir()
+            duplicate = cli(script=skill / "scripts/check_dag.py")
+            self.assertEqual(duplicate.returncode, 1)
+            self.assertIn('duplicate folder name "child"', duplicate.stderr)
 
 
 if __name__ == "__main__":

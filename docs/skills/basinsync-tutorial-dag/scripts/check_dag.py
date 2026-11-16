@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Validate tutorials grouped by canonical Lexidecimal height; Python 3.9+."""
+"""Validate nested tutorial DAGs and unique documentation folder names; Python 3.9+."""
+import os
 import re
 import sys
 from pathlib import Path
 
 DEFAULT_DIRECTORY = Path(__file__).resolve().parents[3] / "diy"
 SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
-TUTORIAL = rf"0z[0-9a-f]+/{SLUG}"
+TUTORIAL = rf"0z[0-9a-f]+/{SLUG}(?:/0z[0-9a-f]+/{SLUG})*"
 
 
 def encode_height(height):
@@ -53,14 +54,44 @@ def prerequisites(text):
     for line in fields[1:]:
         item = re.fullmatch(rf"  - ({TUTORIAL})", line)
         if not item:
-            raise ValueError("prerequisites must be unquoted <height>/<slug> folder paths relative to diy/")
+            raise ValueError("prerequisites must be unquoted alternating <height>/<slug> folder paths relative to diy/")
         dependencies.append(item[1])
     return dependencies
 
 
-def lint_tutorials(directory):
-    directory = Path(directory)
-    errors, graph, slugs = [], {}, {}
+def lint_tutorials(directory, folder_root=None):
+    directory = Path(directory).resolve()
+    folder_root = Path(folder_root).resolve() if folder_root else directory
+    errors, graph, names, readmes = [], {}, {}, set()
+
+    # All folder names share one namespace, including supporting asset folders.
+    # Only canonical Lexidecimal heights are exempt from uniqueness.
+    def on_error(error):
+        raise error
+
+    for parent, folders, files in os.walk(folder_root, onerror=on_error):
+        folders[:] = sorted(name for name in folders if name != "__pycache__")
+        for slug in folders:
+            folder = Path(parent) / slug
+            name = folder.relative_to(folder_root).as_posix()
+            if folder.is_symlink():
+                errors.append(f"{name}: folders must not be symlinks")
+                continue
+            try:
+                decode_height(slug)
+            except ValueError:
+                height_folder = False
+            else:
+                # A tutorial's name is still unique even if it resembles a height.
+                height_folder = not (directory in folder.parents and re.fullmatch(
+                    TUTORIAL, folder.relative_to(directory).as_posix()))
+            if not height_folder:
+                if slug in names:
+                    errors.append(f'{name}: duplicate folder name "{slug}" (also {names[slug]})')
+                else:
+                    names[slug] = name
+        if "README.md" in files and (Path(parent) == directory or directory in Path(parent).parents):
+            readmes.add((Path(parent) / "README.md").relative_to(directory).as_posix())
 
     def visit(folder, height):
         name = folder.relative_to(directory).as_posix()
@@ -69,12 +100,6 @@ def lint_tutorials(directory):
             return
         if not re.fullmatch(SLUG, folder.name):
             errors.append(f"{name}: expected a <lowercase-slug> folder")
-        else:
-            slug = folder.name
-            if slug in slugs:
-                errors.append(f'{name}: duplicate tutorial slug "{slug}" (also {slugs[slug]})')
-            else:
-                slugs[slug] = name
         # Check the actual spelling even on case-insensitive filesystems.
         readme = next((path for path in folder.iterdir() if path.name == "README.md"), None)
         if readme is None:
@@ -90,24 +115,35 @@ def lint_tutorials(directory):
             errors.append(f"{name}: {error}")
         graph[name] = (height, dependencies)
 
-    for folder in sorted(directory.iterdir()):
-        if folder.is_symlink():
-            errors.append(f"{folder.name}: tutorial height folders must not be symlinks")
-            continue
-        if not folder.is_dir():
-            if folder.suffix.lower() == ".md":
-                errors.append(f"{folder.name}: expected <unsigned-Lexidecimal-height>/<lowercase-slug>/README.md")
-            continue
-        height = None
-        try:
-            height = decode_height(folder.name)
-        except ValueError as error:
-            errors.append(f"{folder.name}: {error}")
-        for path in sorted(folder.iterdir()):
-            if path.is_symlink() or path.is_dir():
-                visit(path, height)
-            elif path.suffix.lower() == ".md":
-                errors.append(f"{folder.name}/{path.name}: expected a tutorial folder containing README.md")
+    pending = [directory]
+    while pending:
+        parent = pending.pop()
+        for folder in sorted(parent.iterdir()):
+            if folder.is_symlink():
+                continue
+            if not folder.is_dir():
+                if parent == directory and folder.suffix.lower() == ".md":
+                    errors.append(f"{folder.name}: expected <unsigned-Lexidecimal-height>/<lowercase-slug>/README.md")
+                continue
+            # Other subfolders can hold assets; their names are still unique.
+            if parent != directory and not re.fullmatch(r"0[zZyY][0-9a-fA-F]+", folder.name):
+                continue
+            height = None
+            try:
+                height = decode_height(folder.name)
+            except ValueError as error:
+                errors.append(f"{folder.relative_to(directory).as_posix()}: {error}")
+            for path in sorted(folder.iterdir()):
+                if path.is_symlink():
+                    continue
+                if path.is_dir():
+                    visit(path, height)
+                    pending.append(path)
+                elif path.suffix.lower() == ".md":
+                    errors.append(f"{path.relative_to(directory).as_posix()}: expected a tutorial folder containing README.md")
+    for readme in sorted(readmes):
+        if readme[:-len("/README.md")] not in graph:
+            errors.append(f"{readme}: expected alternating <height>/<slug> tutorial folders")
     if not graph:
         errors.append("no tutorials found")
 
@@ -149,7 +185,8 @@ def main(args):
     try:
         if len(args) > 1:
             raise ValueError("usage: check_dag.py [tutorial-directory]")
-        result = lint_tutorials(Path(args[0]) if args else DEFAULT_DIRECTORY)
+        result = lint_tutorials(Path(args[0]) if args else DEFAULT_DIRECTORY,
+                                folder_root=None if args else DEFAULT_DIRECTORY.parent)
         if result["errors"]:
             print("\n".join(result["errors"]), file=sys.stderr)
             return 1

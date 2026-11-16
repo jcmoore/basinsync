@@ -18,7 +18,8 @@ object storage.
 Build it incrementally, recording milestones as concise tutorials with linked
 reference and glossary entries. Height folders encode dependency height in
 *Lexidecimal*[^][lexidecimal]; frontmatter lists prerequisite folders relative to `diy/`.
-Tutorials at the same height are parallel branches, not a reading sequence. Begin with
+Tutorial folders may nest by repeating height/name pairs; only height folder names
+may repeat. Tutorials at the same height are parallel branches, not a reading sequence. Begin with
 *Shallow epilogue commits*[^][diy/0z000/shallow-epilogue-commits].
 
 Coordinate writes and locate payloads with

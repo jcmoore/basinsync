@@ -27,8 +27,10 @@ Call skippable format `110` envelopes *margins*[^][margin]; reserve padding for 
 
 # Tutorial dependencies
 
-Group tutorials as `diy/<height>/<slug>/README.md`, using canonical unsigned
-*Lexidecimal*[^][lexidecimal] height folders and unprefixed, globally unique slugs.
+Tutorial paths alternate canonical unsigned *Lexidecimal*[^][lexidecimal] height
+folders and named folders, ending in `README.md`; nesting may continue as
+`diy/<height>/<unique>/<height>/<distinct>/README.md`. Throughout `docs/`, all
+folder names must be globally unique except canonical height folder names.
 Frontmatter lists prerequisite folders relative to `diy/`, each at a strictly
 smaller height. For tutorial graph edits or audits, use the *tutorial DAG
 skill*[^][SKILL] and its bundled Python linter.
@@ -51,8 +53,8 @@ plural, and synonymous forms, using the corresponding glossary entry. During
 audits, check for missing term links as well as broken links; omit self-links in
 the defining entry and links inside code.
 
-For tutorial links, use `diy/<height>/<slug>` reference labels targeting the
-corresponding `README.md`. Otherwise, name local labels after the destination
+For tutorial links, use the full tutorial folder path from `docs/` as the
+reference label (including every nested height/name pair), targeting its `README.md`. Otherwise, name local labels after the destination
 filename without its extension, preserving case (e.g. `[server]: <../server.md>`).
 Verify this correspondence during audits. Except for `README.md`, filenames under
 `docs/` should be unique; external references may use descriptive names.

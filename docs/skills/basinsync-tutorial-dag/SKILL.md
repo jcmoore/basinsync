@@ -1,6 +1,6 @@
 ---
 name: basinsync-tutorial-dag
-description: Rename or audit basinsync tutorials grouped in Lexidecimal height folders with prerequisite frontmatter; check dependency integrity after tutorial graph changes.
+description: Rename or audit nested basinsync tutorial README folders, Lexidecimal heights, globally unique folder names, and prerequisite graphs.
 ---
 
 [check_dag]: <scripts/check_dag.py>
@@ -8,11 +8,13 @@ description: Rename or audit basinsync tutorials grouped in Lexidecimal height f
 
 # Tutorial dependency DAG
 
-Name each tutorial `diy/<height>/<slug>/README.md`, encoding its nonnegative height in
-canonical unsigned *Lexidecimal*[^][lexidecimal]. Height must exceed every direct
+Tutorial paths alternate canonical unsigned *Lexidecimal*[^][lexidecimal] height
+folders and named folders, ending in `README.md`. Nesting is supported:
+`diy/<height>/<unique>/<height>/<distinct>/README.md`. Every folder name under
+`docs/`, including asset folders, must be globally unique; only canonical height
+folder names may repeat. Each tutorial's height must exceed every direct
 prerequisite's height; equal-height branches and height gaps are valid. Use zero
-for a new root. Unprefixed slugs must be unique across all heights; height is not
-a sequence number.
+for a new root; height is not a sequence number.
 
 Put prerequisite folder paths relative to `diy/` in frontmatter, before reference definitions:
 
@@ -28,14 +30,16 @@ key, with an empty array or an unquoted block list. Use forward slashes on every
 platform. List direct requirements; ordinary Markdown references need not be prerequisites.
 
 When changing dependencies, update affected folders, frontmatter, and reference
-labels/targets together. Tutorial links use `diy/<height>/<slug>` reference labels
-with relative destinations ending in `README.md`. Preserve tutorial scope and
+labels/targets together. Tutorial links use the full
+folder path from `docs/` as their reference label, including every nested
+height/name pair, with relative destinations ending in `README.md`. Preserve tutorial scope and
 allow independent branches.
 
 Run the bundled *Python linter*[^][check_dag]. Python 3.9+ is required, without
 third-party packages. It locates `diy/` relative to the skill regardless of working
-directory; an optional argument selects another tutorial directory. It rejects
-invalid layouts/heights, duplicate slugs, malformed frontmatter,
+directory, checking folder-name uniqueness across `docs/`. An optional argument
+selects another tutorial directory and scopes uniqueness to that tree. It rejects
+invalid layouts/heights, repeated non-height folder names, malformed frontmatter,
 missing/duplicate/self prerequisites, cycles, and non-increasing edges. It does
 not judge whether the stated prerequisites are sufficient.
 
