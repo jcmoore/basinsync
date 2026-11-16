@@ -45,18 +45,43 @@ fn etag(response: &ResponseData) -> Result<String> {
         .map(|(_, value)| value)
         .context("successful sequence write has no ETag")
 }
-async fn probe(bucket: &Bucket, key: &str, bytes: &[u8]) -> Result<String> {
-    let result = bucket
-        .put_object_with_headers(key, bytes, Some(crate::epilogue::conditional_headers()))
-        .await;
-    let existing = crate::object_read::if_present(bucket)?
-        .get_object(key)
-        .await?;
-    ensure!(
-        existing.status_code() == 200 && existing.as_slice() == bytes,
-        "invalid bucket reference {key}: {result:?}"
-    );
-    etag(&existing)
+async fn probe(
+    bucket: &Bucket,
+    key: &str,
+    candidates: &[Vec<u8>],
+    empty: &str,
+) -> Result<Option<Vec<u8>>> {
+    let mut index = 0;
+    let mut headers = crate::epilogue::conditional_headers();
+    for _ in 0..candidates.len() {
+        let result = bucket
+            .put_object_with_headers(key, &candidates[index], Some(headers))
+            .await;
+        let existing = crate::object_read::if_present(bucket)?
+            .get_object(key)
+            .await?;
+        ensure!(
+            existing.status_code() == 200,
+            "cannot read bucket reference {key}: {result:?}"
+        );
+        let observed_index = candidates
+            .iter()
+            .position(|bytes| bytes == existing.as_slice())
+            .with_context(|| format!("invalid bucket reference {key}"))?;
+        let observed = etag(&existing)?;
+        if observed != empty {
+            return Ok(Some(candidates[observed_index].clone()));
+        }
+        index = index.max(observed_index) + 1;
+        if index == candidates.len() {
+            return Ok(None);
+        }
+        // A concurrent initializer may have advanced the probe; only replace
+        // a candidate whose validator still matches the empty sentinel.
+        headers = HeaderMap::new();
+        headers.insert(header::IF_MATCH, observed.parse()?);
+    }
+    anyhow::bail!("bucket reference {key} did not converge")
 }
 
 /// Probe actual provider validators. A tombstone must stay below the EnvBuf floor.
@@ -76,38 +101,23 @@ pub async fn initialize(bucket: &Bucket) -> Result<String> {
         "invalid empty sentinel reference: {result:?}"
     );
     let empty = head.e_tag.context("empty sentinel reference has no ETag")?;
-    let mut chosen = None;
-    for length in (2..16).step_by(2) {
-        let bytes = [0xde, 0xad].repeat(length / 2);
-        if probe(bucket, &format!("sentinel/tombstone/{length}"), &bytes).await? != empty {
-            chosen = Some(bytes);
-            break;
-        }
-    }
-    let tombstone =
-        chosen.context("no distinct tombstone below 16 bytes; refusing 16-byte tombstone")?;
-    let mut chosen = None;
-    for message_length in 1..=8 {
-        let mut bytes = vec![];
-        crate::envbuf::append(
-            &mut bytes,
-            &[0xee; 8][..message_length],
-            crate::envbuf::PADDING,
-        )?;
-        if probe(
-            bucket,
-            &format!("sentinel/padding/{message_length}"),
-            &bytes,
-        )
+    let tombstones = (2..16)
+        .step_by(2)
+        .map(|length| [0xde, 0xad].repeat(length / 2))
+        .collect::<Vec<_>>();
+    let tombstone = probe(bucket, "sentinel/tombstone", &tombstones, &empty)
         .await?
-            != empty
-        {
-            chosen = Some(bytes);
-            break;
-        }
-    }
-    let padding =
-        chosen.context("cannot distinguish padding with message lengths 1–8 from sentinel")?;
+        .context("no distinct tombstone below 16 bytes; refusing 16-byte tombstone")?;
+    let paddings = (1..=8)
+        .map(|length| {
+            let mut bytes = vec![];
+            crate::envbuf::append(&mut bytes, &[0xee; 8][..length], crate::envbuf::PADDING)?;
+            Ok(bytes)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let padding = probe(bucket, "sentinel/padding", &paddings, &empty)
+        .await?
+        .context("cannot distinguish padding with message lengths 1–8 from sentinel")?;
     references().lock().unwrap().insert(
         bucket.url(),
         References {

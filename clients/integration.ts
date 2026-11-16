@@ -256,28 +256,68 @@ try {
     assert.deepEqual(await (await s3.send(new GetObjectCommand({Bucket:invalid,Key:"sentinel/empty"}))).Body!.transformToByteArray(),bytes("not empty"));
   }
   const a = bytes("359");assert(sha384(a).startsWith("00"));
+  // Model colliding validators while keeping conditional overwrites honest.
+  function probeProvider(b:string,collides:(key:string,body:Uint8Array)=>boolean){
+    const validators=new Map<string,Uint8Array>(),pending=new WeakMap<Request,Uint8Array>();
+    function probeKey(request:Request){const match=new URL(request.url).pathname.match(/\/sentinel\/(tombstone|padding)$/);return match?`sentinel/${match[1]}`:null;}
+    return {
+      async after(request:Request,response:Response){
+        const Key=probeKey(request);
+        if(Key&&request.method==="PUT"&&response.ok)validators.set(response.headers.get("etag")!,pending.get(request)!);
+        if(Key&&request.method==="GET"&&response.ok){
+          const body=new Uint8Array(await response.arrayBuffer()),headers=new Headers(response.headers);
+          validators.set(headers.get("etag")!,body);
+          if(collides(Key,body))headers.set("etag",emptyETag);
+          return new Response(body,{status:response.status,headers});
+        }
+        return response;
+      },
+      async before(request:Request){
+        const Key=probeKey(request);
+        if(!Key||request.method!=="PUT")return;
+        const body=new Uint8Array(await request.clone().arrayBuffer());pending.set(request,body);
+        if(request.headers.get("if-match")!==emptyETag)return;
+        const current=await s3.send(new HeadObjectCommand({Bucket:b,Key})),previous=validators.get(current.ETag!);
+        assert(previous,"probe validator must come from an observed write");
+        if(!collides(Key,previous))return new Response(null,{status:412});
+        try{
+          const put=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:body,IfMatch:current.ETag}));
+          validators.set(put.ETag!,body);
+          return new Response(null,{status:200,headers:{etag:put.ETag!}});
+        }catch(error){if((error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode===412)return new Response(null,{status:412});throw error;}
+      },
+    };
+  }
   // Probe collisions bound tombstones below sixteen bytes and padding to one message of 1–8 bytes.
   for(const mode of ["selected","all-tombstones","all-padding"]){
-    const b=await bucket(),writes:string[]=[];
-    const proxy=relay(async(request,response)=>{
+    const b=await bucket(),writes:Array<{key:string;body:Uint8Array}>=[];
+    const provider=probeProvider(b,(key,body)=>key==="sentinel/tombstone"?(mode==="all-tombstones"||mode==="selected"&&body.length<6):(mode==="all-padding"||mode==="selected"&&envelopes(body)[0]!.content.length<8));
+    const proxy=relay(provider.after,async request=>{
       const path=new URL(request.url).pathname;
-      const tomb=path.match(/\/sentinel\/tombstone\/(\d+)$/),pad=path.match(/\/sentinel\/padding\/(\d+)$/);
-      const collide=!!tomb&&(mode==="all-tombstones"||mode==="selected"&&Number(tomb[1])<6)||!!pad&&(mode==="all-padding"||mode==="selected"&&Number(pad[1])<8);
-      if(response.ok&&collide){const headers=new Headers(response.headers);headers.set("etag",emptyETag);return new Response(await response.arrayBuffer(),{status:response.status,headers});}
-      return response;
-    },async request=>{const path=new URL(request.url).pathname;if(request.method==="PUT"&&path.includes("/sentinel/")){assert.equal(request.headers.get("if-none-match"),"*");writes.push(path);
-      const pad=path.match(/\/sentinel\/padding\/(\d+)$/);if(pad){const frames=envelopes(new Uint8Array(await request.clone().arrayBuffer()));assert.equal(frames.length,1);assert.equal(frames[0]!.end,32);assert.equal(frames[0]!.format,6);assert.deepEqual(frames[0]!.content,new Uint8Array(Number(pad[1])).fill(0xee));}
-    }});
+      if(request.method==="PUT"&&path.includes("/sentinel/")){
+        const key=path.slice(b.length+2),body=new Uint8Array(await request.clone().arrayBuffer());
+        assert(["sentinel/empty","sentinel/tombstone","sentinel/padding"].includes(key));
+        assert.equal(request.headers.get("if-none-match"),request.headers.has("if-match")?null:"*");
+        if(request.headers.has("if-match"))assert.equal(request.headers.get("if-match"),emptyETag);
+        writes.push({key,body});
+        if(key==="sentinel/padding"){const frames=envelopes(body);assert.equal(frames.length,1);assert.equal(frames[0]!.end,32);assert.equal(frames[0]!.format,6);assert.deepEqual(frames[0]!.content,new Uint8Array(frames[0]!.content.length).fill(0xee));}
+      }
+      return provider.before(request);
+    });
+    const tombstones=()=>writes.filter(p=>p.key==="sentinel/tombstone").map(p=>p.body.length);
+    const paddings=()=>writes.filter(p=>p.key==="sentinel/padding").map(p=>envelopes(p.body)[0]!.content.length);
     if(mode!=="selected"){
       const process=serverProcess(b,proxy.url,"127.0.0.1:0");assert.equal(await timeout(process.exited),1);
       const log=readFileSync(processLogs.get(process)!,"utf8");assert(log.includes(mode==="all-tombstones"?"refusing 16-byte tombstone":"cannot distinguish padding with message lengths 1–8"));
-      assert(!writes.some(p=>p.endsWith("/tombstone/16")),"sixteen-byte tombstones must never be written");
-      if(mode==="all-padding")assert.deepEqual(writes.filter(p=>p.includes("/padding/")).map(p=>p.split("/").at(-1)),Array.from({length:8},(_,i)=>String(i+1)));
+      assert(!tombstones().includes(16),"sixteen-byte tombstones must never be written");
+      if(mode==="all-tombstones")assert.deepEqual(tombstones(),[2,4,6,8,10,12,14]);
+      if(mode==="all-padding")assert.deepEqual(paddings(),[1,2,3,4,5,6,7,8]);
       continue;
     }
     let app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-    assert.deepEqual(writes.filter(p=>p.includes("/tombstone/")).map(p=>p.split("/").at(-1)),["2","4","6"]);
-    assert.deepEqual(writes.filter(p=>p.includes("/padding/")).map(p=>p.split("/").at(-1)),Array.from({length:8},(_,i)=>String(i+1)));
+    assert.deepEqual(tombstones(),[2,4,6]);assert.deepEqual(paddings(),[1,2,3,4,5,6,7,8]);
+    const reference=async(key:string)=>{const r=await s3.send(new GetObjectCommand({Bucket:b,Key:key}));return {etag:r.ETag,body:await r.Body!.transformToByteArray()};};
+    const selectedTombstone=await reference("sentinel/tombstone"),selectedPadding=await reference("sentinel/padding");
     await status(await commit(app.url,"probed",a,0n),201);
     const sign=await signKey(b,"probed",0n);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),head=>head.ContentLength===32);
     const signFrames=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key:sign}))).Body!.transformToByteArray());assert.equal(signFrames.length,1);assert.equal(signFrames[0]!.format,6);assert.deepEqual(signFrames[0]!.content,new Uint8Array(8).fill(0xee));
@@ -285,6 +325,26 @@ try {
     const cp=await datashedBackup(b);assert(cp);const vp=~unlex(cp.key.slice(9));
     await s3.send(new PutObjectCommand({Bucket:b,Key:epilogueKey(vp+1n),Body:new Uint8Array([0xde,0xad,0xde,0xad,0xde,0xad])}));
     app=await server(b,proxy.url);assert.equal((await fullStatus(app.url,"probed")).latest?.viewpoint,0n);await stop(app.process);
+    assert.deepEqual(await reference("sentinel/tombstone"),selectedTombstone);assert.deepEqual(await reference("sentinel/padding"),selectedPadding);
+    assert.deepEqual((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"sentinel/"}))).Contents!.map(o=>o.Key),["sentinel/empty","sentinel/padding","sentinel/tombstone"]);
+  }
+  // Concurrent startups converge on the same shared probe objects.
+  {
+    const b=await bucket(),provider=probeProvider(b,(key,body)=>key==="sentinel/tombstone"?body.length<6:envelopes(body)[0]!.content.length<8);
+    const gate=Promise.withResolvers<void>();let arrived=0;
+    const proxy=relay(provider.after,async request=>{
+      if(request.method==="PUT"&&new URL(request.url).pathname.endsWith("/sentinel/tombstone")&&request.headers.get("if-none-match")==="*"){if(++arrived===3)gate.resolve();await gate.promise;}
+      return provider.before(request);
+    });
+    const apps=await Promise.all(Array.from({length:3},()=>server(b,proxy.url)));
+    await Promise.all(apps.map(app=>stop(app.process)));
+    const getReference=async(Key:string)=>(await s3.send(new GetObjectCommand({Bucket:b,Key}))).Body!.transformToByteArray();
+    assert.deepEqual(await getReference("sentinel/tombstone"),new Uint8Array([0xde,0xad,0xde,0xad,0xde,0xad]));
+    const frames=envelopes(await getReference("sentinel/padding"));assert.equal(frames.length,1);assert.equal(frames[0]!.content.length,8);
+  }
+  for(const Key of ["sentinel/tombstone","sentinel/padding"]){
+    const b=await bucket(),body=bytes("invalid probe");await s3.send(new PutObjectCommand({Bucket:b,Key,Body:body}));await badStartup(b);
+    assert.deepEqual(await (await s3.send(new GetObjectCommand({Bucket:b,Key}))).Body!.transformToByteArray(),body);
   }
   {
     const b=await bucket();let armed=false;
@@ -298,9 +358,9 @@ try {
   function collisionProxy(b:string,select:(request:Request)=>boolean,hold=false,missing=false){
     const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
     const originals=new Map<string,{body:Uint8Array;etag:string}>(),bodies=new Map<string,Uint8Array>();let retries=0;
+    const provider=probeProvider(b,(key,body)=>key==="sentinel/padding"&&envelopes(body)[0]!.content.length<8);
     const proxy=relay(async(request,response)=>{
-      const pad=new URL(request.url).pathname.match(/\/sentinel\/padding\/(\d+)$/);
-      if(pad&&Number(pad[1])<8&&response.ok){const headers=new Headers(response.headers);headers.set("etag",emptyETag);return new Response(await response.arrayBuffer(),{status:response.status,headers});}
+      response=await provider.after(request,response);
       if(request.method==="PUT"&&select(request)&&response.ok){
         const Key=decodeURIComponent(new URL(request.url).pathname.slice(b.length+2));
         if(!originals.has(Key)){
@@ -311,6 +371,7 @@ try {
       }
       return response;
     },async request=>{
+      const probe=await provider.before(request);if(probe)return probe;
       if(request.method!=="PUT"||!select(request))return;
       const Key=decodeURIComponent(new URL(request.url).pathname.slice(b.length+2)),body=new Uint8Array(await request.clone().arrayBuffer());bodies.set(Key,body);
       const original=originals.get(Key);
