@@ -17,8 +17,11 @@ exclusive end offset in the containing object, encoded as positive
 
 Command values are prefixes without query payloads. A consecutive run of padding
 *envelopes*[^][envbuf] has one `null` entry at the last envelope's exclusive end.
-The manifest omits itself; locate it by reading backward from the object's final footer,
-skipping padding *envelopes*[^][envbuf].
+The manifest omits itself. Containing S3 objects carry
+`x-amz-meta-manifest-range: bytes=start-end`, its complete *EnvBuf's*[^][envbuf]
+inclusive decimal byte range, excluding trailing padding. Fetch that range directly,
+or locate it by reading backward from the object's final footer, skipping padding
+*envelopes*[^][envbuf].
 
 *FlexBuffers*[^][flexbuffers] sorts these keys lexicographically, so neighboring
 decoded offsets bound one command *EnvBuf*[^][envbuf] or padding run: `[previous, current)`, with

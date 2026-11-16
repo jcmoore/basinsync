@@ -322,6 +322,18 @@ impl Stager {
     }
 }
 
+/// Conditional creation plus an HTTP Range for a framed entry's manifest.
+pub fn entry_headers(bytes: &[u8]) -> Result<axum::http::HeaderMap> {
+    let mut headers = crate::epilogue::conditional_headers();
+    if let Some(range) = event::manifest_range(bytes)? {
+        headers.insert(
+            "x-amz-meta-manifest-range",
+            format!("bytes={}-{}", range.start, range.end - 1).parse()?,
+        );
+    }
+    Ok(headers)
+}
+
 impl Prepared {
     pub fn snapshot(&self) -> Option<Snapshot> {
         self.view.as_ref().map(|view| Snapshot {
@@ -348,10 +360,7 @@ impl Prepared {
             .put_object_with_headers(
                 diffuse16::key(&self.milestone)?,
                 &self.bytes,
-                Some(axum::http::HeaderMap::from_iter([(
-                    axum::http::header::IF_NONE_MATCH,
-                    axum::http::HeaderValue::from_static("*"),
-                )])),
+                Some(entry_headers(&self.bytes)?),
             )
             .await?;
         ensure!(

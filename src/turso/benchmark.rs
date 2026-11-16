@@ -130,10 +130,7 @@ fn commits() -> Result<()> {
                 let response = runtime.block_on(bucket.put_object_with_headers(
                     &key,
                     &bytes,
-                    Some(axum::http::HeaderMap::from_iter([(
-                        axum::http::header::IF_NONE_MATCH,
-                        axum::http::HeaderValue::from_static("*"),
-                    )])),
+                    Some(crate::timeline::entry_headers(&bytes)?),
                 ))?;
                 ensure!(
                     (200..300).contains(&response.status_code()),

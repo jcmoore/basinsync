@@ -142,6 +142,16 @@ async function get(bucket: string, milestone: bigint) {
   const r = await s3.send(new GetObjectCommand({Bucket:bucket,Key:key(milestone)}));
   return r.Body!.transformToByteArray();
 }
+async function assertManifestRange(bucket:string,milestone:bigint,stored?:Uint8Array){
+  stored??=await get(bucket,milestone);
+  const frame=envelopes(stored).filter(e=>e.format!==6).at(-1)!;
+  const head=await s3.send(new HeadObjectCommand({Bucket:bucket,Key:key(milestone)}));
+  const range=head.Metadata?.["manifest-range"];
+  assert.equal(range,`bytes=${frame.start}-${frame.end-1}`);
+  const selected=await s3.send(new GetObjectCommand({Bucket:bucket,Key:key(milestone),Range:range}));
+  assert.equal(selected.$metadata.httpStatusCode,206);
+  assert.deepEqual(await selected.Body!.transformToByteArray(),stored.slice(frame.start,frame.end));
+}
 const marker = (blob: Uint8Array, viewpoint="0"): Marker => ({blob,viewpoint,sha384:sha384(blob),edges:[],context:{}});
 async function seed(bucket: string, milestone: bigint, payload: Uint8Array) {
   await s3.send(new PutObjectCommand({Bucket:bucket,Key:key(milestone),Body:payload}));
@@ -239,6 +249,7 @@ try {
     const node:UserHeapNode={auth:[0,0,bytes("flow-id-case-test")],length:1,edges:[]};
     const mixed="MiXeD.Id_0-",canonical=mixed.toLowerCase();
     await status(await reserveUserHeap(app.url,mixed,0n,[node]),200);
+    await assertManifestRange(name,1n); // Ingestion-only entries also carry a manifest.
     await status(await commit(app.url,canonical,a,0n),201);
     assert.equal((await fullStatus(app.url,mixed)).latest?.viewpoint,0n);
     await mismatch(await commit(app.url,mixed,a,0n),1n);
@@ -853,6 +864,7 @@ try {
     const requests:Promise<Response>[]=[];for(const [flow,blob,vp] of inputs){requests.push(commit(app.url,flow,blob,vp));await queued(app.log,flow,Number(vp));}
     for(const response of await Promise.all(requests))await status(response,201);
     const stored=await get(b,1n),ranges=rangesAt(stored),range=ranges.find(r=>r.flow==="public"&&r.marker.viewpoint==="1")!;
+    await assertManifestRange(b,1n,stored);
     const footer=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:"bytes=-8"}));
     const tailBytes=await footer.Body!.transformToByteArray();assert.equal(tailBytes.length,8);
     const contentLength=new DataView(tailBytes.buffer,tailBytes.byteOffset,tailBytes.byteLength).getUint32(0,true);

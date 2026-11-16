@@ -276,6 +276,27 @@ pub fn digest(bytes: &[u8]) -> String {
 
 pub const RANGE_MANIFEST: &str = "sts/0/databasin/rangemanifest";
 
+/// Locate the complete manifest envelope without traversing preceding commands.
+pub fn manifest_range(bytes: &[u8]) -> Result<Option<std::ops::Range<usize>>> {
+    if !bytes.starts_with(b"enV") {
+        return Ok(None);
+    }
+    let mut end = bytes.len();
+    while end > 0 {
+        let frame = crate::envbuf::before(bytes, end)?;
+        if frame.format != crate::envbuf::PADDING {
+            ensure!(
+                frame.format == crate::envbuf::FLEXBUFFERS
+                    && tuple(frame.content)?.index(2)?.get_str()? == RANGE_MANIFEST,
+                "last readable envelope must be rangemanifest"
+            );
+            return Ok(Some(frame.start..frame.end));
+        }
+        end = frame.start;
+    }
+    anyhow::bail!("missing range manifest envelope")
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlobRange {
     pub flow: String,
@@ -634,7 +655,12 @@ mod envelope_tests {
             assert!(decode_entry(&bad).is_err(), "fault {fault}");
         }
         let mut padded = chunks.finish_manifest()?;
+        let manifest = crate::envbuf::before(&padded, padded.len())?;
+        let expected_manifest = manifest.start..manifest.end;
+        assert_eq!(manifest_range(&padded)?, Some(expected_manifest.clone()));
         crate::envbuf::append(&mut padded, &[], crate::envbuf::PADDING)?;
+        crate::envbuf::append(&mut padded, &[1, 2, 3], crate::envbuf::PADDING)?;
+        assert_eq!(manifest_range(&padded)?, Some(expected_manifest));
         assert_eq!(blob_ranges(&padded)?, locations);
         let mut recovered = crate::timeline::Datashed::default();
         recovered.apply_entry(1u8.into(), &padded)?;
@@ -679,9 +705,18 @@ mod envelope_tests {
         let delta = writer.prepare(&0u8.into(), None, &commands)?;
         let old = encode_vector_wal(commands.clone(), delta.clone())?;
         assert!(matches!(decode_entry(&old)?, Entry::Wal { .. }));
+        assert_eq!(manifest_range(&old)?, None);
         let bytes = chunks.finish(delta)?;
         let frames = crate::envbuf::all(&bytes)?;
         assert_eq!(frames.len(), commands.len() + 2);
+        let last = frames.last().unwrap();
+        assert_eq!(manifest_range(&bytes)?, Some(last.start..last.end));
+        let headers = crate::timeline::entry_headers(&bytes)?;
+        assert_eq!(headers["if-none-match"], "*");
+        assert_eq!(
+            headers["x-amz-meta-manifest-range"],
+            format!("bytes={}-{}", last.start, last.end - 1)
+        );
         assert!(
             frames
                 .iter()
@@ -717,6 +752,8 @@ mod envelope_tests {
         let bytes = encode_wal(commands, delta)?;
         let frames = crate::envbuf::all(&bytes)?;
         assert!(decode_entry(&bytes[..frames.last().unwrap().start]).is_err());
+        assert!(manifest_range(&bytes[..frames.last().unwrap().start]).is_err());
+        assert!(manifest_range(b"enV").is_err());
         let mut bad = bytes.clone();
         let manifest = frames.last().unwrap();
         let relative = manifest

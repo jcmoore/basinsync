@@ -944,10 +944,7 @@ fn measure() -> Result<()> {
                     .put_object_with_headers(
                         crate::diffuse16::key(&(&base + 1u8))?,
                         &encoded,
-                        Some(axum::http::HeaderMap::from_iter([(
-                            axum::http::header::IF_NONE_MATCH,
-                            axum::http::HeaderValue::from_static("*"),
-                        )])),
+                        Some(crate::timeline::entry_headers(&encoded)?),
                     )
                     .await?;
                 ensure!((200..300).contains(&response.status_code()), "PUT failed");

@@ -1309,10 +1309,7 @@ fn measure_disk() -> Result<()> {
                 .put_object_with_headers(
                     crate::diffuse16::key(&1u8.into())?,
                     &seed,
-                    Some(axum::http::HeaderMap::from_iter([(
-                        axum::http::header::IF_NONE_MATCH,
-                        axum::http::HeaderValue::from_static("*"),
-                    )])),
+                    Some(crate::timeline::entry_headers(&seed)?),
                 )
                 .await?;
             ensure!((200..300).contains(&r.status_code()), "seed PUT");
@@ -1340,10 +1337,7 @@ fn measure_disk() -> Result<()> {
                         .put_object_with_headers(
                             crate::diffuse16::key(&milestone.into())?,
                             &bytes,
-                            Some(axum::http::HeaderMap::from_iter([(
-                                axum::http::header::IF_NONE_MATCH,
-                                axum::http::HeaderValue::from_static("*"),
-                            )])),
+                            Some(crate::timeline::entry_headers(&bytes)?),
                         )
                         .await?;
                     ensure!((200..300).contains(&r.status_code()), "event PUT");

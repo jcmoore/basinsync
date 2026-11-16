@@ -1013,10 +1013,7 @@ fn measure() -> Result<()> {
                 .put_object_with_headers(
                     crate::diffuse16::key(&milestone.into())?,
                     &bytes,
-                    Some(axum::http::HeaderMap::from_iter([(
-                        axum::http::header::IF_NONE_MATCH,
-                        axum::http::HeaderValue::from_static("*"),
-                    )])),
+                    Some(crate::timeline::entry_headers(&bytes)?),
                 )
                 .await?;
             ensure!(

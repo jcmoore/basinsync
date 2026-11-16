@@ -66,7 +66,9 @@ to preserve stable, *FlexBuffers-friendly*[^][flexbuffers] alignment.
 Compose append-only chunks, locating
 each *marker's*[^][commit-marker] raw `blob` bytes in its finalized chunk.
 Append a final *range manifest*[^][range-manifest] indexing preceding
-*envelopes*[^][envbuf]; locate the manifest through its final footer.
+*envelopes*[^][envbuf]. Set `x-amz-meta-manifest-range: bytes=start-end` on the S3
+object to the complete manifest *envelope's*[^][envbuf] inclusive decimal byte range,
+excluding trailing padding, so clients can fetch it directly.
 Later appended commands must preserve earlier blob offsets.
 
 Track each *Flow*[^][flow] and *downstream*[^][downstream]
