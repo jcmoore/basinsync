@@ -149,9 +149,14 @@ pub fn readable(bytes: &[u8]) -> Result<Vec<Envelope<'_>>> {
         .collect())
 }
 
+pub fn append_counter_margin(bytes: &mut Vec<u8>, counter: u64) -> Result<usize> {
+    append(bytes, &counter.to_le_bytes(), MARGIN)
+}
+
 pub fn wrap(message: &[u8]) -> Result<Vec<u8>> {
     let mut bytes = vec![];
     append(&mut bytes, message, 0)?;
+    append_counter_margin(&mut bytes, 0)?;
     Ok(bytes)
 }
 
@@ -200,6 +205,9 @@ pub fn wrap_file(path: &std::path::Path) -> Result<tempfile::NamedTempFile> {
     write(&word)?;
     write(&[ALIGNMENT_POWER])?;
     write(b"vNE")?;
+    let mut margin = vec![];
+    append_counter_margin(&mut margin, 0)?;
+    write(&margin)?;
     Ok(output)
 }
 
@@ -216,7 +224,7 @@ mod tests {
             let original = vec![42; length];
             let bytes = wrap(&original)?;
             assert_eq!(message(&bytes)?, original);
-            assert_eq!(bytes.len() as u64, encoded_length(length as u64)?);
+            assert_eq!(bytes.len() as u64, encoded_length(length as u64)? + 32);
             let mut raw = tempfile::NamedTempFile::new()?;
             raw.write_all(&original)?;
             let file = wrap_file(raw.path())?;

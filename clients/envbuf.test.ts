@@ -54,13 +54,13 @@ test("independent EnvBuf event writer records absolute blob offsets across FlexB
   const bytes=encodeWalEvent(commands,{} as any),ranges=rangesAt(bytes);
   expect(eventTuples(bytes).length).toBe(commands.length+1);
   for(const range of ranges){expect(bytes.subarray(range.offset,range.offset+range.length)).toEqual(range.marker.blob);expect(sha384(range.marker.blob)).toBe(range.marker.sha384);}
-  const frames=all(bytes);expect(frames.length).toBe(commands.length+2);expect(before(bytes,bytes.length)).toEqual(frames.at(-1)!);for(const frame of frames)expect((frame.end-frame.start)%16).toBe(0);
+  const frames=all(bytes);expect(frames.length).toBe(commands.length+3);expect(before(bytes,bytes.length)).toEqual(frames.at(-1)!);for(const frame of frames)expect((frame.end-frame.start)%16).toBe(0);
 });
 
 test("ingestion-only events have one indexed command and no marker ranges",()=>{
   const delta:WalDelta={version:"test",logical:{base:null,header:new Uint8Array(),frames:[]},physical:{format:"sqlite-wal/1",base:"0",milestone:"1",parent:null,base_sha384:null,segments:[]}};
   const bytes=encodeWalEvent([],delta);
-  expect(all(bytes).length).toBe(2);
+  expect(all(bytes).length).toBe(3);
   expect(eventTuples(bytes).map(t=>t[2])).toEqual(["sts/0/databasin/ingestturso"]);
   expect(rangesAt(bytes)).toEqual([]);
   expect(deltasAt(bytes).turso["default.turso"]).toEqual(delta);
@@ -70,7 +70,7 @@ test("range manifests index each consecutive margin run once at its exclusive en
   const marker={viewpoint:"0",sha384:sha384(new Uint8Array([1])),blob:new Uint8Array([1]),edges:[],context:{}};
   const plain=encodeWalEvent([{flow:marker}],delta),commands=eventTuples(plain),pad={margin:new Uint8Array([255,0,1])};
   const bytes=encodeTuples([pad,pad,commands[0],pad,pad,commands[1],pad,pad]);
-  const frames=all(bytes),manifest=frames.at(-1)!,index=(toObject(new Uint8Array(manifest.content)) as any[])[3].envelopes;
+  const frames=all(bytes),manifest=frames.at(-2)!,index=(toObject(new Uint8Array(manifest.content)) as any[])[3].envelopes;
   const marginEnds=[frames[1].end,frames[4].end,frames[7].end].map(n=>lex(BigInt(n)));
   expect(Object.keys(index).filter(key=>index[key]===null)).toEqual(marginEnds);
   expect(Object.keys(index).length).toBe(5);expect(index[lex(BigInt(frames[0].end))]).toBeUndefined();
@@ -103,10 +103,11 @@ test("empty raw messages and empty margin are framed above the tombstone floor",
 
 test("Timeline identity excludes trailing retry margin while manifest ranges stay fixed",()=>{
   const commands=[[Symbol.species,"sync.memoremix.com","sts/0/databasin/ingestturso",{turso:{}}]];
-  const bytes=encodeTuples(commands),identity=entryDigest(bytes),last=before(bytes,bytes.length);
+  const bytes=encodeTuples(commands),identity=entryDigest(bytes),last=all(bytes).at(-2)!;
+  expect(before(bytes,bytes.length).content).toEqual(new Uint8Array(8));
   for(const counter of [0n,1n,256n,(1n<<64n)-1n]){
     const message=new Uint8Array(8);new DataView(message.buffer).setBigUint64(0,counter,true);
-    const retried=concat([bytes,wrap(message,MARGIN)]);expect(retried.length).toBe(bytes.length+32);
+    const retried=concat([bytes.subarray(0,last.end),wrap(message,MARGIN)]);expect(retried.length).toBe(bytes.length);
     expect(entryDigest(retried)).toBe(identity);expect(sha384(retried)).not.toBe(identity);
     expect(all(retried).filter(e=>e.format!==MARGIN).at(-1)!.start).toBe(last.start);
   }

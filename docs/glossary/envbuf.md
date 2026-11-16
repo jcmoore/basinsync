@@ -6,6 +6,7 @@
 “Enveloped Buffers” (pronounced “Envy Buff”): concatenable binary envelopes
 with matching headers and footers for forward and backward traversal.
 A concatenation of envelopes is a feed; each envelope carries a message.
+Feeds default to a trailing *counter margin*[^][margin].
 Prefer `.nv` filenames.
 
 Each header and footer occupies eight bytes:

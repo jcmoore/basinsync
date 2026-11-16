@@ -392,6 +392,7 @@ impl FlowChunks {
             },
         ))?;
         crate::envbuf::append(&mut self.bytes, &content, crate::envbuf::FLEXBUFFERS)?;
+        crate::envbuf::append_counter_margin(&mut self.bytes, 0)?;
         Ok(self.bytes)
     }
 }
@@ -660,7 +661,7 @@ mod envelope_tests {
             assert!(decode_entry(&bad).is_err(), "fault {fault}");
         }
         let mut padded = chunks.finish_manifest()?;
-        let manifest = crate::envbuf::before(&padded, padded.len())?;
+        let manifest = crate::envbuf::readable(&padded)?.pop().unwrap();
         let expected_manifest = manifest.start..manifest.end;
         assert_eq!(manifest_range(&padded)?, Some(expected_manifest.clone()));
         crate::envbuf::append(&mut padded, &[], crate::envbuf::MARGIN)?;
@@ -713,8 +714,10 @@ mod envelope_tests {
         assert_eq!(manifest_range(&old)?, None);
         let bytes = chunks.finish(delta)?;
         let frames = crate::envbuf::all(&bytes)?;
-        assert_eq!(frames.len(), commands.len() + 2);
-        let last = frames.last().unwrap();
+        assert_eq!(frames.len(), commands.len() + 3);
+        let last = &frames[frames.len() - 2];
+        assert_eq!(frames.last().unwrap().format, crate::envbuf::MARGIN);
+        assert_eq!(frames.last().unwrap().content, &0u64.to_le_bytes());
         assert_eq!(manifest_range(&bytes)?, Some(last.start..last.end));
         let headers = crate::timeline::entry_headers(&bytes)?;
         assert_eq!(headers["if-none-match"], "*");
@@ -756,11 +759,11 @@ mod envelope_tests {
         let delta = writer.prepare(&0u8.into(), None, &commands)?;
         let bytes = encode_wal(commands, delta)?;
         let frames = crate::envbuf::all(&bytes)?;
-        assert!(decode_entry(&bytes[..frames.last().unwrap().start]).is_err());
-        assert!(manifest_range(&bytes[..frames.last().unwrap().start]).is_err());
+        let manifest = &frames[frames.len() - 2];
+        assert!(decode_entry(&bytes[..manifest.start]).is_err());
+        assert!(manifest_range(&bytes[..manifest.start]).is_err());
         assert!(manifest_range(b"enV").is_err());
         let mut bad = bytes.clone();
-        let manifest = frames.last().unwrap();
         let relative = manifest
             .content
             .windows(COMMIT_FLOW.len())

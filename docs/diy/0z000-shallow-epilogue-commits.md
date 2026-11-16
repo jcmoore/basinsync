@@ -29,11 +29,11 @@ sentinels*[^][empty-sentinel]; even an empty blob has framing.
 Bootstrap the *empty-reference object*[^][object-keys] with `If-None-Match: *`,
 verify it is empty, and learn
 its *ETag*[^][etag] from the bucket. Probe distinct *tombstone*[^][tombstone] and
-standalone *margins*[^][margin] with message lengths 1–7 too; fail startup
+standalone *margins*[^][margin] with one-byte counters 1–7 too; fail startup
 if none differs. After each successful upload, require
-an *ETag*[^][etag] different from the empty reference; otherwise append one
-*margin*[^][margin] with an eight-byte little-endian `u64` message, starting at zero
-and incrementing it on each `If-Match` retry until distinct.
+an *ETag*[^][etag] different from the empty reference. Feeds have a trailing
+*margin*[^][margin] whose eight-byte little-endian `u64` message is zero; increment
+it on each `If-Match` retry until distinct.
 
 1. Build a Rust server that recovers its next *viewpoint*[^][viewpoint] from the
    bucket's lowest non-sentinel *Epilogue*[^][epilogue] key, treating

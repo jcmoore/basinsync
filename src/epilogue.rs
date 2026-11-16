@@ -55,8 +55,7 @@ pub async fn confirm_promotion_sign(bucket: &Bucket, key: &str, upstream: &BigUi
     }
     let mut headers = conditional_headers();
     headers.insert("x-amz-meta-upstream", upstream.to_string().parse()?);
-    let bytes = crate::sequence::margin(bucket)?;
-    let result = crate::sequence::put_feed(bucket, key, &bytes, headers).await;
+    let result = crate::sequence::put_margin(bucket, key, headers).await;
     ensure!(
         promotion_sign_matches(bucket, key, upstream).await?,
         "PromotionSign not confirmed: {result:?}"
@@ -70,6 +69,11 @@ async fn promotion_sign_matches(bucket: &Bucket, key: &str, upstream: &BigUint) 
     match status {
         200 if head.content_length.is_some_and(|length| length < 16) => Ok(false),
         200 => {
+            if head.e_tag.as_deref().context("PromotionSign has no ETag")?
+                == crate::sequence::reference(bucket)?
+            {
+                return Ok(false);
+            }
             ensure!(
                 head.content_length
                     .is_some_and(|length| length >= 16 && length % 16 == 0),

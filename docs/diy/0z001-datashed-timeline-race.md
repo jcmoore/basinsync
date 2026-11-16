@@ -71,7 +71,7 @@ each *marker's*[^][commit-marker] raw `blob` bytes in its finalized chunk.
 Append a final *range manifest*[^][range-manifest] indexing preceding
 *envelopes*[^][envbuf]. Set `x-amz-meta-manifest-range: bytes=start-end` on the S3
 object to the complete manifest *envelope's*[^][envbuf] inclusive decimal byte range,
-excluding trailing *margins*[^][margin], so clients can fetch it directly.
+excluding the default trailing *counter margin*[^][margin], so clients can fetch it directly.
 Later appended commands must preserve earlier blob offsets.
 A *Timeline*[^][timeline] predecessor's *SHA-384*[^][sha384] covers the feed through
 its *range manifest*[^][range-manifest], excluding trailing *margins*[^][margin]. A retry can

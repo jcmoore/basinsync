@@ -86,20 +86,15 @@ pub async fn initialize(bucket: &Bucket) -> Result<String> {
     let tombstone =
         chosen.context("no distinct tombstone below 16 bytes; refusing 16-byte tombstone")?;
     let mut chosen = None;
-    for message_length in 1..=7 {
+    for counter in 1u8..=7 {
         let mut bytes = vec![];
-        crate::envbuf::append(
-            &mut bytes,
-            &[0xee; 7][..message_length],
-            crate::envbuf::MARGIN,
-        )?;
-        if probe(bucket, &format!("sentinel/margin/{message_length}"), &bytes).await? != empty {
+        crate::envbuf::append(&mut bytes, &[counter], crate::envbuf::MARGIN)?;
+        if probe(bucket, &format!("sentinel/margin/{counter}"), &bytes).await? != empty {
             chosen = Some(bytes);
             break;
         }
     }
-    let margin =
-        chosen.context("cannot distinguish margin with message lengths 1–7 from sentinel")?;
+    let margin = chosen.context("cannot distinguish margin with u8 counters 1–7 from sentinel")?;
     references().lock().unwrap().insert(
         bucket.url(),
         References {
@@ -189,14 +184,32 @@ pub async fn put_entry(
     }
 }
 
-fn retry_margin(counter: &mut Option<u64>) -> Result<Vec<u8>> {
-    let next = match *counter {
-        None => 0,
-        Some(value) => value.checked_add(1).context("margin counter exhausted")?,
-    };
+/// Standalone signs use the bucket-proven u8 counter and stay one envelope.
+pub async fn put_margin(
+    bucket: &Bucket,
+    key: &str,
+    mut headers: HeaderMap,
+) -> Result<ResponseData> {
+    let chosen = margin(bucket)?;
+    let start = crate::envbuf::at(&chosen, 0)?.content[0];
+    for counter in start..=7 {
+        let mut bytes = vec![];
+        crate::envbuf::append(&mut bytes, &[counter], crate::envbuf::MARGIN)?;
+        let response = send(bucket, key, &bytes, headers.clone()).await?;
+        if !(200..300).contains(&response.status_code()) || etag(&response)? != reference(bucket)? {
+            return Ok(response);
+        }
+        headers.remove(header::IF_NONE_MATCH);
+        headers.insert(header::IF_MATCH, reference(bucket)?.parse()?);
+    }
+    anyhow::bail!("standalone margin exhausted u8 counters 1–7")
+}
+
+fn retry_margin(counter: &mut u64) -> Result<Vec<u8>> {
+    let next = counter.checked_add(1).context("margin counter exhausted")?;
     let mut bytes = vec![];
-    crate::envbuf::append(&mut bytes, &next.to_le_bytes(), crate::envbuf::MARGIN)?;
-    *counter = Some(next);
+    crate::envbuf::append_counter_margin(&mut bytes, next)?;
+    *counter = next;
     Ok(bytes)
 }
 
@@ -207,9 +220,16 @@ pub async fn put_feed(
     bytes: &[u8],
     mut headers: HeaderMap,
 ) -> Result<ResponseData> {
-    let original_length = bytes.len();
+    let tail = crate::envbuf::before(bytes, bytes.len())?;
     let mut bytes = Cow::Borrowed(bytes);
-    let mut counter = None;
+    let (original_length, mut counter) =
+        if tail.format == crate::envbuf::MARGIN && tail.content.len() == 8 {
+            (tail.start, u64::from_le_bytes(tail.content.try_into()?))
+        } else {
+            let original_length = bytes.len();
+            crate::envbuf::append_counter_margin(bytes.to_mut(), 0)?;
+            (original_length, 0)
+        };
     loop {
         let response = send(bucket, key, &bytes, headers.clone()).await?;
         if !(200..300).contains(&response.status_code()) || etag(&response)? != reference(bucket)? {
@@ -231,8 +251,21 @@ pub async fn put_file(
     path: &std::path::Path,
     mut headers: HeaderMap,
 ) -> Result<()> {
-    let original_length = tokio::fs::metadata(path).await?.len();
-    let mut counter = None;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let mut file = tokio::fs::File::open(path).await?;
+    let length = file.metadata().await?.len();
+    ensure!(length >= 48, "feed file lacks its trailing counter margin");
+    file.seek(std::io::SeekFrom::End(-32)).await?;
+    let mut tail = [0u8; 32];
+    file.read_exact(&mut tail).await?;
+    let tail = crate::envbuf::at(&tail, 0)?;
+    ensure!(
+        tail.format == crate::envbuf::MARGIN && tail.content.len() == 8,
+        "feed file lacks its trailing counter margin"
+    );
+    let original_length = length - 32;
+    let mut counter = u64::from_le_bytes(tail.content.try_into()?);
+    drop(file);
     loop {
         let length = tokio::fs::metadata(path).await?.len();
         ensure!(
@@ -289,7 +322,7 @@ mod tests {
 
     #[test]
     fn counter_margin_covers_u64_without_wrapping() -> Result<()> {
-        let mut counter = Some(u64::MAX - 1);
+        let mut counter = u64::MAX - 1;
         let bytes = retry_margin(&mut counter)?;
         let envelope = crate::envbuf::at(&bytes, 0)?;
         assert_eq!(envelope.format, crate::envbuf::MARGIN);

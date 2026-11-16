@@ -81,7 +81,7 @@ Keep object I/O outside the writer;
 journal mutations through *Timeline*[^][timeline] ingestion frames.
 
 Once the entire graph is promoted, conditionally create its *PromotionSign*[^][promotion-sign]
-as the bucket-proven *margin*[^][margin] with message length 1–7 at the uncomplemented
+as the bucket-proven *margin*[^][margin] with a one-byte counter from 1 through 7 at the uncomplemented
 position in the same *Epilogue*[^][epilogue], recording
 `x-amz-meta-upstream` as canonical decimal. Confirm presence and matching metadata before
 removing the *marking task*[^][marking-task], including for empty graphs. The sign

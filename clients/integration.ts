@@ -256,7 +256,7 @@ try {
     assert.deepEqual(await (await s3.send(new GetObjectCommand({Bucket:invalid,Key:"sentinel/empty"}))).Body!.transformToByteArray(),bytes("not empty"));
   }
   const a = bytes("359");assert(sha384(a).startsWith("00"));
-  // Probe collisions bound tombstones below sixteen bytes and margin to one message of 1–7 bytes.
+  // Probe collisions bound tombstones below sixteen bytes and standalone margins to u8 values 1–7.
   for(const mode of ["selected","all-tombstones","all-margins"]){
     const b=await bucket(),writes:string[]=[];
     const proxy=relay(async(request,response)=>{
@@ -266,11 +266,11 @@ try {
       if(response.ok&&collide){const headers=new Headers(response.headers);headers.set("etag",emptyETag);return new Response(await response.arrayBuffer(),{status:response.status,headers});}
       return response;
     },async request=>{const path=new URL(request.url).pathname;if(request.method==="PUT"&&path.includes("/sentinel/")){assert.equal(request.headers.get("if-none-match"),"*");writes.push(path);
-      const pad=path.match(/\/sentinel\/margin\/(\d+)$/);if(pad){const frames=envelopes(new Uint8Array(await request.clone().arrayBuffer()));assert.equal(frames.length,1);assert.equal(frames[0]!.end,32);assert.equal(frames[0]!.format,6);assert.deepEqual(frames[0]!.content,new Uint8Array(Number(pad[1])).fill(0xee));}
+      const pad=path.match(/\/sentinel\/margin\/(\d+)$/);if(pad){const frames=envelopes(new Uint8Array(await request.clone().arrayBuffer()));assert.equal(frames.length,1);assert.equal(frames[0]!.end,32);assert.equal(frames[0]!.format,6);assert.deepEqual(frames[0]!.content,new Uint8Array([Number(pad[1])]));}
     }});
     if(mode!=="selected"){
       const process=serverProcess(b,proxy.url,"127.0.0.1:0");assert.equal(await timeout(process.exited),1);
-      const log=readFileSync(processLogs.get(process)!,"utf8");assert(log.includes(mode==="all-tombstones"?"refusing 16-byte tombstone":"cannot distinguish margin with message lengths 1–7"));
+      const log=readFileSync(processLogs.get(process)!,"utf8");assert(log.includes(mode==="all-tombstones"?"refusing 16-byte tombstone":"cannot distinguish margin with u8 counters 1–7"));
       assert(!writes.some(p=>p.endsWith("/tombstone/16")),"sixteen-byte tombstones must never be written");
       if(mode==="all-margins")assert.deepEqual(writes.filter(p=>p.includes("/margin/")).map(p=>p.split("/").at(-1)),Array.from({length:7},(_,i)=>String(i+1)));
       continue;
@@ -280,7 +280,7 @@ try {
     assert.deepEqual(writes.filter(p=>p.includes("/margin/")).map(p=>p.split("/").at(-1)),Array.from({length:7},(_,i)=>String(i+1)));
     await status(await commit(app.url,"probed",a,0n),201);
     const sign=await signKey(b,"probed",0n);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),head=>head.ContentLength===32);
-    const signFrames=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key:sign}))).Body!.transformToByteArray());assert.equal(signFrames.length,1);assert.equal(signFrames[0]!.format,6);assert.deepEqual(signFrames[0]!.content,new Uint8Array(7).fill(0xee));
+    const signFrames=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key:sign}))).Body!.transformToByteArray());assert.equal(signFrames.length,1);assert.equal(signFrames[0]!.format,6);assert.deepEqual(signFrames[0]!.content,new Uint8Array([7]));
     await eventually(()=>datashedBackup(b),Boolean);await stop(app.process);
     const cp=await datashedBackup(b);assert(cp);const vp=~unlex(cp.key.slice(9));
     await s3.send(new PutObjectCommand({Bucket:b,Key:epilogueKey(vp+1n),Body:new Uint8Array([0xde,0xad,0xde,0xad,0xde,0xad])}));
@@ -299,8 +299,11 @@ try {
     const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
     const originals=new Map<string,{body:Uint8Array;etag:string}>(),bodies=new Map<string,Uint8Array>(),validators=new Map<string,string>(),counts=new Map<string,number>();let retries=0;
     const proxy=relay(async(request,response)=>{
-      const pad=new URL(request.url).pathname.match(/\/sentinel\/margin\/(\d+)$/);
-      if(pad&&Number(pad[1])<7&&response.ok){const headers=new Headers(response.headers);headers.set("etag",emptyETag);return new Response(await response.arrayBuffer(),{status:response.status,headers});}
+      const Key=decodeURIComponent(new URL(request.url).pathname.slice(b.length+2));
+      if(request.method==="HEAD"&&originals.has(Key)&&(counts.get(Key)??0)<collisions&&response.ok){
+        const headers=new Headers(response.headers);headers.set("etag",emptyETag);
+        return new Response(null,{status:request.headers.get("if-none-match")===emptyETag?304:response.status,headers});
+      }
       if(request.method==="PUT"&&select(request)&&response.ok){
         const Key=decodeURIComponent(new URL(request.url).pathname.slice(b.length+2));
         if(!originals.has(Key)){
@@ -315,11 +318,15 @@ try {
       const Key=decodeURIComponent(new URL(request.url).pathname.slice(b.length+2)),body=new Uint8Array(await request.clone().arrayBuffer());bodies.set(Key,body);
       const original=originals.get(Key);
       if(original&&request.headers.get("if-match")===emptyETag){
-        retries++;assert.equal(request.headers.get("if-none-match"),null);assert.deepEqual(body.subarray(0,original.body.length),original.body);
-        const margin=envelopes(body).filter(e=>e.start>=original.body.length);assert.equal(margin.length,1);assert.equal(body.length,original.body.length+32);assert.equal(margin[0]!.format,6);assert.equal(margin[0]!.content.length,8);
-        const counter=counts.get(Key)??0;assert.equal(new DataView(margin[0]!.content.buffer,margin[0]!.content.byteOffset,8).getBigUint64(0,true),BigInt(counter));counts.set(Key,counter+1);
+        retries++;assert.equal(request.headers.get("if-none-match"),null);
+        const previous=envelopes(original.body).at(-1)!,margin=envelopes(body).at(-1)!;
+        assert.equal(previous.format,6);assert.equal(margin.format,6);assert.equal(body.length,original.body.length);
+        assert.deepEqual(body.subarray(0,previous.start),original.body.subarray(0,previous.start));assert.equal(margin.start,previous.start);
+        const counter=(counts.get(Key)??0)+1;counts.set(Key,counter);
+        if(previous.content.length===1){assert.equal(margin.content.length,1);assert.equal(margin.content[0],previous.content[0]+counter);assert(margin.content[0]<=7);}
+        else{assert.equal(previous.content.length,8);assert.deepEqual(previous.content,new Uint8Array(8));assert.equal(margin.content.length,8);assert.equal(new DataView(margin.content.buffer,margin.content.byteOffset,8).getBigUint64(0,true),BigInt(counter));}
         const Metadata=Object.fromEntries([...request.headers].filter(([name])=>name.startsWith("x-amz-meta-")).map(([name,value])=>[name.slice(11),value]));
-        const put=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:body,IfMatch:validators.get(Key),Metadata}));validators.set(Key,put.ETag!);return new Response(null,{status:200,headers:{etag:counter+1<collisions?emptyETag:put.ETag!}});
+        const put=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:body,IfMatch:validators.get(Key),Metadata}));validators.set(Key,put.ETag!);return new Response(null,{status:200,headers:{etag:counter<collisions?emptyETag:put.ETag!}});
       }
     });
     return {...proxy,entered,release,originals,retries:()=>retries};
@@ -348,6 +355,14 @@ try {
     const app=await server(b,proxy.url);await status(await commit(app.url,"missing-validator",a,0n),503);assert.equal(await timeout(app.process.exited),1);
     const restored=await server(b);assert.equal((await fullStatus(restored.url,"missing-validator")).latest?.viewpoint,0n);await stop(restored.process);
   }
+  {
+    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes("/flows/")&&new URL(r.url).pathname.includes("/epilogue/0z"),false,false,8);
+    const app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});await status(await commit(app.url,"bounded-sign",a,0n),201);
+    await eventually(async()=>readFileSync(app.log,"utf8"),log=>log.includes("standalone margin exhausted u8 counters 1–7"));
+    assert.equal(proxy.retries(),6);const Key=await signKey(b,"bounded-sign",0n);
+    const sign=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key}))).Body!.transformToByteArray());
+    assert.equal(sign.length,1);assert.deepEqual(sign[0]!.content,new Uint8Array([7]));await stop(app.process);
+  }
   console.log("put of success: bounded tombstone/margin probes, immutable tombstones, upload postconditions, margin retries across all sequence writers, and stable pipelined Timeline digest/recovery");
   // Sequence sentinels are excluded from search and replaced only with their observed ETag.
   {
@@ -369,7 +384,7 @@ try {
     const markerBytes=await markerObject.Body!.transformToByteArray();assert.equal(envelopeMessage(markerBytes).length,0);assert(markerBytes.length>0);assert.notEqual(markerObject.ETag,emptyETag);
     for(const signKey of [sign,`epilogue/${lex(0n)}`]){
       await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:signKey})),head=>head.ContentLength!>=16);
-      const signObject=await s3.send(new GetObjectCommand({Bucket:b,Key:signKey}));const frames=envelopes(await signObject.Body!.transformToByteArray());assert.equal(frames.length,1);assert.equal(frames[0].format,6);assert.deepEqual(frames[0].content,new Uint8Array([0xee]));assert.notEqual(signObject.ETag,emptyETag);
+      const signObject=await s3.send(new GetObjectCommand({Bucket:b,Key:signKey}));const frames=envelopes(await signObject.Body!.transformToByteArray());assert.equal(frames.length,1);assert.equal(frames[0].format,6);assert.deepEqual(frames[0].content,new Uint8Array([1]));assert.notEqual(signObject.ETag,emptyETag);
     }
     await stop(app.process);
     for(const Key of [key(1n),epilogueKey(0n),`epilogue/${lex(0n)}`,markerKey,sign])assert(replaced.has(Key),`ETag-guarded replacement: ${Key}`);
@@ -1025,17 +1040,21 @@ try {
     for(const response of await Promise.all(requests))await status(response,201);
     const stored=await get(b,1n),ranges=rangesAt(stored),range=ranges.find(r=>r.flow==="public"&&r.marker.viewpoint==="1")!;
     await assertManifestRange(b,1n,stored);
-    const footer=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:"bytes=-8"}));
-    const tailBytes=await footer.Body!.transformToByteArray();assert.equal(tailBytes.length,8);
-    const contentLength=new DataView(tailBytes.buffer,tailBytes.byteOffset,tailBytes.byteLength).getUint32(0,true);
-    const alignment=2**(tailBytes[4]&31);assert.equal(alignment,16);
-    const span=Math.ceil((contentLength+16)/alignment)*alignment;
-    const last=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=-${span}`}));
-    const manifestBytes=await last.Body!.transformToByteArray(),manifest=previousEnvelope(manifestBytes,manifestBytes.length);
-    const query=toObject(new Uint8Array(manifest.content)) as any[];
-    assert.equal(query[2],"sts/0/databasin/rangemanifest");
+    let end=stored.length,query:any[],skipped=0;
+    for(;;){
+      const footer=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=${end-8}-${end-1}`}));
+      const tailBytes=await footer.Body!.transformToByteArray();assert.equal(tailBytes.length,8);
+      const contentLength=new DataView(tailBytes.buffer,tailBytes.byteOffset,tailBytes.byteLength).getUint32(0,true);
+      const alignment=2**(tailBytes[4]&31);assert.equal(alignment,16);
+      const span=Math.ceil((contentLength+16)/alignment)*alignment;
+      if(tailBytes[4]>>5===6){end-=span;skipped++;continue;}
+      const last=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=${end-span}-${end-1}`}));
+      const manifestBytes=await last.Body!.transformToByteArray(),manifest=previousEnvelope(manifestBytes,manifestBytes.length);
+      query=toObject(new Uint8Array(manifest.content)) as any[];break;
+    }
+    assert.equal(skipped,1);assert.equal(query[2],"sts/0/databasin/rangemanifest");
     const frames=envelopes(stored);for(const frame of frames){assert.equal(frame.start%16,0);assert.equal(frame.end%16,0);}
-    assert.deepEqual(Object.keys(query[3].envelopes),frames.slice(0,-1).map(e=>lex(BigInt(e.end))));
+    assert.deepEqual(Object.keys(query[3].envelopes),frames.slice(0,-2).map(e=>lex(BigInt(e.end))));
     const current=(await fullStatus(app.url,"public")).latest!;
     assert.equal(current.viewpoint,1n);assert.equal(current.length,target.length);
     assert.equal(current.headers?.Range,`bytes=${range.offset}-${range.offset+range.length-1}`);
@@ -1238,7 +1257,7 @@ try {
     for(const action of [actions.preview,actions.read]){assert.equal(action.headers["If-Match"],"*");const r=await fetch(action.url,{headers:action.headers});assert([404,412].includes(r.status));await r.arrayBuffer();}
     const first=await get(b,1n),tuples=eventTuples(first);
     assert.equal(tuples.length,1);assert.equal(tuples[0][2],"sts/0/databasin/ingestturso");
-    assert.equal(envelopes(first).length,2);assert.deepEqual(rangesAt(first),[]);
+    assert.equal(envelopes(first).length,3);assert.deepEqual(envelopes(first).at(-1)!.content,new Uint8Array(8));assert.deepEqual(rangesAt(first),[]);
     const delta=deltasAt(first).turso["default.turso"] as WalDelta;
     let image=ingestWal(delta.logical.base!,delta.physical.segments);
     const original=await inspectUserHeap(image,secret);assert.equal(original.length,7);assert.equal(original.etag,"");assert.equal(original.promoted,"");assert(original.retained);assert(Number.isFinite(Date.parse(original.reserved)));
@@ -1663,11 +1682,11 @@ try {
     await stop(app.process);const before=puts;confirm=true;
     for(const metadata of [{},{upstream:"999"}] as Record<string,string>[]){
       mismatch=Promise.withResolvers<void>();
-      await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:wrapEnvelope(new Uint8Array(),6),Metadata:metadata}));
+      await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:wrapEnvelope(new Uint8Array([1]),6),Metadata:metadata}));
       app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});await timeout(mismatch.promise);
       assert((await counts()).marking_tasks>=1,"sign upstream must match its source Milestone");await stop(app.process);
     }
-    await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:wrapEnvelope(new Uint8Array(),6),Metadata:{upstream:"1"}}));
+    await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:wrapEnvelope(new Uint8Array([1]),6),Metadata:{upstream:"1"}}));
     app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     await eventually(counts,r=>r.marking_tasks===0&&r.sweeping_tasks===0);
     assert.equal(puts,before,"restart confirms an existing sign without rewriting it");

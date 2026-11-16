@@ -19,6 +19,6 @@ competing metadata revisions.
 
 Require every successful sequence write to return an *ETag*[^][etag] distinct
 from the empty reference before acknowledging publication. A match fails the
-postcondition: append or update one *counter margin*[^][margin] and retry with
+postcondition: increment the feed's trailing *counter margin*[^][margin] and retry with
 `If-Match` on that observed validator. Probe *standalone margins*[^][margin]
 conditionally at startup. Opaque user blobs outside sequences may still be empty.

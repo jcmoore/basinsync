@@ -27,7 +27,7 @@ export function encodeTuples(commands:(unknown[]|{margin:Uint8Array})[]):Uint8Ar
     if(margin){if(lastMargin!==null)delete envelopes[lastMargin];envelopes[key]=null;lastMargin=key;}
     else{envelopes[key]=tuple.slice(0,3);lastMargin=null;}
   }
-  chunks.push(wrap(encode([Symbol.species,namespace,manifestPath,{envelopes}])));return concat(chunks);
+  chunks.push(wrap(encode([Symbol.species,namespace,manifestPath,{envelopes}])),wrap(new Uint8Array(8),MARGIN));return concat(chunks);
 }
 export function encodeWalEvent(commands:Record<string,Marker>[],delta:WalDelta):Uint8Array {
   return encodeTuples([...commands.map(markers=>[Symbol.species,namespace,command,{markers}]),[Symbol.species,namespace,ingest,{turso:{"default.turso":delta}}]]);

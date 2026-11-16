@@ -524,7 +524,8 @@ mod tests {
         let (command, delta) = captured.unwrap();
         let bytes = event::encode_wal(vec![], delta)?;
         let envelopes = crate::envbuf::all(&bytes)?;
-        assert_eq!(envelopes.len(), 2);
+        assert_eq!(envelopes.len(), 3);
+        assert_eq!(envelopes.last().unwrap().content, &0u64.to_le_bytes());
         assert!(event::blob_ranges(&bytes)?.is_empty());
         assert!(!bytes.windows(secret.len()).any(|w| w == secret));
         let mut recovered = crate::timeline::Datashed::default();
