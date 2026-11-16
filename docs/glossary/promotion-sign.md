@@ -5,6 +5,7 @@
 [epilogue-compaction]: <epilogue-compaction.md>
 [etag]: <etag.md>
 [lexidecimal]: <lexidecimal.md>
+[margin]: <margin.md>
 [milestone]: <milestone.md>
 [node-promotion]: <node-promotion.md>
 [object-keys]: <../object-keys.md>
@@ -16,8 +17,8 @@
 The S3 complement of a *CommitMarker*[^][commit-marker], stored in the same
 *Epilogue*[^][epilogue] using its uncomplemented *Lexidecimal*[^][lexidecimal]
 *Viewpoint*[^][viewpoint]; see the *object-key patterns*[^][object-keys].
-Its object is a bucket-proven padding *EnvBuf*[^][envbuf] (`110`) with message
-length 1–8, rather than a zero-byte *sentinel*[^][empty-sentinel]. Startup checks
+Its object uses a bucket-proven *margin*[^][margin] (`110`) with message
+length 1–7, rather than a zero-byte *sentinel*[^][empty-sentinel]. Startup checks
 that its *ETag*[^][etag] differs from the empty reference; publication verifies
 that postcondition again. Its presence certifies that the entire graph has completed *promotion*[^][node-promotion],
 including an empty graph. Its `x-amz-meta-upstream` records the source

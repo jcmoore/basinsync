@@ -1,6 +1,6 @@
 [conditional-write]: <conditional-write.md>
-[envbuf]: <envbuf.md>
 [etag]: <etag.md>
+[margin]: <margin.md>
 [object-keys]: <../object-keys.md>
 [tombstone]: <tombstone.md>
 
@@ -19,8 +19,6 @@ competing metadata revisions.
 
 Require every successful sequence write to return an *ETag*[^][etag] distinct
 from the empty reference before acknowledging publication. A match fails the
-postcondition: append one bucket-proven padding *EnvBuf*[^][envbuf]
-and retry with `If-Match` on that observed validator. At startup, conditionally
-probe single padding *EnvBufs*[^][envbuf] with message lengths 1 through 8,
-in order, using `0xee` message bytes (each envelope is 32 bytes); fail startup
-if none has a distinct validator. Opaque user blobs outside sequences may still be empty.
+postcondition: append or update one *counter margin*[^][margin] and retry with
+`If-Match` on that observed validator. Probe *standalone margins*[^][margin]
+conditionally at startup. Opaque user blobs outside sequences may still be empty.

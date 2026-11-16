@@ -8,6 +8,7 @@
 [envbuf]: <glossary/envbuf.md>
 [flow]: <glossary/flow.md>
 [lexidecimal]: <glossary/lexidecimal.md>
+[margin]: <glossary/margin.md>
 [milestone]: <glossary/milestone.md>
 [node]: <glossary/node.md>
 [node-height]: <glossary/node-height.md>
@@ -29,7 +30,7 @@ All implemented S3 key patterns, relative to the configured bucket:
 | --- | --- |
 | Empty-validator reference | `sentinel/empty` |
 | *Tombstone*[^][tombstone] probes | `sentinel/tombstone/${length}` |
-| Padding probes | `sentinel/padding/${message_length}` |
+| *Margin*[^][margin] probes | `sentinel/margin/${message_length}` |
 | *Datashed*[^][datashed] *DifferentialEvent*[^][differential-event] | `timeline/${diffuse16(milestone)}` |
 | *Datashed*[^][datashed] backup *CommitMarker*[^][commit-marker] | `epilogue/${lex(~viewpoint)}` |
 | *Datashed*[^][datashed] *PromotionSign*[^][promotion-sign] | `epilogue/${lex(viewpoint)}` |
@@ -83,10 +84,10 @@ Reserve `_r_` for future *retainers*[^][retainer].
 Sequence objects reserve zero bytes for *empty sentinels*[^][empty-sentinel].
 *DifferentialEvents*[^][differential-event] are *EnvBuf feeds*[^][envbuf];
 *CommitMarkers*[^][commit-marker], including database backups, wrap their blob in
-one raw message; *PromotionSigns*[^][promotion-sign] use a padding envelope with
-message length 1–8. Their framing keeps valid empty messages distinct from
+one raw message; *PromotionSigns*[^][promotion-sign] use a *margin*[^][margin] with
+message length 1–7. Their framing keeps valid empty messages distinct from
 *sentinels*[^][empty-sentinel]. *UserHeap*[^][userheap] objects stay opaque, including valid empty blobs.
 The empty reference is always zero bytes. Probe objects are created only if
 absent and verified on reuse. *Tombstone*[^][tombstone] probe lengths are decimal
-2, 4, …, 14; sixteen-byte candidates are refused. Padding probes each contain a single
-32-byte *EnvBuf*[^][envbuf], with `message_length` from 1 through 8 and `0xee` message bytes.
+2, 4, …, 14; sixteen-byte candidates are refused. *Margin*[^][margin] probes each contain a single
+32-byte *EnvBuf*[^][envbuf], with `message_length` from 1 through 7 and `0xee` message bytes.

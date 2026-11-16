@@ -1,7 +1,7 @@
 import {createHash} from "node:crypto";
 import assert from "node:assert/strict";
 import { encode, toReference, type Reference } from "./flexbuffer";
-import { all, readable, wrap, concat, PADDING } from "./envbuf";
+import { all, readable, wrap, concat, MARGIN } from "./envbuf";
 import { encode as lex } from "./lexidecimal";
 
 export type Marker={viewpoint:string;sha384:string;blob:Uint8Array;edges:string[];context:Record<string,string>};
@@ -19,13 +19,13 @@ export function encodeEvent(markers:Record<string,Marker>,deltas?:Deltas<TursoDe
   for(const [flow,marker] of Object.entries(markers))owned[flow]={...marker,blob:new Uint8Array(marker.blob)};
   return encode([[Symbol.species,namespace,command,{markers:owned,...(deltas?{deltas}:{})}]]);
 }
-export function encodeTuples(commands:(unknown[]|{padding:Uint8Array})[]):Uint8Array {
-  const envelopes:Record<string,unknown>=Object.create(null),chunks:Uint8Array[]=[];let end=0,lastPadding:string|null=null;
+export function encodeTuples(commands:(unknown[]|{margin:Uint8Array})[]):Uint8Array {
+  const envelopes:Record<string,unknown>=Object.create(null),chunks:Uint8Array[]=[];let end=0,lastMargin:string|null=null;
   for(const tuple of commands){
-    const padding=!Array.isArray(tuple),chunk=padding?wrap(tuple.padding,PADDING):wrap(encode(tuple));end+=chunk.length;chunks.push(chunk);
+    const margin=!Array.isArray(tuple),chunk=margin?wrap(tuple.margin,MARGIN):wrap(encode(tuple));end+=chunk.length;chunks.push(chunk);
     const key=lex(BigInt(end));
-    if(padding){if(lastPadding!==null)delete envelopes[lastPadding];envelopes[key]=null;lastPadding=key;}
-    else{envelopes[key]=tuple.slice(0,3);lastPadding=null;}
+    if(margin){if(lastMargin!==null)delete envelopes[lastMargin];envelopes[key]=null;lastMargin=key;}
+    else{envelopes[key]=tuple.slice(0,3);lastMargin=null;}
   }
   chunks.push(wrap(encode([Symbol.species,namespace,manifestPath,{envelopes}])));return concat(chunks);
 }
@@ -40,13 +40,13 @@ function tuples(bytes:Uint8Array):{tuple:Reference;base:number}[] {
   let commands:{tuple:Reference;base:number}[];
   const enveloped=bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56;
   if(enveloped){
-    const physical=all(bytes),frames=physical.filter(e=>e.format!==PADDING);assert(frames.length>=2);
+    const physical=all(bytes),frames=physical.filter(e=>e.format!==MARGIN);assert(frames.length>=2);
     const refs=frames.map(e=>{assert.equal(e.format,5);return toReference(new Uint8Array(e.content).buffer);});
     const manifest=refs.pop()!;assert.equal(manifest.get(0).symbolValue(),Symbol.species);assert.equal(manifest.get(1).stringValue(),namespace);assert.equal(manifest.get(2).stringValue(),manifestPath);
     const index=manifest.get(3).get("envelopes").toObject() as Record<string,unknown>;
     let expected=refs.length;
     for(let n=0;n<physical.length&&physical[n].start<frames.at(-1)!.start;n++){
-      if(physical[n].format===PADDING&&physical[n+1].format!==PADDING){assert.equal(index[lex(BigInt(physical[n].end))],null);expected++;}
+      if(physical[n].format===MARGIN&&physical[n+1].format!==MARGIN){assert.equal(index[lex(BigInt(physical[n].end))],null);expected++;}
     }
     assert.equal(Object.keys(index).length,expected);
     for(let n=0;n<refs.length;n++)assert.deepEqual(index[lex(BigInt(frames[n].end))],[Symbol.species,namespace,refs[n].get(2).stringValue()]);

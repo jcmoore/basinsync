@@ -284,7 +284,7 @@ pub fn manifest_range(bytes: &[u8]) -> Result<Option<std::ops::Range<usize>>> {
     let mut end = bytes.len();
     while end > 0 {
         let frame = crate::envbuf::before(bytes, end)?;
-        if frame.format != crate::envbuf::PADDING {
+        if frame.format != crate::envbuf::MARGIN {
             ensure!(
                 frame.format == crate::envbuf::FLEXBUFFERS
                     && tuple(frame.content)?.index(2)?.get_str()? == RANGE_MANIFEST,
@@ -297,7 +297,7 @@ pub fn manifest_range(bytes: &[u8]) -> Result<Option<std::ops::Range<usize>>> {
     anyhow::bail!("missing range manifest envelope")
 }
 
-/// Retry padding follows the manifest and is excluded from predecessor bindings.
+/// Retry margin follows the manifest and is excluded from predecessor bindings.
 pub fn entry_digest(bytes: &[u8]) -> Result<String> {
     let end = manifest_range(bytes)?.map_or(bytes.len(), |range| range.end);
     Ok(digest(&bytes[..end]))
@@ -359,8 +359,8 @@ impl FlowChunks {
         );
         Ok(())
     }
-    pub fn append_padding(&mut self, content: &[u8]) -> Result<()> {
-        let end = crate::envbuf::append(&mut self.bytes, content, crate::envbuf::PADDING)?;
+    pub fn append_margin(&mut self, content: &[u8]) -> Result<()> {
+        let end = crate::envbuf::append(&mut self.bytes, content, crate::envbuf::MARGIN)?;
         if self
             .envelopes
             .last_key_value()
@@ -460,7 +460,7 @@ fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
     let frames = crate::envbuf::all(bytes)?;
     let envelopes: Vec<_> = frames
         .iter()
-        .filter(|e| e.format != crate::envbuf::PADDING)
+        .filter(|e| e.format != crate::envbuf::MARGIN)
         .collect();
     ensure!(
         envelopes.len() >= 2,
@@ -481,12 +481,11 @@ fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
         .enumerate()
         .take_while(|(_, frame)| frame.start < last.start)
     {
-        if frame.format == crate::envbuf::PADDING && frames[n + 1].format != crate::envbuf::PADDING
-        {
+        if frame.format == crate::envbuf::MARGIN && frames[n + 1].format != crate::envbuf::MARGIN {
             let key = crate::lexidecimal::encode(&frame.end.into());
             ensure!(
                 index.index(key.as_str())?.flexbuffer_type() == flexbuffers::FlexBufferType::Null,
-                "padding run must have a null range manifest entry"
+                "margin run must have a null range manifest entry"
             );
             expected_entries += 1;
         }
@@ -587,40 +586,40 @@ fn historical_ranges(bytes: &[u8]) -> Result<Vec<BlobRange>> {
 mod envelope_tests {
     use super::*;
     #[test]
-    fn padding_is_skipped_without_affecting_marker_ranges_or_recovery() -> Result<()> {
+    fn margin_is_skipped_without_affecting_marker_ranges_or_recovery() -> Result<()> {
         let commands = commands();
         let mut writer = crate::turso::wal::Writer::open(&crate::turso::State::genesis()?.image)?;
         let mut chunks = FlowChunks::new(&[])?;
-        chunks.append_padding(&[])?;
-        let first_padding_end = chunks.bytes.len();
-        chunks.append_padding(&[255, 0, 1])?;
+        chunks.append_margin(&[])?;
+        let first_margin_end = chunks.bytes.len();
+        chunks.append_margin(&[255, 0, 1])?;
         for (n, command) in commands.iter().enumerate() {
             chunks.append_commit(command)?;
             if n == 0 {
-                chunks.append_padding(&[])?;
-                chunks.append_padding(&[1])?;
+                chunks.append_margin(&[])?;
+                chunks.append_margin(&[1])?;
             }
         }
         let locations = chunks.ranges().to_vec();
         let delta = writer.prepare_with_ranges(&0u8.into(), None, &commands, &locations)?;
-        chunks.append_padding(&[2])?;
-        chunks.append_padding(&[3])?;
+        chunks.append_margin(&[2])?;
+        chunks.append_margin(&[3])?;
         chunks.append(
             INGEST_TURSO,
             &IngestTurso {
                 turso: BTreeMap::from([(crate::turso::ID.into(), delta)]),
             },
         )?;
-        chunks.append_padding(&[4])?;
-        chunks.append_padding(&[])?;
+        chunks.append_margin(&[4])?;
+        chunks.append_margin(&[])?;
         assert_eq!(chunks.envelopes.values().filter(|v| v.is_none()).count(), 4);
         assert!(
             !chunks
                 .envelopes
-                .contains_key(&crate::lexidecimal::encode(&first_padding_end.into()))
+                .contains_key(&crate::lexidecimal::encode(&first_margin_end.into()))
         );
         // Missing, split, mistyped, and shifted run entries must fail closed.
-        let (padding_key, _) = chunks
+        let (margin_key, _) = chunks
             .envelopes
             .iter()
             .find(|(_, value)| value.is_none())
@@ -629,14 +628,14 @@ mod envelope_tests {
             let mut index = chunks.envelopes.clone();
             match fault {
                 0 => {
-                    index.remove(padding_key);
+                    index.remove(margin_key);
                 }
                 1 => {
-                    index.insert(crate::lexidecimal::encode(&first_padding_end.into()), None);
+                    index.insert(crate::lexidecimal::encode(&first_margin_end.into()), None);
                 }
                 2 => {
                     index.insert(
-                        padding_key.clone(),
+                        margin_key.clone(),
                         Some((
                             Extension::WellKnownSymbol("species".into()).payload()?,
                             NAMESPACE.into(),
@@ -645,9 +644,9 @@ mod envelope_tests {
                     );
                 }
                 _ => {
-                    index.remove(padding_key);
+                    index.remove(margin_key);
                     index.insert(
-                        crate::lexidecimal::encode(&(first_padding_end + 1).into()),
+                        crate::lexidecimal::encode(&(first_margin_end + 1).into()),
                         None,
                     );
                 }
@@ -664,19 +663,19 @@ mod envelope_tests {
         let manifest = crate::envbuf::before(&padded, padded.len())?;
         let expected_manifest = manifest.start..manifest.end;
         assert_eq!(manifest_range(&padded)?, Some(expected_manifest.clone()));
-        crate::envbuf::append(&mut padded, &[], crate::envbuf::PADDING)?;
-        crate::envbuf::append(&mut padded, &[1, 2, 3], crate::envbuf::PADDING)?;
+        crate::envbuf::append(&mut padded, &[], crate::envbuf::MARGIN)?;
+        crate::envbuf::append(&mut padded, &[1, 2, 3], crate::envbuf::MARGIN)?;
         assert_eq!(manifest_range(&padded)?, Some(expected_manifest));
         assert_eq!(blob_ranges(&padded)?, locations);
         let mut recovered = crate::timeline::Datashed::default();
         recovered.apply_entry(1u8.into(), &padded)?;
         assert_eq!(recovered.database.unwrap().image, writer.image()?);
         let mut bad = padded.clone();
-        bad[first_padding_end - 1] ^= 1;
+        bad[first_margin_end - 1] ^= 1;
         assert!(decode_entry(&bad).is_err());
         // Raw content is readable and cannot silently disappear from a command feed.
         padded[3] = 4;
-        padded[first_padding_end - 4] = 4;
+        padded[first_margin_end - 4] = 4;
         assert!(decode_entry(&padded).is_err());
         Ok(())
     }

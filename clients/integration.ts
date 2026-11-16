@@ -256,31 +256,31 @@ try {
     assert.deepEqual(await (await s3.send(new GetObjectCommand({Bucket:invalid,Key:"sentinel/empty"}))).Body!.transformToByteArray(),bytes("not empty"));
   }
   const a = bytes("359");assert(sha384(a).startsWith("00"));
-  // Probe collisions bound tombstones below sixteen bytes and padding to one message of 1–8 bytes.
-  for(const mode of ["selected","all-tombstones","all-padding"]){
+  // Probe collisions bound tombstones below sixteen bytes and margin to one message of 1–7 bytes.
+  for(const mode of ["selected","all-tombstones","all-margins"]){
     const b=await bucket(),writes:string[]=[];
     const proxy=relay(async(request,response)=>{
       const path=new URL(request.url).pathname;
-      const tomb=path.match(/\/sentinel\/tombstone\/(\d+)$/),pad=path.match(/\/sentinel\/padding\/(\d+)$/);
-      const collide=!!tomb&&(mode==="all-tombstones"||mode==="selected"&&Number(tomb[1])<6)||!!pad&&(mode==="all-padding"||mode==="selected"&&Number(pad[1])<8);
+      const tomb=path.match(/\/sentinel\/tombstone\/(\d+)$/),pad=path.match(/\/sentinel\/margin\/(\d+)$/);
+      const collide=!!tomb&&(mode==="all-tombstones"||mode==="selected"&&Number(tomb[1])<6)||!!pad&&(mode==="all-margins"||mode==="selected"&&Number(pad[1])<7);
       if(response.ok&&collide){const headers=new Headers(response.headers);headers.set("etag",emptyETag);return new Response(await response.arrayBuffer(),{status:response.status,headers});}
       return response;
     },async request=>{const path=new URL(request.url).pathname;if(request.method==="PUT"&&path.includes("/sentinel/")){assert.equal(request.headers.get("if-none-match"),"*");writes.push(path);
-      const pad=path.match(/\/sentinel\/padding\/(\d+)$/);if(pad){const frames=envelopes(new Uint8Array(await request.clone().arrayBuffer()));assert.equal(frames.length,1);assert.equal(frames[0]!.end,32);assert.equal(frames[0]!.format,6);assert.deepEqual(frames[0]!.content,new Uint8Array(Number(pad[1])).fill(0xee));}
+      const pad=path.match(/\/sentinel\/margin\/(\d+)$/);if(pad){const frames=envelopes(new Uint8Array(await request.clone().arrayBuffer()));assert.equal(frames.length,1);assert.equal(frames[0]!.end,32);assert.equal(frames[0]!.format,6);assert.deepEqual(frames[0]!.content,new Uint8Array(Number(pad[1])).fill(0xee));}
     }});
     if(mode!=="selected"){
       const process=serverProcess(b,proxy.url,"127.0.0.1:0");assert.equal(await timeout(process.exited),1);
-      const log=readFileSync(processLogs.get(process)!,"utf8");assert(log.includes(mode==="all-tombstones"?"refusing 16-byte tombstone":"cannot distinguish padding with message lengths 1–8"));
+      const log=readFileSync(processLogs.get(process)!,"utf8");assert(log.includes(mode==="all-tombstones"?"refusing 16-byte tombstone":"cannot distinguish margin with message lengths 1–7"));
       assert(!writes.some(p=>p.endsWith("/tombstone/16")),"sixteen-byte tombstones must never be written");
-      if(mode==="all-padding")assert.deepEqual(writes.filter(p=>p.includes("/padding/")).map(p=>p.split("/").at(-1)),Array.from({length:8},(_,i)=>String(i+1)));
+      if(mode==="all-margins")assert.deepEqual(writes.filter(p=>p.includes("/margin/")).map(p=>p.split("/").at(-1)),Array.from({length:7},(_,i)=>String(i+1)));
       continue;
     }
     let app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     assert.deepEqual(writes.filter(p=>p.includes("/tombstone/")).map(p=>p.split("/").at(-1)),["2","4","6"]);
-    assert.deepEqual(writes.filter(p=>p.includes("/padding/")).map(p=>p.split("/").at(-1)),Array.from({length:8},(_,i)=>String(i+1)));
+    assert.deepEqual(writes.filter(p=>p.includes("/margin/")).map(p=>p.split("/").at(-1)),Array.from({length:7},(_,i)=>String(i+1)));
     await status(await commit(app.url,"probed",a,0n),201);
     const sign=await signKey(b,"probed",0n);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),head=>head.ContentLength===32);
-    const signFrames=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key:sign}))).Body!.transformToByteArray());assert.equal(signFrames.length,1);assert.equal(signFrames[0]!.format,6);assert.deepEqual(signFrames[0]!.content,new Uint8Array(8).fill(0xee));
+    const signFrames=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key:sign}))).Body!.transformToByteArray());assert.equal(signFrames.length,1);assert.equal(signFrames[0]!.format,6);assert.deepEqual(signFrames[0]!.content,new Uint8Array(7).fill(0xee));
     await eventually(()=>datashedBackup(b),Boolean);await stop(app.process);
     const cp=await datashedBackup(b);assert(cp);const vp=~unlex(cp.key.slice(9));
     await s3.send(new PutObjectCommand({Bucket:b,Key:epilogueKey(vp+1n),Body:new Uint8Array([0xde,0xad,0xde,0xad,0xde,0xad])}));
@@ -295,16 +295,16 @@ try {
     assert.deepEqual(await get(b,1n),new Uint8Array([0xde,0xad]),"a competing tombstone can never be replaced");await badStartup(b);
   }
   // This provider adapter gives one successful upload the empty ETag, then honors its CAS retry.
-  function collisionProxy(b:string,select:(request:Request)=>boolean,hold=false,missing=false){
+  function collisionProxy(b:string,select:(request:Request)=>boolean,hold=false,missing=false,collisions=1){
     const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
-    const originals=new Map<string,{body:Uint8Array;etag:string}>(),bodies=new Map<string,Uint8Array>();let retries=0;
+    const originals=new Map<string,{body:Uint8Array;etag:string}>(),bodies=new Map<string,Uint8Array>(),validators=new Map<string,string>(),counts=new Map<string,number>();let retries=0;
     const proxy=relay(async(request,response)=>{
-      const pad=new URL(request.url).pathname.match(/\/sentinel\/padding\/(\d+)$/);
-      if(pad&&Number(pad[1])<8&&response.ok){const headers=new Headers(response.headers);headers.set("etag",emptyETag);return new Response(await response.arrayBuffer(),{status:response.status,headers});}
+      const pad=new URL(request.url).pathname.match(/\/sentinel\/margin\/(\d+)$/);
+      if(pad&&Number(pad[1])<7&&response.ok){const headers=new Headers(response.headers);headers.set("etag",emptyETag);return new Response(await response.arrayBuffer(),{status:response.status,headers});}
       if(request.method==="PUT"&&select(request)&&response.ok){
         const Key=decodeURIComponent(new URL(request.url).pathname.slice(b.length+2));
         if(!originals.has(Key)){
-          originals.set(Key,{body:bodies.get(Key)!,etag:response.headers.get("etag")!});entered.resolve();if(hold)await release.promise;
+          originals.set(Key,{body:bodies.get(Key)!,etag:response.headers.get("etag")!});validators.set(Key,response.headers.get("etag")!);entered.resolve();if(hold)await release.promise;
           const headers=new Headers(response.headers);if(missing)headers.delete("etag");else headers.set("etag",emptyETag);
           return new Response(await response.arrayBuffer(),{status:response.status,headers});
         }
@@ -316,19 +316,20 @@ try {
       const original=originals.get(Key);
       if(original&&request.headers.get("if-match")===emptyETag){
         retries++;assert.equal(request.headers.get("if-none-match"),null);assert.deepEqual(body.subarray(0,original.body.length),original.body);
-        const padding=envelopes(body).filter(e=>e.start>=original.body.length);assert.equal(padding.length,1);assert.equal(padding[0]!.format,6);assert.deepEqual(padding[0]!.content,new Uint8Array(8).fill(0xee));
+        const margin=envelopes(body).filter(e=>e.start>=original.body.length);assert.equal(margin.length,1);assert.equal(body.length,original.body.length+32);assert.equal(margin[0]!.format,6);assert.equal(margin[0]!.content.length,8);
+        const counter=counts.get(Key)??0;assert.equal(new DataView(margin[0]!.content.buffer,margin[0]!.content.byteOffset,8).getBigUint64(0,true),BigInt(counter));counts.set(Key,counter+1);
         const Metadata=Object.fromEntries([...request.headers].filter(([name])=>name.startsWith("x-amz-meta-")).map(([name,value])=>[name.slice(11),value]));
-        const put=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:body,IfMatch:original.etag,Metadata}));return new Response(null,{status:200,headers:{etag:put.ETag!}});
+        const put=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:body,IfMatch:validators.get(Key),Metadata}));validators.set(Key,put.ETag!);return new Response(null,{status:200,headers:{etag:counter+1<collisions?emptyETag:put.ETag!}});
       }
     });
     return {...proxy,entered,release,originals,retries:()=>retries};
   }
   {
-    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.endsWith(`/${key(1n)}`),true);
+    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.endsWith(`/${key(1n)}`),true,false,259);
     const app=await server(b,proxy.url,{BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});let done=0;
     const first=commit(app.url,"collision",a,0n).then(r=>{done++;return r});await timeout(proxy.entered.promise);
     const next=commit(app.url,"collision",bytes("second"),1n).then(r=>{done++;return r});await batchLogged(app.log,2);assert.equal(done,0);
-    proxy.release.resolve();await status(await first,201);await status(await next,201);assert.equal(proxy.retries(),1);
+    proxy.release.resolve();await status(await first,201);await status(await next,201);assert.equal(proxy.retries(),259);
     const payload=await get(b,1n),original=proxy.originals.get(key(1n))!.body;assert.equal(entryDigest(payload),entryDigest(original));assert.notEqual(sha384(payload),sha384(original));
     assert.equal((deltasAt(await get(b,2n)).turso["default.turso"] as WalDelta).physical.parent,entryDigest(payload));await assertManifestRange(b,1n,payload);await stop(app.process);
     const replayed=await server(b);assert.equal((await fullStatus(replayed.url,"collision")).latest?.viewpoint,1n);await stop(replayed.process);
@@ -336,7 +337,7 @@ try {
     const restored=await server(b);assert.deepEqual(await latestBlob((await fullStatus(restored.url,"collision")).latest!),bytes("second"));await stop(restored.process);
   }
   for(const kind of ["marker","backup","sign"]){
-    const b=await bucket(),proxy=collisionProxy(b,r=>{const path=new URL(r.url).pathname;return kind==="marker"?path.includes("/flows/"):kind==="backup"?isDatashedPut(r):path.includes("/epilogue/0z");});
+    const b=await bucket(),proxy=collisionProxy(b,r=>{const path=new URL(r.url).pathname;return kind==="marker"?path.includes("/flows/"):kind==="backup"?isDatashedPut(r):path.includes("/epilogue/0z");},false,false,3);
     const app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await status(await commit(app.url,"collision",a,0n),201);
     await eventually(()=>datashedBackup(b),Boolean);await eventually(async()=>proxy.retries(),n=>n>0);await stop(app.process);
     const cp=await datashedBackup(b);assert(cp);assert.equal((await inspectImage(cp.blob)).flows.collision,"0");
@@ -347,7 +348,7 @@ try {
     const app=await server(b,proxy.url);await status(await commit(app.url,"missing-validator",a,0n),503);assert.equal(await timeout(app.process.exited),1);
     const restored=await server(b);assert.equal((await fullStatus(restored.url,"missing-validator")).latest?.viewpoint,0n);await stop(restored.process);
   }
-  console.log("put of success: bounded tombstone/padding probes, immutable tombstones, upload postconditions, padding retries across all sequence writers, and stable pipelined Timeline digest/recovery");
+  console.log("put of success: bounded tombstone/margin probes, immutable tombstones, upload postconditions, margin retries across all sequence writers, and stable pipelined Timeline digest/recovery");
   // Sequence sentinels are excluded from search and replaced only with their observed ETag.
   {
     const b=await bucket(),replaced=new Set<string>();
@@ -394,7 +395,7 @@ try {
     assert.equal(outcomes.filter(s=>s===200).length,1);assert.equal(outcomes.filter(s=>s===412).length,7);
     await assert.rejects(s3.send(new PutObjectCommand({Bucket:b,Key,Body:wrapEnvelope(bytes("stale"),0),IfMatch:original.ETag})),(e:any)=>e.$metadata.httpStatusCode===412);
   }
-  console.log("put of success: bucket-derived empty sentinel validators, atomic conditional replacement, metadata-only ETag caveat, exclusive search bounds, wrapped empty markers, padding signs, and snapshot recovery");
+  console.log("put of success: bucket-derived empty sentinel validators, atomic conditional replacement, metadata-only ETag caveat, exclusive search bounds, wrapped empty markers, margin signs, and snapshot recovery");
   // Flow Epilogue contents must never become a source of Datashed state.
   await s3.send(new PutObjectCommand({Bucket:b,Key:"flows/unrelated/epilogue/0",Body:bytes("legacy, not a Timeline")}));
   const trace: {method:string;url:URL}[] = [];

@@ -44,7 +44,7 @@ pub fn flow_promotion_key(
     event::valid_flow(flow)?;
     promotion_key(&flow_prefix(flow, revision), viewpoint)
 }
-/// A sign is an immutable padding envelope with an empty message; confirmation also resolves ambiguous PUT replies.
+/// A sign is a bucket-proven standalone margin envelope; confirmation also resolves ambiguous PUT replies.
 pub async fn confirm_promotion_sign(bucket: &Bucket, key: &str, upstream: &BigUint) -> Result<()> {
     ensure!(
         upstream > &BigUint::from(0u8),
@@ -55,7 +55,7 @@ pub async fn confirm_promotion_sign(bucket: &Bucket, key: &str, upstream: &BigUi
     }
     let mut headers = conditional_headers();
     headers.insert("x-amz-meta-upstream", upstream.to_string().parse()?);
-    let bytes = crate::sequence::padding(bucket)?;
+    let bytes = crate::sequence::margin(bucket)?;
     let result = crate::sequence::put_feed(bucket, key, &bytes, headers).await;
     ensure!(
         promotion_sign_matches(bucket, key, upstream).await?,

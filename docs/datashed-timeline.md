@@ -12,6 +12,7 @@
 [epilogue-protocol]: <epilogue-protocol.md>
 [flexbuffers]: <glossary/flexbuffers.md>
 [flow]: <glossary/flow.md>
+[margin]: <glossary/margin.md>
 [milestone]: <glossary/milestone.md>
 [node]: <glossary/node.md>
 [object-keys]: <object-keys.md>
@@ -56,7 +57,7 @@ Regardless of in-flight limits, durable publication must follow
 Complete one *conditional PUT*[^][conditional-write] before starting the next;
 acknowledge a batch only after it and all predecessors are durable.
 Predecessor *digests*[^][sha384] cover the feed through its *range manifest*[^][range-manifest],
-excluding trailing retry padding; commands, internal padding, and the manifest
+excluding trailing retry *margins*[^][margin]; commands, internal *margins*[^][margin], and the manifest
 remain covered.
 
 `PUT /api/v0/epilogue` adds a `flow` string to the

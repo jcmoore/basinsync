@@ -2,14 +2,14 @@
 use anyhow::{Context, Result, ensure};
 
 pub const FLEXBUFFERS: u8 = 5;
-pub const PADDING: u8 = 6;
+pub const MARGIN: u8 = 6;
 pub const PLATFORM_EXTENSION: u8 = 7;
 const ALIGNMENT_POWER: u8 = 4;
 const FRAME: usize = 8;
 
 fn alignment(descriptor: u8) -> Result<usize> {
     ensure!(
-        matches!(descriptor >> 5, 0 | 4 | 5 | PADDING),
+        matches!(descriptor >> 5, 0 | 4 | 5 | MARGIN),
         "unsupported EnvBuf descriptor"
     );
     Ok(1usize << (descriptor & 31))
@@ -49,7 +49,7 @@ pub fn append_with_alignment(
         "EnvBuf alignment power exceeds five bits"
     );
     ensure!(
-        matches!(format, 0 | 4 | 5 | PADDING),
+        matches!(format, 0 | 4 | 5 | MARGIN),
         "reserved EnvBuf format"
     );
     let descriptor = (format << 5) | alignment_power;
@@ -141,11 +141,11 @@ pub fn all(bytes: &[u8]) -> Result<Vec<Envelope<'_>>> {
     Ok(result)
 }
 
-/// Validate every envelope, omitting padding from the readable contents.
+/// Validate every envelope, omitting margins from the readable contents.
 pub fn readable(bytes: &[u8]) -> Result<Vec<Envelope<'_>>> {
     Ok(all(bytes)?
         .into_iter()
-        .filter(|envelope| envelope.format != PADDING)
+        .filter(|envelope| envelope.format != MARGIN)
         .collect())
 }
 
@@ -211,7 +211,7 @@ mod tests {
     fn empty_sentinel_and_wrapped_messages_are_distinct() -> Result<()> {
         use std::io::Write;
         let mut empty_feed = vec![];
-        append(&mut empty_feed, &[], PADDING)?;
+        append(&mut empty_feed, &[], MARGIN)?;
         for length in [0, 1, 7, 8, 15, 16, 17, 65536] {
             let original = vec![42; length];
             let bytes = wrap(&original)?;
@@ -232,18 +232,18 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn padding_is_skipped_but_raw_content_is_readable() -> Result<()> {
+    fn margin_is_skipped_but_raw_content_is_readable() -> Result<()> {
         let mut bytes = vec![];
-        append(&mut bytes, b"ignored enV vNE", PADDING)?;
+        append(&mut bytes, b"ignored enV vNE", MARGIN)?;
         let raw_start = bytes.len();
         append(&mut bytes, b"read me", 0)?;
-        append(&mut bytes, &[], PADDING)?;
+        append(&mut bytes, &[], MARGIN)?;
         let frames = all(&bytes)?;
         assert_eq!(
             frames.iter().map(|e| e.format).collect::<Vec<_>>(),
             [6, 0, 6]
         );
-        assert_eq!(before(&bytes, bytes.len())?.format, PADDING);
+        assert_eq!(before(&bytes, bytes.len())?.format, MARGIN);
         assert_eq!(readable(&bytes)?, [at(&bytes, raw_start)?]);
         assert_eq!(readable(&bytes)?[0].content, b"read me");
         let mut bad = bytes.clone();
@@ -291,7 +291,7 @@ mod tests {
         for length in 0..=1024 {
             let start = bytes.len();
             let content = vec![0x42; length];
-            let end = append(&mut bytes, &content, [0, 4, 5, PADDING][length % 4])?;
+            let end = append(&mut bytes, &content, [0, 4, 5, MARGIN][length % 4])?;
             assert_eq!(end - start, 16 + length.next_multiple_of(16));
             assert_eq!(start % 16, 0);
             assert_eq!(end % 16, 0);

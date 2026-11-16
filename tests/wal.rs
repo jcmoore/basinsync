@@ -53,7 +53,7 @@ fn unpublished_state_is_not_readable_and_bootstrap_is_verified() -> Result<()> {
 }
 
 #[test]
-fn retry_padding_preserves_prepared_successors_and_locations() -> Result<()> {
+fn retry_margin_preserves_prepared_successors_and_locations() -> Result<()> {
     let mut stager = Datashed::default().into_stager();
     let first = stager.prepare(vec![command("f", "0")])?;
     let second = stager.prepare(vec![command("f", "1")])?;
@@ -61,8 +61,14 @@ fn retry_padding_preserves_prepared_successors_and_locations() -> Result<()> {
     let locations = event::blob_ranges(first.bytes())?;
     let manifest = event::manifest_range(first.bytes())?;
     let mut retried = first.bytes().to_vec();
-    for _ in 0..3 {
-        basinsync::envbuf::append(&mut retried, &[], basinsync::envbuf::PADDING)?;
+    for counter in [0u64, 1, 256, u64::MAX] {
+        retried.truncate(first.bytes().len());
+        basinsync::envbuf::append(
+            &mut retried,
+            &counter.to_le_bytes(),
+            basinsync::envbuf::MARGIN,
+        )?;
+        assert_eq!(retried.len(), first.bytes().len() + 32);
         assert_eq!(event::entry_digest(&retried)?, digest);
         assert_ne!(event::digest(&retried), digest);
         assert_eq!(event::blob_ranges(&retried)?, locations);

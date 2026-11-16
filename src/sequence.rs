@@ -9,12 +9,11 @@ use std::{
 };
 
 pub const REFERENCE_KEY: &str = "sentinel/empty";
-const ATTEMPTS: usize = 8;
 #[derive(Clone)]
 struct References {
     empty: String,
     tombstone: Vec<u8>,
-    padding: Vec<u8>,
+    margin: Vec<u8>,
 }
 static REFERENCES: OnceLock<Mutex<BTreeMap<String, References>>> = OnceLock::new();
 fn references() -> &'static Mutex<BTreeMap<String, References>> {
@@ -34,8 +33,8 @@ pub fn reference(bucket: &Bucket) -> Result<String> {
 pub fn tombstone(bucket: &Bucket) -> Result<Vec<u8>> {
     cached(bucket, |proof| proof.tombstone.clone())
 }
-pub fn padding(bucket: &Bucket) -> Result<Vec<u8>> {
-    cached(bucket, |proof| proof.padding.clone())
+pub fn margin(bucket: &Bucket) -> Result<Vec<u8>> {
+    cached(bucket, |proof| proof.margin.clone())
 }
 fn etag(response: &ResponseData) -> Result<String> {
     response
@@ -87,33 +86,26 @@ pub async fn initialize(bucket: &Bucket) -> Result<String> {
     let tombstone =
         chosen.context("no distinct tombstone below 16 bytes; refusing 16-byte tombstone")?;
     let mut chosen = None;
-    for message_length in 1..=8 {
+    for message_length in 1..=7 {
         let mut bytes = vec![];
         crate::envbuf::append(
             &mut bytes,
-            &[0xee; 8][..message_length],
-            crate::envbuf::PADDING,
+            &[0xee; 7][..message_length],
+            crate::envbuf::MARGIN,
         )?;
-        if probe(
-            bucket,
-            &format!("sentinel/padding/{message_length}"),
-            &bytes,
-        )
-        .await?
-            != empty
-        {
+        if probe(bucket, &format!("sentinel/margin/{message_length}"), &bytes).await? != empty {
             chosen = Some(bytes);
             break;
         }
     }
-    let padding =
-        chosen.context("cannot distinguish padding with message lengths 1–8 from sentinel")?;
+    let margin =
+        chosen.context("cannot distinguish margin with message lengths 1–7 from sentinel")?;
     references().lock().unwrap().insert(
         bucket.url(),
         References {
             empty: empty.clone(),
             tombstone,
-            padding,
+            margin,
         },
     );
     Ok(empty)
@@ -197,6 +189,17 @@ pub async fn put_entry(
     }
 }
 
+fn retry_margin(counter: &mut Option<u64>) -> Result<Vec<u8>> {
+    let next = match *counter {
+        None => 0,
+        Some(value) => value.checked_add(1).context("margin counter exhausted")?,
+    };
+    let mut bytes = vec![];
+    crate::envbuf::append(&mut bytes, &next.to_le_bytes(), crate::envbuf::MARGIN)?;
+    *counter = Some(next);
+    Ok(bytes)
+}
+
 /// Only the writer that observed a collision may replace its own colliding payload.
 pub async fn put_feed(
     bucket: &Bucket,
@@ -204,27 +207,33 @@ pub async fn put_feed(
     bytes: &[u8],
     mut headers: HeaderMap,
 ) -> Result<ResponseData> {
+    let original_length = bytes.len();
     let mut bytes = Cow::Borrowed(bytes);
-    for _ in 0..ATTEMPTS {
+    let mut counter = None;
+    loop {
         let response = send(bucket, key, &bytes, headers.clone()).await?;
         if !(200..300).contains(&response.status_code()) || etag(&response)? != reference(bucket)? {
             return Ok(response);
         }
-        bytes.to_mut().extend_from_slice(&padding(bucket)?);
+        let margin = retry_margin(&mut counter)?;
+        let bytes = bytes.to_mut();
+        bytes.truncate(original_length);
+        bytes.extend_from_slice(&margin);
         headers.remove(header::IF_NONE_MATCH);
         headers.insert(header::IF_MATCH, reference(bucket)?.parse()?);
     }
-    anyhow::bail!("sequence write could not escape the empty sentinel validator")
 }
 
-/// Single-PUT files stay on disk; collision retries append only verified padding.
+/// Single-PUT files stay on disk; collision retries replace one counter margin.
 pub async fn put_file(
     bucket: &Bucket,
     key: &str,
     path: &std::path::Path,
     mut headers: HeaderMap,
 ) -> Result<()> {
-    for _ in 0..ATTEMPTS {
+    let original_length = tokio::fs::metadata(path).await?.len();
+    let mut counter = None;
+    loop {
         let length = tokio::fs::metadata(path).await?.len();
         ensure!(
             length >= 16,
@@ -264,15 +273,29 @@ pub async fn put_file(
         if observed.context("successful sequence write has no ETag")? != reference(bucket)? {
             return Ok(());
         }
-        use tokio::io::AsyncWriteExt;
-        let mut file = tokio::fs::OpenOptions::new()
-            .append(true)
-            .open(path)
-            .await?;
-        file.write_all(&padding(bucket)?).await?;
+        use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+        let mut file = tokio::fs::OpenOptions::new().write(true).open(path).await?;
+        file.seek(std::io::SeekFrom::Start(original_length)).await?;
+        file.write_all(&retry_margin(&mut counter)?).await?;
         file.flush().await?;
         headers.remove(header::IF_NONE_MATCH);
         headers.insert(header::IF_MATCH, reference(bucket)?.parse()?);
     }
-    anyhow::bail!("sequence file write could not escape the empty sentinel validator")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counter_margin_covers_u64_without_wrapping() -> Result<()> {
+        let mut counter = Some(u64::MAX - 1);
+        let bytes = retry_margin(&mut counter)?;
+        let envelope = crate::envbuf::at(&bytes, 0)?;
+        assert_eq!(envelope.format, crate::envbuf::MARGIN);
+        assert_eq!(envelope.end, 32);
+        assert_eq!(envelope.content, &u64::MAX.to_le_bytes());
+        assert!(retry_margin(&mut counter).is_err());
+        Ok(())
+    }
 }

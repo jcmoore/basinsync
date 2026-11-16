@@ -18,6 +18,7 @@ prerequisites:
 [flexbuffers]: <../glossary/flexbuffers.md>
 [flow]: <../glossary/flow.md>
 [lexidecimal]: <../glossary/lexidecimal.md>
+[margin]: <../glossary/margin.md>
 [milestone]: <../glossary/milestone.md>
 [range-get]: <../glossary/range-get.md>
 [range-manifest]: <../glossary/range-manifest.md>
@@ -70,11 +71,11 @@ each *marker's*[^][commit-marker] raw `blob` bytes in its finalized chunk.
 Append a final *range manifest*[^][range-manifest] indexing preceding
 *envelopes*[^][envbuf]. Set `x-amz-meta-manifest-range: bytes=start-end` on the S3
 object to the complete manifest *envelope's*[^][envbuf] inclusive decimal byte range,
-excluding trailing padding, so clients can fetch it directly.
+excluding trailing *margins*[^][margin], so clients can fetch it directly.
 Later appended commands must preserve earlier blob offsets.
 A *Timeline*[^][timeline] predecessor's *SHA-384*[^][sha384] covers the feed through
-its *range manifest*[^][range-manifest], excluding trailing padding. A retry can
-therefore append padding without changing already-prepared successor bindings.
+its *range manifest*[^][range-manifest], excluding trailing *margins*[^][margin]. A retry can
+therefore update its trailing *margin*[^][margin] without changing already-prepared successor bindings.
 
 Track each *Flow*[^][flow] and *downstream*[^][downstream]
 *Viewpoint's*[^][viewpoint] *upstream*[^][upstream] *Milestone*[^][milestone],
@@ -93,6 +94,6 @@ Use the *command and route contract*[^][datashed-timeline] and
 *Flow*[^][flow] *Epilogues*[^][epilogue] and create recovery snapshots.
 
 Test multiple *Flows*[^][flow], concurrent servers, exact blob contents, restart
-replay, forward/backward framing, padding and width boundaries, manifests, and
+replay, forward/backward framing, *margins*[^][margin], padding and width boundaries, manifests, and
 blob slices. Fetch signed ranges and reject omitted, expanded, or changed
 headers, including when other sensitive payloads share the object.
