@@ -29,7 +29,7 @@ Call skippable format `110` envelopes *margins*[^][margin]; reserve padding for 
 
 Tutorial paths alternate canonical unsigned *Lexidecimal*[^][lexidecimal] height
 folders and named folders, ending in `README.md`; nesting may continue as
-`diy/<height>/<unique>/<height>/<distinct>/README.md`. Throughout `docs/`, all
+`diy/<height>/<unique>/<height>/<distinct>/README.md`. Within `diy/`, all
 folder names must be globally unique except canonical height folder names.
 Frontmatter lists prerequisite folders relative to `diy/`, each at a strictly
 smaller height. For tutorial graph edits or audits, use the *tutorial DAG

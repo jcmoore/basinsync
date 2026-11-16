@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate nested tutorial DAGs and unique documentation folder names; Python 3.9+."""
+"""Validate nested tutorial DAGs and unique folder names within diy/; Python 3.9+."""
 import os
 import re
 import sys
@@ -59,21 +59,20 @@ def prerequisites(text):
     return dependencies
 
 
-def lint_tutorials(directory, folder_root=None):
+def lint_tutorials(directory):
     directory = Path(directory).resolve()
-    folder_root = Path(folder_root).resolve() if folder_root else directory
     errors, graph, names, readmes = [], {}, {}, set()
 
-    # All folder names share one namespace, including supporting asset folders.
+    # Folder names within this tutorial tree share one namespace, including assets.
     # Only canonical Lexidecimal heights are exempt from uniqueness.
     def on_error(error):
         raise error
 
-    for parent, folders, files in os.walk(folder_root, onerror=on_error):
+    for parent, folders, files in os.walk(directory, onerror=on_error):
         folders[:] = sorted(name for name in folders if name != "__pycache__")
         for slug in folders:
             folder = Path(parent) / slug
-            name = folder.relative_to(folder_root).as_posix()
+            name = folder.relative_to(directory).as_posix()
             if folder.is_symlink():
                 errors.append(f"{name}: folders must not be symlinks")
                 continue
@@ -83,14 +82,13 @@ def lint_tutorials(directory, folder_root=None):
                 height_folder = False
             else:
                 # A tutorial's name is still unique even if it resembles a height.
-                height_folder = not (directory in folder.parents and re.fullmatch(
-                    TUTORIAL, folder.relative_to(directory).as_posix()))
+                height_folder = not re.fullmatch(TUTORIAL, name)
             if not height_folder:
                 if slug in names:
                     errors.append(f'{name}: duplicate folder name "{slug}" (also {names[slug]})')
                 else:
                     names[slug] = name
-        if "README.md" in files and (Path(parent) == directory or directory in Path(parent).parents):
+        if "README.md" in files:
             readmes.add((Path(parent) / "README.md").relative_to(directory).as_posix())
 
     def visit(folder, height):
@@ -185,8 +183,7 @@ def main(args):
     try:
         if len(args) > 1:
             raise ValueError("usage: check_dag.py [tutorial-directory]")
-        result = lint_tutorials(Path(args[0]) if args else DEFAULT_DIRECTORY,
-                                folder_root=None if args else DEFAULT_DIRECTORY.parent)
+        result = lint_tutorials(Path(args[0]) if args else DEFAULT_DIRECTORY)
         if result["errors"]:
             print("\n".join(result["errors"]), file=sys.stderr)
             return 1

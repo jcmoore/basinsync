@@ -128,14 +128,14 @@ class TutorialDagTests(unittest.TestCase):
                 (directory / second).mkdir(parents=True, exist_ok=True)
                 self.assertIn("duplicate folder name", "\n".join(lint_tutorials(directory)["errors"]))
 
-    def test_default_namespace_includes_other_documentation_folders(self):
+    def test_namespace_excludes_other_documentation_folders(self):
         with fixture({}) as directory:
             docs = directory / "docs"
             write(docs / "diy", "0z000/glossary", frontmatter([]))
             (docs / "glossary").mkdir()
-            result = lint_tutorials(docs / "diy", folder_root=docs)
-            self.assertIn('duplicate folder name "glossary"', "\n".join(result["errors"]))
-            self.assertEqual(result["tutorials"], 1)
+            (docs / "reference/glossary").mkdir(parents=True)
+            self.assertEqual(lint_tutorials(docs / "diy"),
+                             {"errors": [], "tutorials": 1, "edges": 0})
 
     def test_distinct_slugs_may_share_trailing_words(self):
         with fixture({"0z000/shared-topic": frontmatter([]),
@@ -234,6 +234,9 @@ class TutorialDagTests(unittest.TestCase):
             result = cli(script=skill / "scripts/check_dag.py")
             self.assertEqual(result.returncode, 0, result.stderr)
             (docs / "child").mkdir()
+            outside = cli(script=skill / "scripts/check_dag.py")
+            self.assertEqual(outside.returncode, 0, outside.stderr)
+            (docs / "diy" / ROOT / "child").mkdir()
             duplicate = cli(script=skill / "scripts/check_dag.py")
             self.assertEqual(duplicate.returncode, 1)
             self.assertIn('duplicate folder name "child"', duplicate.stderr)
