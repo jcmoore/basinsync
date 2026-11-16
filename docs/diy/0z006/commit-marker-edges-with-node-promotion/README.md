@@ -1,35 +1,35 @@
 ---
 prerequisites:
-  - 0z003/datashed-backup-recovery.md
-  - 0z005/deep-userheap-support.md
+  - 0z003/datashed-backup-recovery
+  - 0z005/deep-userheap-support
 ---
 
-[access-token]: <../../glossary/access-token.md>
-[commit-marker]: <../../glossary/commit-marker.md>
-[conditional-read]: <../../glossary/conditional-read.md>
-[development]: <../../development.md>
-[envbuf]: <../../glossary/envbuf.md>
-[epilogue]: <../../glossary/epilogue.md>
-[epilogue-compaction]: <../../glossary/epilogue-compaction.md>
-[epilogue-protocol]: <../../epilogue-protocol.md>
-[etag]: <../../glossary/etag.md>
-[lexidecimal]: <../../glossary/lexidecimal.md>
-[margin]: <../../glossary/margin.md>
-[marking-task]: <../../glossary/marking-task.md>
-[milestone]: <../../glossary/milestone.md>
-[node]: <../../glossary/node.md>
-[node-promotion]: <../../glossary/node-promotion.md>
-[old-generation]: <../../glossary/old-generation.md>
-[promotion-sign]: <../../glossary/promotion-sign.md>
-[retainer]: <../../glossary/retainer.md>
-[revision]: <../../glossary/revision.md>
-[sweeping-task]: <../../glossary/sweeping-task.md>
-[timeline]: <../../glossary/timeline.md>
-[upstream]: <../../glossary/upstream.md>
-[userheap-protocol]: <../../userheap-protocol.md>
-[viewpoint]: <../../glossary/viewpoint.md>
-[virtual-file-system]: <../../glossary/virtual-file-system.md>
-[young-generation]: <../../glossary/young-generation.md>
+[access-token]: <../../../glossary/access-token.md>
+[commit-marker]: <../../../glossary/commit-marker.md>
+[conditional-read]: <../../../glossary/conditional-read.md>
+[development]: <../../../development.md>
+[envbuf]: <../../../glossary/envbuf.md>
+[epilogue]: <../../../glossary/epilogue.md>
+[epilogue-compaction]: <../../../glossary/epilogue-compaction.md>
+[epilogue-protocol]: <../../../epilogue-protocol.md>
+[etag]: <../../../glossary/etag.md>
+[lexidecimal]: <../../../glossary/lexidecimal.md>
+[margin]: <../../../glossary/margin.md>
+[marking-task]: <../../../glossary/marking-task.md>
+[milestone]: <../../../glossary/milestone.md>
+[node]: <../../../glossary/node.md>
+[node-promotion]: <../../../glossary/node-promotion.md>
+[old-generation]: <../../../glossary/old-generation.md>
+[promotion-sign]: <../../../glossary/promotion-sign.md>
+[retainer]: <../../../glossary/retainer.md>
+[revision]: <../../../glossary/revision.md>
+[sweeping-task]: <../../../glossary/sweeping-task.md>
+[timeline]: <../../../glossary/timeline.md>
+[upstream]: <../../../glossary/upstream.md>
+[userheap-protocol]: <../../../userheap-protocol.md>
+[viewpoint]: <../../../glossary/viewpoint.md>
+[virtual-file-system]: <../../../glossary/virtual-file-system.md>
+[young-generation]: <../../../glossary/young-generation.md>
 
 # CommitMarker edges with node promotion
 

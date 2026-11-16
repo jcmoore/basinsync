@@ -1,31 +1,31 @@
 ---
 prerequisites:
-  - 0z000/shallow-epilogue-commits.md
+  - 0z000/shallow-epilogue-commits
 ---
 
-[commit-marker]: <../../glossary/commit-marker.md>
-[context]: <../../glossary/context.md>
-[datashed]: <../../glossary/datashed.md>
-[datashed-timeline]: <../../datashed-timeline.md>
-[development]: <../../development.md>
-[differential-event]: <../../glossary/differential-event.md>
-[diffuse16]: <../../glossary/diffuse16.md>
-[downstream]: <../../glossary/downstream.md>
-[empty-sentinel]: <../../glossary/empty-sentinel.md>
-[envbuf]: <../../glossary/envbuf.md>
-[epilogue]: <../../glossary/epilogue.md>
-[epilogue-protocol]: <../../epilogue-protocol.md>
-[flexbuffers]: <../../glossary/flexbuffers.md>
-[flow]: <../../glossary/flow.md>
-[lexidecimal]: <../../glossary/lexidecimal.md>
-[margin]: <../../glossary/margin.md>
-[milestone]: <../../glossary/milestone.md>
-[range-get]: <../../glossary/range-get.md>
-[range-manifest]: <../../glossary/range-manifest.md>
-[sha384]: <../../glossary/sha384.md>
-[timeline]: <../../glossary/timeline.md>
-[upstream]: <../../glossary/upstream.md>
-[viewpoint]: <../../glossary/viewpoint.md>
+[commit-marker]: <../../../glossary/commit-marker.md>
+[context]: <../../../glossary/context.md>
+[datashed]: <../../../glossary/datashed.md>
+[datashed-timeline]: <../../../datashed-timeline.md>
+[development]: <../../../development.md>
+[differential-event]: <../../../glossary/differential-event.md>
+[diffuse16]: <../../../glossary/diffuse16.md>
+[downstream]: <../../../glossary/downstream.md>
+[empty-sentinel]: <../../../glossary/empty-sentinel.md>
+[envbuf]: <../../../glossary/envbuf.md>
+[epilogue]: <../../../glossary/epilogue.md>
+[epilogue-protocol]: <../../../epilogue-protocol.md>
+[flexbuffers]: <../../../glossary/flexbuffers.md>
+[flow]: <../../../glossary/flow.md>
+[lexidecimal]: <../../../glossary/lexidecimal.md>
+[margin]: <../../../glossary/margin.md>
+[milestone]: <../../../glossary/milestone.md>
+[range-get]: <../../../glossary/range-get.md>
+[range-manifest]: <../../../glossary/range-manifest.md>
+[sha384]: <../../../glossary/sha384.md>
+[timeline]: <../../../glossary/timeline.md>
+[upstream]: <../../../glossary/upstream.md>
+[viewpoint]: <../../../glossary/viewpoint.md>
 
 # Datashed Timeline race
 

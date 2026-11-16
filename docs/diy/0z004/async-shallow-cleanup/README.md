@@ -1,23 +1,23 @@
 ---
 prerequisites:
-  - 0z003/shallow-userheap-management.md
+  - 0z003/shallow-userheap-management
 ---
 
-[commit-marker]: <../../glossary/commit-marker.md>
-[development]: <../../development.md>
-[dusting]: <../../glossary/dusting.md>
-[flow]: <../../glossary/flow.md>
-[node]: <../../glossary/node.md>
-[object-keys]: <../../object-keys.md>
-[retainer]: <../../glossary/retainer.md>
-[revision]: <../../glossary/revision.md>
-[sweeping-task]: <../../glossary/sweeping-task.md>
-[timeline]: <../../glossary/timeline.md>
-[turso]: <../../glossary/turso.md>
-[userheap-reservation]: <../../glossary/userheap-reservation.md>
-[viewpoint]: <../../glossary/viewpoint.md>
-[virtual-file-system]: <../../glossary/virtual-file-system.md>
-[young-generation]: <../../glossary/young-generation.md>
+[commit-marker]: <../../../glossary/commit-marker.md>
+[development]: <../../../development.md>
+[dusting]: <../../../glossary/dusting.md>
+[flow]: <../../../glossary/flow.md>
+[node]: <../../../glossary/node.md>
+[object-keys]: <../../../object-keys.md>
+[retainer]: <../../../glossary/retainer.md>
+[revision]: <../../../glossary/revision.md>
+[sweeping-task]: <../../../glossary/sweeping-task.md>
+[timeline]: <../../../glossary/timeline.md>
+[turso]: <../../../glossary/turso.md>
+[userheap-reservation]: <../../../glossary/userheap-reservation.md>
+[viewpoint]: <../../../glossary/viewpoint.md>
+[virtual-file-system]: <../../../glossary/virtual-file-system.md>
+[young-generation]: <../../../glossary/young-generation.md>
 
 # Async shallow cleanup
 

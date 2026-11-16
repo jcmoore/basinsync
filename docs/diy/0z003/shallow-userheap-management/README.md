@@ -1,26 +1,26 @@
 ---
 prerequisites:
-  - 0z002/turso-reservoir-vfs.md
+  - 0z002/turso-reservoir-vfs
 ---
 
-[access-token]: <../../glossary/access-token.md>
-[commit-marker]: <../../glossary/commit-marker.md>
-[context]: <../../glossary/context.md>
-[dag]: <../../glossary/dag.md>
-[datashed]: <../../glossary/datashed.md>
-[development]: <../../development.md>
-[flow]: <../../glossary/flow.md>
-[kernelheap]: <../../glossary/kernelheap.md>
-[node]: <../../glossary/node.md>
-[node-height]: <../../glossary/node-height.md>
-[old-generation]: <../../glossary/old-generation.md>
-[retainer]: <../../glossary/retainer.md>
-[timeline]: <../../glossary/timeline.md>
-[turso]: <../../glossary/turso.md>
-[userheap-protocol]: <../../userheap-protocol.md>
-[userheap-reservation]: <../../glossary/userheap-reservation.md>
-[viewpoint]: <../../glossary/viewpoint.md>
-[young-generation]: <../../glossary/young-generation.md>
+[access-token]: <../../../glossary/access-token.md>
+[commit-marker]: <../../../glossary/commit-marker.md>
+[context]: <../../../glossary/context.md>
+[dag]: <../../../glossary/dag.md>
+[datashed]: <../../../glossary/datashed.md>
+[development]: <../../../development.md>
+[flow]: <../../../glossary/flow.md>
+[kernelheap]: <../../../glossary/kernelheap.md>
+[node]: <../../../glossary/node.md>
+[node-height]: <../../../glossary/node-height.md>
+[old-generation]: <../../../glossary/old-generation.md>
+[retainer]: <../../../glossary/retainer.md>
+[timeline]: <../../../glossary/timeline.md>
+[turso]: <../../../glossary/turso.md>
+[userheap-protocol]: <../../../userheap-protocol.md>
+[userheap-reservation]: <../../../glossary/userheap-reservation.md>
+[viewpoint]: <../../../glossary/viewpoint.md>
+[young-generation]: <../../../glossary/young-generation.md>
 
 # Shallow UserHeap management
 

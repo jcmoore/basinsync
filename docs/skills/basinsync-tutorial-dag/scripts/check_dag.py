@@ -6,7 +6,7 @@ from pathlib import Path
 
 DEFAULT_DIRECTORY = Path(__file__).resolve().parents[3] / "diy"
 SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
-TUTORIAL = rf"0z[0-9a-f]+/{SLUG}\.md"
+TUTORIAL = rf"0z[0-9a-f]+/{SLUG}"
 
 
 def encode_height(height):
@@ -53,7 +53,7 @@ def prerequisites(text):
     for line in fields[1:]:
         item = re.fullmatch(rf"  - ({TUTORIAL})", line)
         if not item:
-            raise ValueError("prerequisites must be unquoted <height>/<slug>.md paths relative to diy/")
+            raise ValueError("prerequisites must be unquoted <height>/<slug> folder paths relative to diy/")
         dependencies.append(item[1])
     return dependencies
 
@@ -62,22 +62,30 @@ def lint_tutorials(directory):
     directory = Path(directory)
     errors, graph, slugs = [], {}, {}
 
-    def visit(path, height):
-        name = path.relative_to(directory).as_posix()
-        if path.is_symlink() or not path.is_file():
-            errors.append(f"{name}: tutorials must be regular files, not symlinks")
+    def visit(folder, height):
+        name = folder.relative_to(directory).as_posix()
+        if folder.is_symlink() or not folder.is_dir():
+            errors.append(f"{name}: expected a tutorial folder, not a file or symlink")
             return
-        if not re.fullmatch(rf"{SLUG}\.md", path.name):
-            errors.append(f"{name}: expected <lowercase-slug>.md")
+        if not re.fullmatch(SLUG, folder.name):
+            errors.append(f"{name}: expected a <lowercase-slug> folder")
         else:
-            slug = path.stem
+            slug = folder.name
             if slug in slugs:
                 errors.append(f'{name}: duplicate tutorial slug "{slug}" (also {slugs[slug]})')
             else:
                 slugs[slug] = name
+        # Check the actual spelling even on case-insensitive filesystems.
+        readme = next((path for path in folder.iterdir() if path.name == "README.md"), None)
+        if readme is None:
+            errors.append(f"{name}: missing README.md (case-sensitive)")
+            return
+        if readme.is_symlink() or not readme.is_file():
+            errors.append(f"{name}/README.md: must be a regular file, not a symlink")
+            return
         dependencies = []
         try:
-            dependencies = prerequisites(path.read_text(encoding="utf-8"))
+            dependencies = prerequisites(readme.read_text(encoding="utf-8"))
         except (ValueError, OSError) as error:
             errors.append(f"{name}: {error}")
         graph[name] = (height, dependencies)
@@ -88,7 +96,7 @@ def lint_tutorials(directory):
             continue
         if not folder.is_dir():
             if folder.suffix.lower() == ".md":
-                errors.append(f"{folder.name}: expected <unsigned-Lexidecimal-height>/<lowercase-slug>.md")
+                errors.append(f"{folder.name}: expected <unsigned-Lexidecimal-height>/<lowercase-slug>/README.md")
             continue
         height = None
         try:
@@ -97,9 +105,9 @@ def lint_tutorials(directory):
             errors.append(f"{folder.name}: {error}")
         for path in sorted(folder.iterdir()):
             if path.is_symlink() or path.is_dir():
-                errors.append(f"{folder.name}/{path.name}: tutorials must be regular files directly in height folders")
-            elif path.suffix.lower() == ".md":
                 visit(path, height)
+            elif path.suffix.lower() == ".md":
+                errors.append(f"{folder.name}/{path.name}: expected a tutorial folder containing README.md")
     if not graph:
         errors.append("no tutorials found")
 

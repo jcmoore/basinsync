@@ -27,9 +27,9 @@ Call skippable format `110` envelopes *margins*[^][margin]; reserve padding for 
 
 # Tutorial dependencies
 
-Group tutorials as `diy/<height>/<slug>.md`, using canonical unsigned
+Group tutorials as `diy/<height>/<slug>/README.md`, using canonical unsigned
 *Lexidecimal*[^][lexidecimal] height folders and unprefixed, globally unique slugs.
-Frontmatter lists prerequisite paths relative to `diy/`, each at a strictly
+Frontmatter lists prerequisite folders relative to `diy/`, each at a strictly
 smaller height. For tutorial graph edits or audits, use the *tutorial DAG
 skill*[^][SKILL] and its bundled Python linter.
 
@@ -51,9 +51,11 @@ plural, and synonymous forms, using the corresponding glossary entry. During
 audits, check for missing term links as well as broken links; omit self-links in
 the defining entry and links inside code.
 
-Name local reference labels after the destination filename without its extension,
-preserving case (e.g. `[server]: <../server.md>`), and verify this correspondence
-during audits. Filenames under `docs/` should be unique; external references may use descriptive names.
+For tutorial links, use `diy/<height>/<slug>` reference labels targeting the
+corresponding `README.md`. Otherwise, name local labels after the destination
+filename without its extension, preserving case (e.g. `[server]: <../server.md>`).
+Verify this correspondence during audits. Except for `README.md`, filenames under
+`docs/` should be unique; external references may use descriptive names.
 
 Avoid inline links and bare/autolink URLs in prose, including tables and lists.
 Keep literal links inside code examples unchanged. Check that reference labels

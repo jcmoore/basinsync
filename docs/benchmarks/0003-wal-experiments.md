@@ -5,6 +5,7 @@
 [commit-marker]: <../glossary/commit-marker.md>
 [conditional-write]: <../glossary/conditional-write.md>
 [differential-event]: <../glossary/differential-event.md>
+[diy/0z002/turso-reservoir-vfs]: <../diy/0z002/turso-reservoir-vfs/README.md>
 [flexbuffers]: <../glossary/flexbuffers.md>
 [flow]: <../glossary/flow.md>
 [logical-frame]: <../glossary/logical-frame.md>
@@ -14,7 +15,6 @@
 [sha384]: <../glossary/sha384.md>
 [timeline]: <../glossary/timeline.md>
 [turso]: <../glossary/turso.md>
-[turso-reservoir-vfs]: <../diy/0z002/turso-reservoir-vfs.md>
 [viewpoint]: <../glossary/viewpoint.md>
 [wal]: <../glossary/wal.md>
 
@@ -22,7 +22,7 @@
 
 Historical test/benchmark prototypes extending the
 *baseline*[^][0003-commit-baseline]. Persistent capture and bounded batching have
-since been promoted into the *Turso Reservoir VFS procedure*[^][turso-reservoir-vfs].
+since been promoted into the *Turso Reservoir VFS procedure*[^][diy/0z002/turso-reservoir-vfs].
 Success follows the corresponding command's durable S3 PUT.
 
 Capture *physical WAL*[^][wal] writes before checkpoint truncation. Validate

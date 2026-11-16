@@ -8,18 +8,18 @@ description: Rename or audit basinsync tutorials grouped in Lexidecimal height f
 
 # Tutorial dependency DAG
 
-Name each tutorial `diy/<height>/<slug>.md`, encoding its nonnegative height in
+Name each tutorial `diy/<height>/<slug>/README.md`, encoding its nonnegative height in
 canonical unsigned *Lexidecimal*[^][lexidecimal]. Height must exceed every direct
 prerequisite's height; equal-height branches and height gaps are valid. Use zero
 for a new root. Unprefixed slugs must be unique across all heights; height is not
 a sequence number.
 
-Put prerequisite paths relative to `diy/` in frontmatter, before reference definitions:
+Put prerequisite folder paths relative to `diy/` in frontmatter, before reference definitions:
 
 ```yaml
 ---
 prerequisites:
-  - 0z000/shallow-epilogue-commits.md
+  - 0z000/shallow-epilogue-commits
 ---
 ```
 
@@ -28,7 +28,9 @@ key, with an empty array or an unquoted block list. Use forward slashes on every
 platform. List direct requirements; ordinary Markdown references need not be prerequisites.
 
 When changing dependencies, update affected folders, frontmatter, and reference
-labels/targets together. Preserve tutorial scope and allow independent branches.
+labels/targets together. Tutorial links use `diy/<height>/<slug>` reference labels
+with relative destinations ending in `README.md`. Preserve tutorial scope and
+allow independent branches.
 
 Run the bundled *Python linter*[^][check_dag]. Python 3.9+ is required, without
 third-party packages. It locates `diy/` relative to the skill regardless of working

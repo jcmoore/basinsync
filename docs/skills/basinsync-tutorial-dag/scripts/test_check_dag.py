@@ -12,10 +12,10 @@ from check_dag import decode_height, encode_height, lint_tutorials
 
 SCRIPTS = Path(__file__).resolve().parent
 CORE = SCRIPTS / "check_dag.py"
-ROOT = "0z000/root.md"
-LEFT = "0z001/left.md"
-RIGHT = "0z001/right.md"
-MERGE = "0z002/merge.md"
+ROOT = "0z000/root"
+LEFT = "0z001/left"
+RIGHT = "0z001/right"
+MERGE = "0z002/merge"
 
 
 def frontmatter(dependencies):
@@ -26,6 +26,8 @@ def frontmatter(dependencies):
 
 def write(directory, name, text):
     path = directory / name
+    if path.suffix.lower() != ".md":
+        path /= "README.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
@@ -67,20 +69,20 @@ class TutorialDagTests(unittest.TestCase):
         with fixture({ROOT: frontmatter([]),
                       LEFT: "\ufeff" + frontmatter([ROOT]).replace("\n", "\r\n"),
                       RIGHT: frontmatter([ROOT]), MERGE: frontmatter([LEFT, RIGHT]),
-                      "0z000/independent.md": frontmatter([]),
-                      "0z00f/deeper.md": frontmatter([MERGE])}) as directory:
+                      "0z000/independent": frontmatter([]),
+                      "0z00f/deeper": frontmatter([MERGE])}) as directory:
             self.assertEqual(lint_tutorials(directory), {"errors": [], "tutorials": 6, "edges": 5})
 
     def test_graph_heights_keep_arbitrary_precision(self):
         height = 1 << 128
-        parent, child = f"{encode_height(height)}/parent.md", f"{encode_height(height + 1)}/child.md"
+        parent, child = f"{encode_height(height)}/parent", f"{encode_height(height + 1)}/child"
         with fixture({parent: frontmatter([]), child: frontmatter([parent])}) as directory:
             self.assertEqual(lint_tutorials(directory)["errors"], [])
             write(directory, parent, frontmatter([child]))
             self.assertIn("must exceed", "\n".join(lint_tutorials(directory)["errors"]))
 
     def test_slug_uniqueness_across_folders_and_cli_failure(self):
-        first, second = "0z000/shared-topic.md", "0z001/shared-topic.md"
+        first, second = "0z000/shared-topic", "0z001/shared-topic"
         with fixture({first: frontmatter([]), second: frontmatter([first])}) as directory:
             errors = lint_tutorials(directory)["errors"]
             self.assertEqual(len(errors), 1)
@@ -92,8 +94,8 @@ class TutorialDagTests(unittest.TestCase):
             self.assertIn("duplicate tutorial slug", result.stderr)
 
     def test_distinct_slugs_may_share_trailing_words(self):
-        with fixture({"0z000/shared-topic.md": frontmatter([]),
-                      "0z001/other-shared-topic.md": frontmatter(["0z000/shared-topic.md"])}) as directory:
+        with fixture({"0z000/shared-topic": frontmatter([]),
+                      "0z001/other-shared-topic": frontmatter(["0z000/shared-topic"])}) as directory:
             self.assertEqual(lint_tutorials(directory)["errors"], [])
 
     def test_invalid_graphs_layouts_and_frontmatter(self):
@@ -104,14 +106,16 @@ class TutorialDagTests(unittest.TestCase):
             ("equal height", {LEFT: frontmatter([RIGHT]), RIGHT: frontmatter([])}, "must exceed"),
             ("decreasing height", {ROOT: frontmatter([LEFT]), LEFT: frontmatter([])}, "must exceed"),
             ("cycle", {ROOT: frontmatter([MERGE]), LEFT: frontmatter([ROOT]), MERGE: frontmatter([LEFT])}, "prerequisite cycle"),
-            ("signed height", {"0yfff/root.md": frontmatter([])}, "unsigned Lexidecimal"),
-            ("noncanonical height", {"0z0100/root.md": frontmatter([])}, "noncanonical"),
-            ("uppercase height", {"0Z000/root.md": frontmatter([])}, "unsigned Lexidecimal"),
-            ("uppercase slug", {"0z000/Root.md": frontmatter([])}, "lowercase-slug"),
-            ("uppercase extension", {"0z000/root.MD": frontmatter([])}, "lowercase-slug"),
-            ("case mismatch", {"0z000/Root.md": frontmatter([]), LEFT: frontmatter([ROOT])}, "missing prerequisite"),
+            ("signed height", {"0yfff/root": frontmatter([])}, "unsigned Lexidecimal"),
+            ("noncanonical height", {"0z0100/root": frontmatter([])}, "noncanonical"),
+            ("uppercase height", {"0Z000/root": frontmatter([])}, "unsigned Lexidecimal"),
+            ("uppercase slug", {"0z000/Root": frontmatter([])}, "lowercase-slug"),
+            ("wrong README casing", {"0z000/root/readme.md": frontmatter([])}, "missing README.md"),
+            ("wrong README extension", {"0z000/root/README.MD": frontmatter([])}, "missing README.md"),
+            ("previous file layout", {"0z000/root.md": frontmatter([])}, "tutorial folder containing README.md"),
+            ("case mismatch", {"0z000/Root": frontmatter([]), LEFT: frontmatter([ROOT])}, "missing prerequisite"),
             ("old flat layout", {"0z000-root.md": frontmatter([])}, "unsigned-Lexidecimal-height"),
-            ("nested folder", {"0z000/nested/root.md": frontmatter([])}, "directly in height folders"),
+            ("nested folder", {"0z000/nested/root/README.md": frontmatter([])}, "missing README.md"),
             ("missing frontmatter", {ROOT: "# No metadata\n"}, "missing frontmatter"),
             ("unclosed frontmatter", {ROOT: "---\nprerequisites: []\n"}, "unterminated"),
             ("missing prerequisites", {ROOT: "---\ntitle: root\n---\n"}, "expected prerequisites"),
@@ -123,6 +127,10 @@ class TutorialDagTests(unittest.TestCase):
             ("backslash", {LEFT: frontmatter(["0z000\\root.md"])}, "paths relative to diy/"),
             ("non-normal path", {LEFT: frontmatter(["0z000/../root.md"])}, "paths relative to diy/"),
             ("old prerequisite", {LEFT: frontmatter(["0z000-root.md"])}, "paths relative to diy/"),
+            ("file prerequisite", {LEFT: frontmatter(["0z000/root.md"])}, "paths relative to diy/"),
+            ("README prerequisite", {LEFT: frontmatter(["0z000/root/README.md"])}, "paths relative to diy/"),
+            ("docs prefix prerequisite", {LEFT: frontmatter(["diy/0z000/root"])}, "paths relative to diy/"),
+            ("trailing slash prerequisite", {LEFT: frontmatter(["0z000/root/"])}, "paths relative to diy/"),
             ("wrong indentation", {LEFT: "---\nprerequisites:\n - 0z000/root.md\n---\n"}, "paths relative to diy/"),
         ]
         for description, files, expected in cases:
@@ -138,8 +146,22 @@ class TutorialDagTests(unittest.TestCase):
                 self.skipTest("symlink creation is unavailable")
             self.assertIn("must not be symlinks", "\n".join(lint_tutorials(directory)["errors"]))
             link.unlink()
-            (directory / "0z000/alias.md").symlink_to(directory / ROOT)
-            self.assertIn("regular files", "\n".join(lint_tutorials(directory)["errors"]))
+            link = directory / "0z000/alias"
+            link.symlink_to(directory / ROOT, target_is_directory=True)
+            self.assertIn("symlink", "\n".join(lint_tutorials(directory)["errors"]))
+            link.unlink()
+            write(directory, "0z000/independent", frontmatter([]))
+            readme = directory / ROOT / "README.md"
+            readme.unlink()
+            readme.symlink_to(directory / "0z000/independent/README.md")
+            self.assertIn("regular file", "\n".join(lint_tutorials(directory)["errors"]))
+
+    def test_tutorial_folders_allow_supporting_assets(self):
+        with fixture({ROOT: frontmatter([])}) as directory:
+            assets = directory / ROOT / "assets"
+            assets.mkdir()
+            (assets / "diagram.svg").write_text("<svg/>", encoding="utf-8")
+            self.assertEqual(lint_tutorials(directory)["errors"], [])
 
     def test_empty_missing_and_excess_arguments_fail(self):
         with fixture({}) as directory:

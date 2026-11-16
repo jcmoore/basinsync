@@ -2,23 +2,23 @@
 prerequisites: []
 ---
 
-[commit-marker]: <../../glossary/commit-marker.md>
-[conditional-read]: <../../glossary/conditional-read.md>
-[conditional-write]: <../../glossary/conditional-write.md>
-[context]: <../../glossary/context.md>
-[development]: <../../development.md>
-[empty-sentinel]: <../../glossary/empty-sentinel.md>
-[envbuf]: <../../glossary/envbuf.md>
-[epilogue]: <../../glossary/epilogue.md>
-[epilogue-protocol]: <../../epilogue-protocol.md>
-[etag]: <../../glossary/etag.md>
-[json0]: <../../glossary/json0.md>
-[margin]: <../../glossary/margin.md>
-[object-keys]: <../../object-keys.md>
-[range-get]: <../../glossary/range-get.md>
-[sha384]: <../../glossary/sha384.md>
-[tombstone]: <../../glossary/tombstone.md>
-[viewpoint]: <../../glossary/viewpoint.md>
+[commit-marker]: <../../../glossary/commit-marker.md>
+[conditional-read]: <../../../glossary/conditional-read.md>
+[conditional-write]: <../../../glossary/conditional-write.md>
+[context]: <../../../glossary/context.md>
+[development]: <../../../development.md>
+[empty-sentinel]: <../../../glossary/empty-sentinel.md>
+[envbuf]: <../../../glossary/envbuf.md>
+[epilogue]: <../../../glossary/epilogue.md>
+[epilogue-protocol]: <../../../epilogue-protocol.md>
+[etag]: <../../../glossary/etag.md>
+[json0]: <../../../glossary/json0.md>
+[margin]: <../../../glossary/margin.md>
+[object-keys]: <../../../object-keys.md>
+[range-get]: <../../../glossary/range-get.md>
+[sha384]: <../../../glossary/sha384.md>
+[tombstone]: <../../../glossary/tombstone.md>
+[viewpoint]: <../../../glossary/viewpoint.md>
 
 # Shallow epilogue commits
 
