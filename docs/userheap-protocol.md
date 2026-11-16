@@ -17,8 +17,8 @@
 
 # UserHeap staging protocol
 
-`POST /api/v0/userheap/reserve` accepts *JSON0*[^][json0] for the
-*Flow's*[^][flow] expected next *Viewpoint*[^][viewpoint]:
+`POST /api/v0/userheap/reserve` accepts *JSON0*[~][json0] for the
+*Flow's*[~][flow] expected next *Viewpoint*[~][viewpoint]:
 
 ```ts
 {
@@ -33,11 +33,11 @@
 }
 ```
 
-Edges identify a child set: each child has lower *height*[^][node-height] and a
-verified stored allocation in either generation. Existing *nodes*[^][node] require matching content
-length, *context*[^][context], and child-id set, even when already referenced by other *nodes*[^][node].
+Edges identify a child set: each child has lower *height*[~][node-height] and a
+verified stored allocation in either generation. Existing *nodes*[~][node] require matching content
+length, *context*[~][context], and child-id set, even when already referenced by other *nodes*[~][node].
 
-A wrong *Viewpoint*[^][viewpoint] returns the *common 409 response*[^][epilogue-protocol].
+A wrong *Viewpoint*[~][viewpoint] returns the *common 409 response*[~][epilogue-protocol].
 Otherwise return HTTP 200 with nullable maps indexed by input position:
 
 ```ts
@@ -51,16 +51,16 @@ type Action = { url: string; headers: Record<string, string> };
 }
 ```
 
-Successful *reservations*[^][userheap-reservation] are durable before returning.
-`write` is a *conditional PUT*[^][conditional-write] to the
-*young generation*[^][young-generation], signing `If-None-Match: *` and the
+Successful *reservations*[~][userheap-reservation] are durable before returning.
+`write` is a *conditional PUT*[~][conditional-write] to the
+*young generation*[~][young-generation], signing `If-None-Match: *` and the
 specified `Content-Length` plus every `x-amz-meta-ctx-${key}` header from that
-*node's*[^][node] *context*[^][context] (default `{}`). The first reservation fixes its *context*[^][context]; compare names
+*node's*[~][node] *context*[~][context] (default `{}`). The first reservation fixes its *context*[~][context]; compare names
 case-insensitively and values exactly. Mismatches return an indexed
 `context_collision` error without actions, even before upload. `preview` and `read` are
-*conditional GETs*[^][conditional-read] for that *node*[^][node] in the
-*young*[^][young-generation] and *old*[^][old-generation] generations respectively.
-Both *object-key patterns*[^][object-keys] share the stored UUIDv4
-*revision*[^][revision]. Send each action's headers. A nonempty stored *etag*[^][etag] makes `write` null; a valid
-*promotion*[^][node-promotion] timestamp makes `preview` null.
+*conditional GETs*[~][conditional-read] for that *node*[~][node] in the
+*young*[~][young-generation] and *old*[~][old-generation] generations respectively.
+Both *object-key patterns*[~][object-keys] share the stored UUIDv4
+*revision*[~][revision]. Send each action's headers. A nonempty stored *etag*[~][etag] makes `write` null; a valid
+*promotion*[~][node-promotion] timestamp makes `preview` null.
 

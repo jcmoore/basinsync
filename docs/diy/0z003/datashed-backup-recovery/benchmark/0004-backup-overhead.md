@@ -10,15 +10,15 @@
 # 0004 backup overhead — 2026-10-24
 
 Compare background copying/backups enabled and disabled through real HTTP and
-S3 requests. Both modes use the on-disk *Turso*[^][turso] copy-on-write
-*VFS*[^][virtual-file-system] and the two-batch server pipeline. Only durable
-*Timeline*[^][timeline] publication gates client success.
+S3 requests. Both modes use the on-disk *Turso*[~][turso] copy-on-write
+*VFS*[~][virtual-file-system] and the two-batch server pipeline. Only durable
+*Timeline*[~][timeline] publication gates client success.
 
-Seed 1,024 *Flows*[^][flow] with 400-byte id padding outside timing. Four
+Seed 1,024 *Flows*[~][flow] with 400-byte id padding outside timing. Four
 independent clients each commit 128 successive 1 KiB blobs to their own
-*Flow*[^][flow]. Time responses through body receipt. Keep batches at 32 requests
+*Flow*[~][flow]. Time responses through body receipt. Keep batches at 32 requests
 with a 2 ms collection window; copy at most eight independent
-*Flows*[^][flow] concurrently. Exclude initial recovery, seed/copy warm-up,
+*Flows*[~][flow] concurrently. Exclude initial recovery, seed/copy warm-up,
 and final backup drain. Verify stored snapshot checksums, final copied blobs,
 and status after catching up.
 
@@ -44,6 +44,6 @@ I/O still competes for resources. With added snapshot-upload latency, coalescing
 reduced median backup submissions during the measured requests from 36 to 16.
 These are saturated closed-loop clients, not a fixed-arrival-rate latency test.
 
-The *Datashed*[^][datashed] publishes a *CommitMarker*[^][commit-marker] only after
-all covered *Flow*[^][flow] copies reach their *Epilogues*[^][epilogue].
-Retain the *environment and run samples*[^][0004-backup-samples].
+The *Datashed*[~][datashed] publishes a *CommitMarker*[~][commit-marker] only after
+all covered *Flow*[~][flow] copies reach their *Epilogues*[~][epilogue].
+Retain the *environment and run samples*[~][0004-backup-samples].

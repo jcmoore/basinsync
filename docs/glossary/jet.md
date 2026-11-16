@@ -8,7 +8,7 @@
 
 # Jet
 
-A *Reservoir*[^][reservoir] that ingests *DifferentialEvents*[^][differential-event]
-to arrange in *Flow*[^][flow] *Timelines*[^][timeline], as a *Datashed*[^][datashed]
-ingests *CommitMarkers*[^][commit-marker] to arrange in *Flow*[^][flow]
-*Epilogues*[^][epilogue].
+A *Reservoir*[~][reservoir] that ingests *DifferentialEvents*[~][differential-event]
+to arrange in *Flow*[~][flow] *Timelines*[~][timeline], as a *Datashed*[~][datashed]
+ingests *CommitMarkers*[~][commit-marker] to arrange in *Flow*[~][flow]
+*Epilogues*[~][epilogue].

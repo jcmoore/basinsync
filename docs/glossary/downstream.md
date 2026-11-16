@@ -6,7 +6,7 @@
 
 # Downstream
 
-The receiving *Reservoir*[^][reservoir] in a replication relationship.
-A destination position may be an *Epilogue*[^][epilogue]
-*Viewpoint*[^][viewpoint] or a *Timeline*[^][timeline]
-*Milestone*[^][milestone].
+The receiving *Reservoir*[~][reservoir] in a replication relationship.
+A destination position may be an *Epilogue*[~][epilogue]
+*Viewpoint*[~][viewpoint] or a *Timeline*[~][timeline]
+*Milestone*[~][milestone].

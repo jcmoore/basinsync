@@ -5,7 +5,7 @@
 
 # Development
 
-Use *VersityGW v1.11.0*[^][versitygw] as the S3-compatible test endpoint, with its
+Use *VersityGW v1.11.0*[~][versitygw] as the S3-compatible test endpoint, with its
 POSIX backend and a separate metadata sidecar directory. Install the pinned binary:
 
 ```sh
@@ -18,9 +18,9 @@ The integration suite verifies atomic destination preconditions and source ETags
 for COPY before exercising concurrent Rust server processes with TypeScript clients.
 
 Verify gapless sequences, winning blob contents, and restart recovery. Wrong
-*viewpoints*[^][viewpoint] and *digests*[^][sha384] must fail without advancing
+*viewpoints*[~][viewpoint] and *digests*[~][sha384] must fail without advancing
 state. Race servers against the same position: only the first
-*conditional writer*[^][conditional-write] wins.
+*conditional writer*[~][conditional-write] wins.
 
 Queued mutations belong to workers, not HTTP handlers: a lost reply must not
 cancel publication. Trace cancellation through callers before adding timeouts

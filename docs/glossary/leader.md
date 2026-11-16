@@ -2,4 +2,4 @@
 
 # Leader
 
-A server able to win the next expected *conditional write*[^][conditional-write].
+A server able to win the next expected *conditional write*[~][conditional-write].

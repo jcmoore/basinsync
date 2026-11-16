@@ -22,32 +22,32 @@ tutorial's `benchmark/` folder.
 
 Use `Basin` for the tenancy domain and `Datashed` for the data-state `Reservoir`.
 Use `UserHeap` for client-driven `Flow` nodes and `KernelHeap` for server-driven
-`Datashed` nodes. Call concatenated *EnvBufs*[^][envbuf] a feed and their enclosed
+`Datashed` nodes. Call concatenated *EnvBufs*[~][envbuf] a feed and their enclosed
 bytes a message (`message_length`), distinguishing that count from S3 `Content-Length`.
-Call skippable format `110` envelopes *margins*[^][margin]; reserve padding for alignment filler inside envelopes.
+Call skippable format `110` envelopes *margins*[~][margin]; reserve padding for alignment filler inside envelopes.
 
 # Tutorial dependencies
 
-Tutorial paths alternate canonical unsigned *Lexidecimal*[^][lexidecimal] height
+Tutorial paths alternate canonical unsigned *Lexidecimal*[~][lexidecimal] height
 folders and named folders, ending in `README.md`; nesting may continue as
 `diy/<height>/<unique>/<height>/<distinct>/README.md`. Tutorial slug folder
 names must be unique throughout `diy/`; supporting folder names and filenames may repeat.
 Frontmatter lists prerequisite folders relative to `diy/`, each at a strictly
 smaller height. For tutorial graph edits or audits, use the *tutorial DAG
-skill*[^][SKILL] and its bundled Python linter.
+skill*[~][SKILL] and its bundled Python linter.
 
 # Documentation links
 
-Use `*multi-word phrase*[^][reference-name]` links throughout `docs/`. Wrap
+Use `*multi-word phrase*[~][reference-name]` links throughout `docs/`. Wrap
 the entire keyphrase, whether one word or multiple words, in single asterisks
-for italic text and link only the adjacent `^` marker. Keep the keyphrase itself
+for italic text and link only the adjacent `~` marker. Keep the keyphrase itself
 copyable without link navigation; do not use `[keyphrase][reference-name]`. List
 every link definition at the top of its file, after any frontmatter and before the document body, using descriptive,
 stable labels (in sorted order), and angle-bracket destinations. This makes each document's
 relationships easy to inspect without searching its prose.
 
 Include possessives and attached compound suffixes inside the emphasized phrase
-(e.g. `*Viewpoint's*[^][viewpoint]`); audit both boundaries for stranded word fragments.
+(e.g. `*Viewpoint's*[~][viewpoint]`); audit both boundaries for stranded word fragments.
 
 Link introduced domain terms wherever they occur in prose, including lowercase,
 plural, and synonymous forms, using the corresponding glossary entry. During
@@ -71,7 +71,7 @@ prompted requirements or established clarifications. Self-contained means a
 seasoned developer can fill in the gaps without project source, not that every
 implementation step or test must be documented.
 
-Keep object-key layouts in the *object-key reference*[^][object-keys]; link there
+Keep object-key layouts in the *object-key reference*[~][object-keys]; link there
 rather than duplicating patterns across pages.
 
 Tutorial and command requirements belong in these docs. Implementations should

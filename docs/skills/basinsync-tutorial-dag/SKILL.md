@@ -8,7 +8,7 @@ description: Rename or audit nested basinsync tutorial README folders, Lexidecim
 
 # Tutorial dependency DAG
 
-Tutorial paths alternate canonical unsigned *Lexidecimal*[^][lexidecimal] height
+Tutorial paths alternate canonical unsigned *Lexidecimal*[~][lexidecimal] height
 folders and named folders, ending in `README.md`. Nesting is supported:
 `diy/<height>/<unique>/<height>/<distinct>/README.md`. Tutorial slug folder names
 must be unique throughout `diy/`; supporting folder names and filenames may repeat.
@@ -35,7 +35,7 @@ folder path from `docs/` as their reference label, including every nested
 height/name pair, with relative destinations ending in `README.md`. Preserve tutorial scope and
 allow independent branches.
 
-Run the bundled *Python linter*[^][check_dag]. Python 3.9+ is required, without
+Run the bundled *Python linter*[~][check_dag]. Python 3.9+ is required, without
 third-party packages. It locates `diy/` relative to the skill regardless of working
 directory. An optional argument selects another tutorial directory; tutorial-slug
 uniqueness is checked only within the selected tutorial tree. It rejects

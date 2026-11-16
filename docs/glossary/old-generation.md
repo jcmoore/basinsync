@@ -5,5 +5,5 @@
 
 # Old generation
 
-The *UserHeap's*[^][userheap] promoted *node*[^][node] keyspace; its *object keys*[^][object-keys]
-preserve the id and *revision*[^][revision] used for upload.
+The *UserHeap's*[~][userheap] promoted *node*[~][node] keyspace; its *object keys*[~][object-keys]
+preserve the id and *revision*[~][revision] used for upload.

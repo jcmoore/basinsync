@@ -9,12 +9,12 @@
 
 # CommitMarker
 
-The opaque blob committed at one *Viewpoint*[^][viewpoint], stored as a raw
-*EnvBuf message*[^][envbuf] in its *Epilogue*[^][epilogue]. An empty message still
-has framing, distinguishing it from an *empty sentinel*[^][empty-sentinel].
-*Conditional publication*[^][conditional-write] makes it immutable and
-first-writer-wins. Its *context*[^][context] is stored as object metadata.
+The opaque blob committed at one *Viewpoint*[~][viewpoint], stored as a raw
+*EnvBuf message*[~][envbuf] in its *Epilogue*[~][epilogue]. An empty message still
+has framing, distinguishing it from an *empty sentinel*[~][empty-sentinel].
+*Conditional publication*[~][conditional-write] makes it immutable and
+first-writer-wins. Its *context*[~][context] is stored as object metadata.
 GET capabilities select only its message bytes and convey the signed
-*Range headers*[^][range-get].
+*Range headers*[~][range-get].
 
-Its *PromotionSign*[^][promotion-sign] certifies that the entire graph is promoted.
+Its *PromotionSign*[~][promotion-sign] certifies that the entire graph is promoted.

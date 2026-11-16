@@ -29,29 +29,29 @@ All implemented S3 key patterns, relative to the configured bucket:
 | Object | Key |
 | --- | --- |
 | Empty-validator reference | `sentinel/empty` |
-| *Tombstone*[^][tombstone] probes | `sentinel/tombstone/${length}` |
-| *Margin*[^][margin] probes | `sentinel/margin/${counter}` |
-| *Datashed*[^][datashed] *DifferentialEvent*[^][differential-event] | `timeline/${diffuse16(milestone)}` |
-| *Datashed*[^][datashed] backup *CommitMarker*[^][commit-marker] | `epilogue/${lex(~viewpoint)}` |
-| *Datashed*[^][datashed] *PromotionSign*[^][promotion-sign] | `epilogue/${lex(viewpoint)}` |
-| *Flow*[^][flow] *CommitMarker*[^][commit-marker] | `flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
-| *Flow*[^][flow] *PromotionSign*[^][promotion-sign] | `flows/${flow}/${flow_revision}/epilogue/${lex(viewpoint)}` |
-| *Young-generation*[^][young-generation] *node*[^][node] | `userheap/young/${node_id}/${node_revision}` |
-| *Old-generation*[^][old-generation] *node*[^][node] | `userheap/old/${node_id}/${node_revision}` |
+| *Tombstone*[~][tombstone] probes | `sentinel/tombstone/${length}` |
+| *Margin*[~][margin] probes | `sentinel/margin/${counter}` |
+| *Datashed*[~][datashed] *DifferentialEvent*[~][differential-event] | `timeline/${diffuse16(milestone)}` |
+| *Datashed*[~][datashed] backup *CommitMarker*[~][commit-marker] | `epilogue/${lex(~viewpoint)}` |
+| *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `epilogue/${lex(viewpoint)}` |
+| *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
+| *Flow*[~][flow] *PromotionSign*[~][promotion-sign] | `flows/${flow}/${flow_revision}/epilogue/${lex(viewpoint)}` |
+| *Young-generation*[~][young-generation] *node*[~][node] | `userheap/young/${node_id}/${node_revision}` |
+| *Old-generation*[~][old-generation] *node*[~][node] | `userheap/old/${node_id}/${node_revision}` |
 
-`lex` is signed *Lexidecimal*[^][lexidecimal]; `~` is arbitrary-precision bitwise
-complement. `diffuse16` is *Diffuse16*[^][diffuse16]. *Viewpoints*[^][viewpoint]
-start at zero; *Milestones*[^][milestone] start at one.
-*Revisions*[^][revision] are lowercase UUIDv4 strings. A *Flow's*[^][flow]
-revision is assigned at its first commit; each *node*[^][node] allocation gets a
+`lex` is signed *Lexidecimal*[~][lexidecimal]; `~` is arbitrary-precision bitwise
+complement. `diffuse16` is *Diffuse16*[~][diffuse16]. *Viewpoints*[~][viewpoint]
+start at zero; *Milestones*[~][milestone] start at one.
+*Revisions*[~][revision] are lowercase UUIDv4 strings. A *Flow's*[~][flow]
+revision is assigned at its first commit; each *node*[~][node] allocation gets a
 new revision, shared across both generations. Object keys must fit S3's
 1024-byte limit.
 
 ## Flow ids
 
 Accept 1–160 ASCII letters, digits, `.`, `_`, or `-`, excluding `.` and `..`.
-Lowercase letters before identifying the *Flow*[^][flow]. Use this canonical id
-directly, without hexadecimal or *Lexidecimal*[^][lexidecimal] encoding.
+Lowercase letters before identifying the *Flow*[~][flow]. Use this canonical id
+directly, without hexadecimal or *Lexidecimal*[~][lexidecimal] encoding.
 Reject `/` and every other character outside that subset.
 
 ## Node ids
@@ -60,35 +60,35 @@ Reject `/` and every other character outside that subset.
 n-${lex(~height)}/v.${lex(version)}/t.${lex(token.length)}/d_${sha384(token)}
 ```
 
-`height` is the *node height*[^][node-height]; `version` is currently zero.
-`token.length` counts *access-token*[^][access-token] bytes. The *derived
-subkey*[^][derived-subkey] is lowercase hexadecimal *SHA-384*[^][sha384]; never
+`height` is the *node height*[~][node-height]; `version` is currently zero.
+`token.length` counts *access-token*[~][access-token] bytes. The *derived
+subkey*[~][derived-subkey] is lowercase hexadecimal *SHA-384*[~][sha384]; never
 persist the token itself.
 
 ## Database retainers
 
-These are *retainer*[^][retainer] identifiers, not additional S3 objects:
+These are *retainer*[~][retainer] identifiers, not additional S3 objects:
 
 ```text
 _a_${flow}/v.${lex(version)}/e.${lex(viewpoint)}   # staging area
 _m_${flow}/v.${lex(version)}/e.${lex(viewpoint)}   # CommitMarker
 ```
 
-An outgoing *node*[^][node] edge uses the parent's `node_id` as its
-*retainer*[^][retainer]. Require `retainer < node`; `_a_`/`_m_` precede `n-`,
-and complemented *heights*[^][node-height] order parents before children.
-Reserve `_r_` for future *retainers*[^][retainer].
+An outgoing *node*[~][node] edge uses the parent's `node_id` as its
+*retainer*[~][retainer]. Require `retainer < node`; `_a_`/`_m_` precede `n-`,
+and complemented *heights*[~][node-height] order parents before children.
+Reserve `_r_` for future *retainers*[~][retainer].
 
 ## Object bodies
 
-Sequence objects reserve zero bytes for *empty sentinels*[^][empty-sentinel].
-*DifferentialEvents*[^][differential-event] are *EnvBuf feeds*[^][envbuf];
-*CommitMarkers*[^][commit-marker], including database backups, wrap their blob in
-one raw message. These feeds default to a trailing `u64` *counter margin*[^][margin].
-*PromotionSigns*[^][promotion-sign] use a *margin*[^][margin] with a one-byte counter
+Sequence objects reserve zero bytes for *empty sentinels*[~][empty-sentinel].
+*DifferentialEvents*[~][differential-event] are *EnvBuf feeds*[~][envbuf];
+*CommitMarkers*[~][commit-marker], including database backups, wrap their blob in
+one raw message. These feeds default to a trailing `u64` *counter margin*[~][margin].
+*PromotionSigns*[~][promotion-sign] use a *margin*[~][margin] with a one-byte counter
 from 1 through 7. Their framing keeps valid empty messages distinct from
-*sentinels*[^][empty-sentinel]. *UserHeap*[^][userheap] objects stay opaque, including valid empty blobs.
+*sentinels*[~][empty-sentinel]. *UserHeap*[~][userheap] objects stay opaque, including valid empty blobs.
 The empty reference is always zero bytes. Probe objects are created only if
-absent and verified on reuse. *Tombstone*[^][tombstone] probe lengths are decimal
-2, 4, …, 14; sixteen-byte candidates are refused. *Margin*[^][margin] probes each contain a single
-32-byte *EnvBuf*[^][envbuf], with a one-byte message containing `counter` from 1 through 7.
+absent and verified on reuse. *Tombstone*[~][tombstone] probe lengths are decimal
+2, 4, …, 14; sixteen-byte candidates are refused. *Margin*[~][margin] probes each contain a single
+32-byte *EnvBuf*[~][envbuf], with a one-byte message containing `counter` from 1 through 7.

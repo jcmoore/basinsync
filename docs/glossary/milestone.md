@@ -4,6 +4,6 @@
 
 # Milestone
 
-An arbitrary-precision positive integer identifying a *Timeline*[^][timeline]
-position. Its *Diffuse16*[^][diffuse16] key holds one
-*DifferentialEvent*[^][differential-event].
+An arbitrary-precision positive integer identifying a *Timeline*[~][timeline]
+position. Its *Diffuse16*[~][diffuse16] key holds one
+*DifferentialEvent*[~][differential-event].

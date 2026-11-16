@@ -21,15 +21,15 @@ prerequisites:
 
 # Async shallow cleanup
 
-Queue reclamation when committing a *Flow*[^][flow] *Viewpoint*[^][viewpoint],
-leaving object deletion outside the request path. No *CommitMarker*[^][commit-marker]
-edges exist yet, so every staged *node*[^][node] eventually becomes unretained.
+Queue reclamation when committing a *Flow*[~][flow] *Viewpoint*[~][viewpoint],
+leaving object deletion outside the request path. No *CommitMarker*[~][commit-marker]
+edges exist yet, so every staged *node*[~][node] eventually becomes unretained.
 
-Add a random UUIDv4 *revision*[^][revision] to each new `graph_nodes` row;
+Add a random UUIDv4 *revision*[~][revision] to each new `graph_nodes` row;
 existing allocations retain theirs. Include it in both generations'
-*object-key patterns*[^][object-keys]. Reusing a reclaimed id creates a fresh
-revision: delayed DELETEs and acknowledgments must target the old *revision*[^][revision] only.
-These keys disclose neither *Flow*[^][flow], *Viewpoint*[^][viewpoint], nor *Timeline*[^][timeline] position.
+*object-key patterns*[~][object-keys]. Reusing a reclaimed id creates a fresh
+revision: delayed DELETEs and acknowledgments must target the old *revision*[~][revision] only.
+These keys disclose neither *Flow*[~][flow], *Viewpoint*[~][viewpoint], nor *Timeline*[~][timeline] position.
 
 ```sql
 ALTER TABLE graph_nodes ADD COLUMN revision TEXT NOT NULL;
@@ -45,20 +45,20 @@ CREATE INDEX sweeping_tasks_prioritized
   ON sweeping_tasks(prioritized, flow, viewpoint);
 ```
 
-Every commit transaction inserts a *sweeping task*[^][sweeping-task] alongside
-its *Viewpoint*[^][viewpoint] advancement, including intermediate commits in a batch.
+Every commit transaction inserts a *sweeping task*[~][sweeping-task] alongside
+its *Viewpoint*[~][viewpoint] advancement, including intermediate commits in a batch.
 
-A separate worker reads consistent *VFS snapshots*[^][virtual-file-system] while requests continue.
+A separate worker reads consistent *VFS snapshots*[~][virtual-file-system] while requests continue.
 For a bounded task batch, transactionally remove the tasks and their `_a_` staging
-*retainer*[^][retainer] edges. Mark a *node*[^][node] `freed` with the current time only
-when no *retainers*[^][retainer] remain. Bound edges processed too; retain unfinished tasks.
-Reject *reservations*[^][userheap-reservation] of freed *nodes*[^][node] until reclamation completes.
+*retainer*[~][retainer] edges. Mark a *node*[~][node] `freed` with the current time only
+when no *retainers*[~][retainer] remain. Bound edges processed too; retain unfinished tasks.
+Reject *reservations*[~][userheap-reservation] of freed *nodes*[~][node] until reclamation completes.
 
-Journal these *Turso*[^][turso] mutations as captured frames in `ingestturso`
-through the ordered *Timeline*[^][timeline].
+Journal these *Turso*[~][turso] mutations as captured frames in `ingestturso`
+through the ordered *Timeline*[~][timeline].
 Only after freeing is durable,
 DELETE a bounded batch of exact young-generation keys. Remove their database rows
-in another durable transaction only on confirmed deletion and matching *revision*[^][revision];
+in another durable transaction only on confirmed deletion and matching *revision*[~][revision];
 failures remain queued. Neither slow nor failed DELETEs should block client requests.
 
 Tune `BASINSYNC_CLEANUP_INTERVAL_MS` (1000; zero disables),
@@ -67,9 +67,9 @@ Tune `BASINSYNC_CLEANUP_INTERVAL_MS` (1000; zero disables),
 
 Test shared retainers, bounded sweeps, durable queuing, replay and snapshot recovery,
 failed/lost replies, competing workers, foreground progress during DELETE,
-and id reuse with a delayed old-revision DELETE. Run the *development checks*[^][development].
+and id reuse with a delayed old-revision DELETE. Run the *development checks*[~][development].
 
-A later tutorial will implement a periodic *dusting*[^][dusting] job which will LIST
-*young-generation*[^][young-generation] objects and check for a viable `graph_nodes`
+A later tutorial will implement a periodic *dusting*[~][dusting] job which will LIST
+*young-generation*[~][young-generation] objects and check for a viable `graph_nodes`
 row with matching id **and revision**. Old write URLs may recreate orphan objects;
 eventual reclamation is acceptable. Defer recursive edge cleanup and old-generation deletion too.

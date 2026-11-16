@@ -8,7 +8,7 @@
 
 # UserHeap
 
-The *Datashed's*[^][datashed] object storage for *nodes*[^][node] belonging to
-client-driven *Flow*[^][flow] *Viewpoints*[^][viewpoint], divided into
-*young*[^][young-generation] and *old*[^][old-generation] generations.
-*KernelHeap*[^][kernelheap] serves server-driven *Datashed*[^][datashed] *Viewpoints*[^][viewpoint].
+The *Datashed's*[~][datashed] object storage for *nodes*[~][node] belonging to
+client-driven *Flow*[~][flow] *Viewpoints*[~][viewpoint], divided into
+*young*[~][young-generation] and *old*[~][old-generation] generations.
+*KernelHeap*[~][kernelheap] serves server-driven *Datashed*[~][datashed] *Viewpoints*[~][viewpoint].

@@ -17,8 +17,8 @@ gain another `0`; object keys are unchanged.
 | `0%` | `Uint8Array`, standard base64 |
 | `0#` | Well-known symbol: `asyncIterator`, `iterator`, `species`, or `unscopables` |
 | `0$` | Global symbol name |
-| `0w` | Reserved to avoid confusion with *Diffuse16*[^][diffuse16] |
-| `0y`, `0z` | Reserved to avoid confusion with *Lexidecimal*[^][lexidecimal] |
+| `0w` | Reserved to avoid confusion with *Diffuse16*[~][diffuse16] |
+| `0y`, `0z` | Reserved to avoid confusion with *Lexidecimal*[~][lexidecimal] |
 | `0[A-Z]` | All uppercase letters reserved to avoid case-insensitive filesystem clashes |
 | `0_` | Application-specific extensions/interpretations |
 

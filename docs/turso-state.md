@@ -30,18 +30,18 @@ with id `default.turso`:
 }
 ```
 
-`version` identifies the *Turso*[^][turso] release and revision; reject
+`version` identifies the *Turso*[~][turso] release and revision; reject
 incompatible versions. `logical.header` is the 56-byte native log header;
-`logical.frames` contains the *logical frames*[^][logical-frame], including portable changes,
+`logical.frames` contains the *logical frames*[~][logical-frame], including portable changes,
 without that header. All byte payloads are binary blobs.
 
-Each `physical.segments` entry is a complete *physical WAL*[^][wal] segment,
-including its header, *page frames*[^][physical-frame], and commit boundary. Validate native checksums,
+Each `physical.segments` entry is a complete *physical WAL*[~][wal] segment,
+including its header, *page frames*[~][physical-frame], and commit boundary. Validate native checksums,
 salts, page size, and committed boundaries before installing pages.
 
 `physical.base` and `physical.milestone` are consecutive decimal
-*Milestones*[^][milestone]. `parent` is the hexadecimal *SHA-384*[^][sha384] of the
-preceding encoded *DifferentialEvent*[^][differential-event], or `null` at the
+*Milestones*[~][milestone]. `parent` is the hexadecimal *SHA-384*[~][sha384] of the
+preceding encoded *DifferentialEvent*[~][differential-event], or `null` at the
 beginning. The first delta also carries the initialized database in `logical.base`
 and its checksum in `base_sha384`; both are `null` thereafter. This binds replay
 to a verified initial image and ordered history without hashing whole database

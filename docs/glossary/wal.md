@@ -4,9 +4,9 @@
 
 # Physical WAL
 
-*Turso's*[^][turso] physical write-ahead log contains numbered page images and
-transaction commit boundaries. *MVCC*[^][mvcc] checkpointing writes pages to this
+*Turso's*[~][turso] physical write-ahead log contains numbered page images and
+transaction commit boundaries. *MVCC*[~][mvcc] checkpointing writes pages to this
 log before backfilling the main database.
 
-The *frame layout*[^][sqlite-wal-format] includes page numbers, commit boundaries,
+The *frame layout*[~][sqlite-wal-format] includes page numbers, commit boundaries,
 salts, and rolling checksums.

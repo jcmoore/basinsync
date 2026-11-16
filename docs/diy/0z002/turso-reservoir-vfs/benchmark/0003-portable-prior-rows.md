@@ -10,11 +10,11 @@
 
 # 0003 native prior-row experiment — 2026-10-24
 
-An isolated *Turso*[^][turso] prototype can put prior records directly into
-portable *logical frames*[^][logical-frame], eliminating the
-*shadow/cache*[^][0003-disk-shadow] used to obtain them.
+An isolated *Turso*[~][turso] prototype can put prior records directly into
+portable *logical frames*[~][logical-frame], eliminating the
+*shadow/cache*[~][0003-disk-shadow] used to obtain them.
 
-The commit builder already sees ended *MVCC*[^][mvcc] versions. Add a complete
+The commit builder already sees ended *MVCC*[~][mvcc] versions. Add a complete
 `before_record` as optional length-delimited field 4 in their delete-operation
 extensions. Existing upserts supply the final records; the transaction's object
 map supplies table names. Unknown extension fields remain skippable, and the
@@ -28,7 +28,7 @@ savepoint handling and commit coalescing then produce original-to-final changes,
 omitting intermediate versions and transient inserts. Disabling this retention
 reproduces the missing UPSERT retraction.
 
-Fold deletes at weight −1 and upserts at +1 into *Z-sets*[^][z-set]. These are
+Fold deletes at weight −1 and upserts at +1 into *Z-sets*[~][z-set]. These are
 native records: consumers still need schema information for rowid aliases,
 affinity, and column interpretation. No second database or retained row cache
 is required; optimized overwrites retain an extra old version until normal
@@ -44,7 +44,7 @@ statement audit feed, and it is not enabled in the basinsync server.
 
 ## Preliminary cost
 
-Unoptimized Rust 1.88.0; file-backed 16 KiB *MVCC*[^][mvcc] primary,
+Unoptimized Rust 1.88.0; file-backed 16 KiB *MVCC*[~][mvcc] primary,
 `synchronous=OFF`; 4,096 seeded rows, 96 batches of 32 strided UPSERTs;
 three alternating rounds. SQL construction is outside timing. No S3 writes or
 derived feed encoding. Compare runtime per fixed workload, using median rates:
@@ -59,7 +59,7 @@ derived feed encoding. Compare runtime per fixed workload, using median rates:
 Wide-row logs roughly double. Checkpoint timings depend on the shared SSD;
 small differences are noise. These debug measurements establish a plausible
 cost, not production throughput or a ranking against optimized pipeline runs.
-Retain the *raw measurements*[^][0003-portable-prior-rows-samples].
+Retain the *raw measurements*[~][0003-portable-prior-rows-samples].
 
 Tests reproduce missing prior rows before the change, then cover coalescing,
 savepoints, rollback, UPSERT, REPLACE, rowid changes, typed/overflow records,
@@ -71,9 +71,9 @@ and in the serial suite. This remains an investigation limitation.
 
 ## VFS alternative
 
-Our physical *WAL*[^][wal] recorder already wraps *Turso's*[^][turso] file-I/O
-interface, the *VFS*[^][virtual-file-system] boundary. An observation test commits
-two transactions: each produces a *logical frame*[^][logical-frame], while the
+Our physical *WAL*[~][wal] recorder already wraps *Turso's*[~][turso] file-I/O
+interface, the *VFS*[~][virtual-file-system] boundary. An observation test commits
+two transactions: each produces a *logical frame*[~][logical-frame], while the
 database file and physical recorder remain unchanged until checkpointing.
 Reading the logical-log file at this boundary exposes the existing records;
 it cannot supply omitted prior values. Observing reads is insufficient too:
@@ -83,21 +83,21 @@ page-cache hits need not issue file reads.
 | --- | --- | --- |
 | Native portable extension | Retain ended versions at row mutation | Engine change; extra row bytes in the log |
 | File-I/O/log tap | Parse existing commits and retain prior state elsewhere | Avoids engine changes; still needs the shadow/cache |
-| Versioned-page *VFS*[^][virtual-file-system] | Query pinned before/after page snapshots using SQL | Avoids a full second database file; maintains page history and another reader |
+| Versioned-page *VFS*[~][virtual-file-system] | Query pinned before/after page snapshots using SQL | Avoids a full second database file; maintains page history and another reader |
 
-The *snapshot-reader follow-up*[^][0003-snapshot-readers] implements and measures
+The *snapshot-reader follow-up*[~][0003-snapshot-readers] implements and measures
 live copy-on-write page views and rolling native read transactions. Both derive
 old/new rows through SQL while the primary advances, without rebuilding a shadow.
 
-Snapshots must include the committed *WAL*[^][wal] overlay, file length, and
+Snapshots must include the committed *WAL*[~][wal] overlay, file length, and
 schema. Copying overwritten main-file bytes alone misses newer pages in the
-*WAL*[^][wal]. Bound retained history and apply backpressure when readers lag.
+*WAL*[~][wal]. Bound retained history and apply backpressure when readers lag.
 Current per-batch checkpoints provide candidate snapshot boundaries; coalescing
 several logical commits into one checkpoint loses intermediate page snapshots
 unless they are captured separately. Raw page diffing would additionally require
 B-tree, overflow, page-reuse, and schema interpretation; reuse SQL readers instead.
 
 Native prior images remain useful for a direct portable row feed. Snapshot
-*VFS*[^][virtual-file-system] storage avoids the engine change and offers page
+*VFS*[~][virtual-file-system] storage avoids the engine change and offers page
 history for other readers. Physical capture and native row metadata can also
 complement each other.

@@ -4,6 +4,6 @@
 
 # Prologue vacuuming
 
-Reclamation of the *Prologue*[^][prologue], distinct from
-*Epilogue compaction*[^][epilogue-compaction] and
-*Timeline eviction*[^][timeline-eviction].
+Reclamation of the *Prologue*[~][prologue], distinct from
+*Epilogue compaction*[~][epilogue-compaction] and
+*Timeline eviction*[~][timeline-eviction].

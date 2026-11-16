@@ -26,48 +26,48 @@
 
 # Datashed Timeline
 
-The *Datashed's*[^][datashed] shared *Timeline*[^][timeline] records state changes using the
-*Timeline object-key pattern*[^][object-keys]. *Milestones*[^][milestone] start at one and increase
-without gaps. Before writing, read the latest *Datashed*[^][datashed] *recovery anchor*[^][datashed-backup]
-and ingest every subsequent *DifferentialEvent*[^][differential-event]. Its
-recorded *Milestone*[^][milestone] seeds exponential search for the tail.
-Without a *CommitMarker*[^][commit-marker], list a seed in the
-*Timeline*[^][timeline] keyspace and replay from the beginning.
-*Diffuse16*[^][diffuse16] key order does not reveal the latest.
-Treat trailing *empty sentinels*[^][empty-sentinel] as exclusive upper search
-bounds. Leading *tombstones*[^][tombstone] occupy retired positions, not replayable
-entries; recovery needs a snapshot covering them. An empty *Timeline*[^][timeline] expects *Milestone*[^][milestone] one.
-Use *conditional reads*[^][conditional-read] for GETs and HEADs, including search probes.
+The *Datashed's*[~][datashed] shared *Timeline*[~][timeline] records state changes using the
+*Timeline object-key pattern*[~][object-keys]. *Milestones*[~][milestone] start at one and increase
+without gaps. Before writing, read the latest *Datashed*[~][datashed] *recovery anchor*[~][datashed-backup]
+and ingest every subsequent *DifferentialEvent*[~][differential-event]. Its
+recorded *Milestone*[~][milestone] seeds exponential search for the tail.
+Without a *CommitMarker*[~][commit-marker], list a seed in the
+*Timeline*[~][timeline] keyspace and replay from the beginning.
+*Diffuse16*[~][diffuse16] key order does not reveal the latest.
+Treat trailing *empty sentinels*[~][empty-sentinel] as exclusive upper search
+bounds. Leading *tombstones*[~][tombstone] occupy retired positions, not replayable
+entries; recovery needs a snapshot covering them. An empty *Timeline*[~][timeline] expects *Milestone*[~][milestone] one.
+Use *conditional reads*[~][conditional-read] for GETs and HEADs, including search probes.
 
 Commitflow tuples begin with `Symbol.species`, using the
-*FlexBuffers*[^][flexbuffers] extension encoding, and carry a `markers` map
-keyed by *Flow*[^][flow] id.
-Each entry contains decimal `viewpoint`, hexadecimal *SHA-384*[^][sha384] in
-`sha384`, binary `blob`, *context*[^][context] as `Record<string, string>`, and required `edges` (`[]` for an empty graph) containing derived child *node*[^][node] ids. *Conditional creation*[^][conditional-write] of a
-*DifferentialEvent*[^][differential-event] at the next *Milestone*[^][milestone]
-arbitrates competing writers. Concatenate zero or more *EnvBuf-wrapped*[^][envbuf]
+*FlexBuffers*[~][flexbuffers] extension encoding, and carry a `markers` map
+keyed by *Flow*[~][flow] id.
+Each entry contains decimal `viewpoint`, hexadecimal *SHA-384*[~][sha384] in
+`sha384`, binary `blob`, *context*[~][context] as `Record<string, string>`, and required `edges` (`[]` for an empty graph) containing derived child *node*[~][node] ids. *Conditional creation*[~][conditional-write] of a
+*DifferentialEvent*[~][differential-event] at the next *Milestone*[~][milestone]
+arbitrates competing writers. Concatenate zero or more *EnvBuf-wrapped*[~][envbuf]
 commitflow tuples, one `sts/0/databasin/ingestturso` tuple, then a
-*range manifest*[^][range-manifest]. Each tuple is its own
-*FlexBuffers*[^][flexbuffers] document. The ingestion command's
-*Turso deltas*[^][turso-state] carry the *physical frames*[^][physical-frame]
+*range manifest*[~][range-manifest]. Each tuple is its own
+*FlexBuffers*[~][flexbuffers] document. The ingestion command's
+*Turso deltas*[~][turso-state] carry the *physical frames*[~][physical-frame]
 that materialize the recorded state; all requests wait for durable publication.
 
 Regardless of in-flight limits, durable publication must follow
-*Milestone*[^][milestone] order to preserve *causal consistency*[^][causal-consistency].
-Complete one *conditional PUT*[^][conditional-write] before starting the next;
+*Milestone*[~][milestone] order to preserve *causal consistency*[~][causal-consistency].
+Complete one *conditional PUT*[~][conditional-write] before starting the next;
 acknowledge a batch only after it and all predecessors are durable.
-Predecessor *digests*[^][sha384] cover the feed through its *range manifest*[^][range-manifest],
-excluding trailing retry *margins*[^][margin]; commands, internal *margins*[^][margin], and the manifest
+Predecessor *digests*[~][sha384] cover the feed through its *range manifest*[~][range-manifest],
+excluding trailing retry *margins*[~][margin]; commands, internal *margins*[~][margin], and the manifest
 remain covered.
 
 `PUT /api/v0/epilogue` adds a `flow` string to the
-*commit details*[^][epilogue-protocol] and validates against that
-*Flow's*[^][flow] expected *Viewpoint*[^][viewpoint].
-`GET /api/v0/epilogue/status?flow=<id>` returns the *common status response*[^][epilogue-protocol].
+*commit details*[~][epilogue-protocol] and validates against that
+*Flow's*[~][flow] expected *Viewpoint*[~][viewpoint].
+`GET /api/v0/epilogue/status?flow=<id>` returns the *common status response*[~][epilogue-protocol].
 The `flow` query parameter is an ordinary URL-encoded string.
-Mismatches use the *common response*[^][epilogue-protocol].
+Mismatches use the *common response*[~][epilogue-protocol].
 
 `BASINSYNC_STATUS_PROBE_MAX_AGE_MS` defaults to 3000; zero probes on every status
-request. Reuse a successful probe or refresh across *Flows*[^][flow] within that
+request. Reuse a successful probe or refresh across *Flows*[~][flow] within that
 window, without extending it on cache hits. Status still waits for pending local
 uploads; writes always refresh independently of this allowance.

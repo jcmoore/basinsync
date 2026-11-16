@@ -4,5 +4,5 @@
 
 # Prologue
 
-A *Reservoir*[^][reservoir] component alongside its *Epilogue*[^][epilogue]
-and *Timeline*[^][timeline].
+A *Reservoir*[~][reservoir] component alongside its *Epilogue*[~][epilogue]
+and *Timeline*[~][timeline].

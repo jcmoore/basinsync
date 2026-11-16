@@ -5,5 +5,5 @@
 
 # DifferentialEvent
 
-A *FlexBuffers-encoded*[^][flexbuffers] batch of *Reservoir*[^][reservoir]
-commands stored at one *Milestone*[^][milestone] in its *Timeline*[^][timeline].
+A *FlexBuffers-encoded*[~][flexbuffers] batch of *Reservoir*[~][reservoir]
+commands stored at one *Milestone*[~][milestone] in its *Timeline*[~][timeline].

@@ -3,7 +3,7 @@
 
 # FlexBuffers
 
-A *schemaless binary format*[^][flexbuffers-format] supporting vectors, maps,
+A *schemaless binary format*[~][flexbuffers-format] supporting vectors, maps,
 and binary blobs.
 
 Reserve `VT_VECTOR_UINT` for extensions: its first element is one ASCII prefix
@@ -22,4 +22,4 @@ the tag (in contrast to `VT_BLOB`, which keeps payload bytes packed as its lengt
 | `$` | UTF-8 global symbol name |
 
 Magnitudes are minimal, with zero represented by one zero byte. Symbol names
-follow *JSON0*[^][json0].
+follow *JSON0*[~][json0].

@@ -4,5 +4,5 @@
 
 # KernelHeap
 
-Object storage for *nodes*[^][node] belonging to server-driven
-*Datashed*[^][datashed] *Viewpoints*[^][viewpoint].
+Object storage for *nodes*[~][node] belonging to server-driven
+*Datashed*[~][datashed] *Viewpoints*[~][viewpoint].

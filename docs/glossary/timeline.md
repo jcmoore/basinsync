@@ -4,6 +4,6 @@
 
 # Timeline (Chronologue)
 
-A *Reservoir's*[^][reservoir] write-ahead log of
-*DifferentialEvents*[^][differential-event]. Its gapless sequence of
-*Milestones*[^][milestone] begins at one.
+A *Reservoir's*[~][reservoir] write-ahead log of
+*DifferentialEvents*[~][differential-event]. Its gapless sequence of
+*Milestones*[~][milestone] begins at one.

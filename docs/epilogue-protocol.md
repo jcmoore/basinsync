@@ -18,47 +18,47 @@
 
 # Epilogue protocol
 
-*CommitMarkers*[^][commit-marker] use complemented positions within each
-*Reservoir*[^][reservoir] namespace; see the *object-key patterns*[^][object-keys].
-*Viewpoints*[^][viewpoint] increase from zero; their
-*encoded keys*[^][lexidecimal] decrease lexicographically.
+*CommitMarkers*[~][commit-marker] use complemented positions within each
+*Reservoir*[~][reservoir] namespace; see the *object-key patterns*[~][object-keys].
+*Viewpoints*[~][viewpoint] increase from zero; their
+*encoded keys*[~][lexidecimal] decrease lexicographically.
 
-`PUT /api/v0/epilogue` accepts multipart `details` (*JSON0*[^][json0]) and
+`PUT /api/v0/epilogue` accepts multipart `details` (*JSON0*[~][json0]) and
 `blob` (raw bytes). `details` contains `viewpoint: bigint` and
 `sha384: Uint8Array`, optional `context: Record<string, string>` (default `{}`),
 and a required `edges` array (`[]` for an empty graph), using the
-*reservation API's*[^][userheap-protocol] authenticated child descriptors.
-Store *context*[^][context] entries as `x-amz-meta-ctx-${key}` object metadata.
-Verify each referenced *node*[^][node] before accepting its edge. Require the expected
-*viewpoint*[^][viewpoint] and matching *digest*[^][sha384] before accepting a
+*reservation API's*[~][userheap-protocol] authenticated child descriptors.
+Store *context*[~][context] entries as `x-amz-meta-ctx-${key}` object metadata.
+Verify each referenced *node*[~][node] before accepting its edge. Require the expected
+*viewpoint*[~][viewpoint] and matching *digest*[~][sha384] before accepting a
 commit. Rejection must not advance the sequence.
 
-Responses use *JSON0*[^][json0] with bigint *viewpoints*[^][viewpoint].
+Responses use *JSON0*[~][json0] with bigint *viewpoints*[~][viewpoint].
 All `/api/v0` responses include `timelines.datashed.milestone`, a bigint identifying
-their known durable *datashed*[^][datashed] *Milestone*[^][milestone] (zero before the first
-*DifferentialEvent*[^][differential-event]).
+their known durable *datashed*[~][datashed] *Milestone*[~][milestone] (zero before the first
+*DifferentialEvent*[~][differential-event]).
 Successful commits report their published batch; status reports its materialized
 prefix, including when cached. A lower value than a client has already observed
-reveals a *causal reverse*[^][causal-consistency] across server instances.
-A *viewpoint*[^][viewpoint] mismatch returns HTTP 409:
+reveals a *causal reverse*[~][causal-consistency] across server instances.
+A *viewpoint*[~][viewpoint] mismatch returns HTTP 409:
 
 ```json
 {"next":{"viewpoint":"0x1"},"timelines":{"datashed":{"milestone":"0x2"}}}
 ```
 
 `GET /api/v0/epilogue/status` reports the latest committed
-*CommitMarker*[^][commit-marker]:
+*CommitMarker*[~][commit-marker]:
 
 ```json
 {"latest":{"viewpoint":"0x1","length":10,"url":"<presigned GET>","headers":{"If-Match":"*","Range":"bytes=128-137"}},"timelines":{"datashed":{"milestone":"0x2"}}}
 ```
 
 For `latest`, send the returned `headers` with its URL, including the signed
-*conditional read*[^][conditional-read] header. A
-*Range GET*[^][range-get] must be cryptographically restricted to the expected
-*marker*[^][commit-marker] bytes. When the matching stored
-*marker*[^][commit-marker] supplies the URL, its signed Range starts at byte eight
-and selects only the raw *EnvBuf message*[^][envbuf]. For zero length,
+*conditional read*[~][conditional-read] header. A
+*Range GET*[~][range-get] must be cryptographically restricted to the expected
+*marker*[~][commit-marker] bytes. When the matching stored
+*marker*[~][commit-marker] supplies the URL, its signed Range starts at byte eight
+and selects only the raw *EnvBuf message*[~][envbuf]. For zero length,
 omit `url` and `headers` and use empty bytes without fetching.
 
-With no committed *marker*[^][commit-marker], `latest` is `null`.
+With no committed *marker*[~][commit-marker], `latest` is `null`.

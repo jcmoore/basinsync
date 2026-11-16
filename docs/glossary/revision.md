@@ -5,10 +5,10 @@
 
 # Revision
 
-A random UUIDv4 identifying one allocation of a *node*[^][node]. Append it to the
+A random UUIDv4 identifying one allocation of a *node*[~][node]. Append it to the
 node id in each generation's object key. Reusing a reclaimed node id creates a
 new revision, keeping stale deletion requests and acknowledgments scoped to the
-previous allocation without revealing its *Flow*[^][flow] or *Timeline*[^][timeline] position.
+previous allocation without revealing its *Flow*[~][flow] or *Timeline*[~][timeline] position.
 
-A *Flow*[^][flow] also has a revision, assigned in its first commit transaction
-and preserved on recovery; see the *object-key patterns*[^][object-keys].
+A *Flow*[~][flow] also has a revision, assigned in its first commit transaction
+and preserved on recovery; see the *object-key patterns*[~][object-keys].

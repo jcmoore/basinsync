@@ -5,6 +5,6 @@
 
 # Upstream
 
-The source *Reservoir*[^][reservoir] in a replication relationship. Its
-*Timeline*[^][timeline] *Milestone*[^][milestone] identifies the
-*DifferentialEvent*[^][differential-event] carrying the payload to arrange.
+The source *Reservoir*[~][reservoir] in a replication relationship. Its
+*Timeline*[~][timeline] *Milestone*[~][milestone] identifies the
+*DifferentialEvent*[~][differential-event] carrying the payload to arrange.

@@ -7,6 +7,6 @@
 
 # Reservoir
 
-A *Datashed*[^][datashed], *Flow*[^][flow], or *Jet*[^][jet]. Each has an
-*Epilogue*[^][epilogue], a *Timeline (Chronologue)*[^][timeline], and a
-*Prologue*[^][prologue].
+A *Datashed*[~][datashed], *Flow*[~][flow], or *Jet*[~][jet]. Each has an
+*Epilogue*[~][epilogue], a *Timeline (Chronologue)*[~][timeline], and a
+*Prologue*[~][prologue].

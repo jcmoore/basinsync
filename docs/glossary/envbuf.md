@@ -6,7 +6,7 @@
 “Enveloped Buffers” (pronounced “Envy Buff”): concatenable binary envelopes
 with matching headers and footers for forward and backward traversal.
 A concatenation of envelopes is a feed; each envelope carries a message.
-Feeds default to a trailing *counter margin*[^][margin].
+Feeds default to a trailing *counter margin*[~][margin].
 Prefer `.nv` filenames.
 
 Each header and footer occupies eight bytes:
@@ -17,7 +17,7 @@ footer: message_length:u32le | format:3, alignment_power:5 | "vNE"
 ```
 
 The descriptor's high three bits select the format: `000` unknown/raw,
-`100` nested EnvBuf, `101` *FlexBuffers*[^][flexbuffers], and `110` *margin*[^][margin].
+`100` nested EnvBuf, `101` *FlexBuffers*[~][flexbuffers], and `110` *margin*[~][margin].
 `111` is reserved for platform extensions, including larger headers and footers
 supporting `u64` message lengths; that support is pending. Other codes are reserved.
 Readers skip `110` messages while validating their framing;
@@ -28,4 +28,4 @@ the complete envelope, including header and footer, is a multiple of that alignm
 `ceil((message_length + 16) / alignment) * alignment`. The message begins eight bytes after
 the header starts.
 Message length excludes padding and framing. The default descriptor for
-*FlexBuffers*[^][flexbuffers] is `0xa4`.
+*FlexBuffers*[~][flexbuffers] is `0xa4`.
