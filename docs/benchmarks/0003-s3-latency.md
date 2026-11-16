@@ -1,19 +1,19 @@
 [0003-s3-latency-samples]: <data/0003-s3-latency-samples.gz>
 [0003-s3-latency-summary]: <data/0003-s3-latency-summary.json>
 [0003-snapshot-readers]: <0003-snapshot-readers.md>
-[0z002-turso-reservoir-vfs]: <../diy/0z002-turso-reservoir-vfs.md>
 [conditional-write]: <../glossary/conditional-write.md>
 [flow]: <../glossary/flow.md>
 [physical-frame]: <../glossary/physical-frame.md>
 [timeline]: <../glossary/timeline.md>
 [turso]: <../glossary/turso.md>
+[turso-reservoir-vfs]: <../diy/0z002/turso-reservoir-vfs.md>
 [virtual-file-system]: <../glossary/virtual-file-system.md>
 [z-set]: <../glossary/z-set.md>
 
 # 0003 S3 latency — 2026-10-24
 
 At measurement time, the HTTP server batched serially, waiting for publication
-before preparing the next batch. The *Turso Reservoir VFS server*[^][0z002-turso-reservoir-vfs] now
+before preparing the next batch. The *Turso Reservoir VFS server*[^][turso-reservoir-vfs] now
 uses two batches. This experiment connects the
 *copy-on-write VFS*[^][virtual-file-system] from the
 *snapshot-reader prototype*[^][0003-snapshot-readers] to three bounded stages:

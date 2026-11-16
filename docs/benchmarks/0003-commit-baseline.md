@@ -1,6 +1,5 @@
 [0003-commit-samples]: <data/0003-commit-samples.gz>
 [0003-commit-summary]: <data/0003-commit-summary.json>
-[0z002-turso-reservoir-vfs]: <../diy/0z002-turso-reservoir-vfs.md>
 [durable-storage]: <../glossary/durable-storage.md>
 [flow]: <../glossary/flow.md>
 [logical-frame]: <../glossary/logical-frame.md>
@@ -8,10 +7,11 @@
 [sha384]: <../glossary/sha384.md>
 [timeline]: <../glossary/timeline.md>
 [turso]: <../glossary/turso.md>
+[turso-reservoir-vfs]: <../diy/0z002/turso-reservoir-vfs.md>
 
 # 0003 commit baseline — 2026-10-23
 
-Measure the *Turso Reservoir VFS procedure*[^][0z002-turso-reservoir-vfs] directly, excluding HTTP
+Measure the *Turso Reservoir VFS procedure*[^][turso-reservoir-vfs] directly, excluding HTTP
 form parsing, cursor lookup, leadership contention, and
 *Timeline*[^][timeline] refresh reads.
 

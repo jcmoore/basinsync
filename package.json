@@ -8,8 +8,8 @@
     "test:integration": "bun clients/integration.ts && bun clients/cancellation-integration.ts",
     "stress": "bun clients/stress.ts",
     "check": "tsc --noEmit",
-    "check:docs": "node docs/skills/basinsync-tutorial-dag/scripts/check-dag.mjs",
-    "test:docs": "node --test docs/skills/basinsync-tutorial-dag/scripts/check-dag.test.mjs"
+    "check:docs": "python3 docs/skills/basinsync-tutorial-dag/scripts/check_dag.py",
+    "test:docs": "python3 docs/skills/basinsync-tutorial-dag/scripts/test_check_dag.py"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "3.1075.0",

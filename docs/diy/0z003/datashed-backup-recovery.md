@@ -1,33 +1,33 @@
 ---
 prerequisites:
-  - 0z002-turso-reservoir-vfs.md
+  - 0z002/turso-reservoir-vfs.md
 ---
 
-[0004-backup-overhead]: <../benchmarks/0004-backup-overhead.md>
-[0z000-shallow-epilogue-commits]: <0z000-shallow-epilogue-commits.md>
-[0z002-turso-reservoir-vfs]: <0z002-turso-reservoir-vfs.md>
-[commit-marker]: <../glossary/commit-marker.md>
-[conditional-write]: <../glossary/conditional-write.md>
-[datashed]: <../glossary/datashed.md>
-[datashed-backup]: <../datashed-backup.md>
-[datashed-timeline]: <../datashed-timeline.md>
-[development]: <../development.md>
-[differential-event]: <../glossary/differential-event.md>
-[envbuf]: <../glossary/envbuf.md>
-[epilogue]: <../glossary/epilogue.md>
-[epilogue-compaction]: <../glossary/epilogue-compaction.md>
-[flow]: <../glossary/flow.md>
-[jet]: <../glossary/jet.md>
-[milestone]: <../glossary/milestone.md>
-[prologue]: <../glossary/prologue.md>
-[prologue-vacuuming]: <../glossary/prologue-vacuuming.md>
-[range-get]: <../glossary/range-get.md>
-[reservoir]: <../glossary/reservoir.md>
-[sha384]: <../glossary/sha384.md>
-[timeline]: <../glossary/timeline.md>
-[timeline-eviction]: <../glossary/timeline-eviction.md>
-[viewpoint]: <../glossary/viewpoint.md>
-[virtual-file-system]: <../glossary/virtual-file-system.md>
+[0004-backup-overhead]: <../../benchmarks/0004-backup-overhead.md>
+[commit-marker]: <../../glossary/commit-marker.md>
+[conditional-write]: <../../glossary/conditional-write.md>
+[datashed]: <../../glossary/datashed.md>
+[datashed-backup]: <../../datashed-backup.md>
+[datashed-timeline]: <../../datashed-timeline.md>
+[development]: <../../development.md>
+[differential-event]: <../../glossary/differential-event.md>
+[envbuf]: <../../glossary/envbuf.md>
+[epilogue]: <../../glossary/epilogue.md>
+[epilogue-compaction]: <../../glossary/epilogue-compaction.md>
+[flow]: <../../glossary/flow.md>
+[jet]: <../../glossary/jet.md>
+[milestone]: <../../glossary/milestone.md>
+[prologue]: <../../glossary/prologue.md>
+[prologue-vacuuming]: <../../glossary/prologue-vacuuming.md>
+[range-get]: <../../glossary/range-get.md>
+[reservoir]: <../../glossary/reservoir.md>
+[sha384]: <../../glossary/sha384.md>
+[shallow-epilogue-commits]: <../0z000/shallow-epilogue-commits.md>
+[timeline]: <../../glossary/timeline.md>
+[timeline-eviction]: <../../glossary/timeline-eviction.md>
+[turso-reservoir-vfs]: <../0z002/turso-reservoir-vfs.md>
+[viewpoint]: <../../glossary/viewpoint.md>
+[virtual-file-system]: <../../glossary/virtual-file-system.md>
 
 # Datashed backup and recovery
 
@@ -37,7 +37,7 @@ an *Epilogue*[^][epilogue], *Timeline (Chronologue)*[^][timeline], and
 *Epilogue*[^][epilogue]. Revisit *Prologues*[^][prologue] and the third
 *Reservoir*[^][reservoir] type, the *Jet*[^][jet], later.
 
-Promote *Turso Reservoir VFS's*[^][0z002-turso-reservoir-vfs] file-backed copy-on-write
+Promote *Turso Reservoir VFS's*[^][turso-reservoir-vfs] file-backed copy-on-write
 *VFS*[^][virtual-file-system] into the server. Pin a consistent, checkpointed
 *Milestone*[^][milestone] through backup publication while request preparation
 continues. Use the entire `default.turso` database file as the raw
@@ -47,7 +47,7 @@ continues. Use the entire `default.turso` database file as the raw
 
 A separate worker first copies every *Flow*[^][flow] *CommitMarker*[^][commit-marker]
 through that durable *Milestone*[^][milestone] into its
-*Epilogue*[^][epilogue], as in *Shallow epilogue commits*[^][0z000-shallow-epilogue-commits]. Only then
+*Epilogue*[^][epilogue], as in *Shallow epilogue commits*[^][shallow-epilogue-commits]. Only then
 publish the pinned backup at the next *Datashed*[^][datashed]
 *Viewpoint*[^][viewpoint] using a single streamed *conditional PUT*[^][conditional-write]
 with the complete enveloped object's content length. The raw database remains

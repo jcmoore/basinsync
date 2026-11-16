@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-node docs/skills/basinsync-tutorial-dag/scripts/check-dag.mjs
-node --test docs/skills/basinsync-tutorial-dag/scripts/check-dag.test.mjs
+python3 docs/skills/basinsync-tutorial-dag/scripts/check_dag.py
+python3 docs/skills/basinsync-tutorial-dag/scripts/test_check_dag.py
 mkdir -p .local/bin
 CGO_ENABLED=0 GOBIN="$PWD/.local/bin" go install github.com/versity/versitygw/cmd/versitygw@v1.11.0
 cargo fmt --check

@@ -1,23 +1,23 @@
 ---
 prerequisites:
-  - 0z004-async-shallow-cleanup.md
+  - 0z004/async-shallow-cleanup.md
 ---
 
-[access-token]: <../glossary/access-token.md>
-[commit-marker]: <../glossary/commit-marker.md>
-[conditional-read]: <../glossary/conditional-read.md>
-[context]: <../glossary/context.md>
-[development]: <../development.md>
-[etag]: <../glossary/etag.md>
-[node]: <../glossary/node.md>
-[node-degree]: <../glossary/node-degree.md>
-[node-height]: <../glossary/node-height.md>
-[old-generation]: <../glossary/old-generation.md>
-[retainer]: <../glossary/retainer.md>
-[revision]: <../glossary/revision.md>
-[timeline]: <../glossary/timeline.md>
-[userheap-protocol]: <../userheap-protocol.md>
-[young-generation]: <../glossary/young-generation.md>
+[access-token]: <../../glossary/access-token.md>
+[commit-marker]: <../../glossary/commit-marker.md>
+[conditional-read]: <../../glossary/conditional-read.md>
+[context]: <../../glossary/context.md>
+[development]: <../../development.md>
+[etag]: <../../glossary/etag.md>
+[node]: <../../glossary/node.md>
+[node-degree]: <../../glossary/node-degree.md>
+[node-height]: <../../glossary/node-height.md>
+[old-generation]: <../../glossary/old-generation.md>
+[retainer]: <../../glossary/retainer.md>
+[revision]: <../../glossary/revision.md>
+[timeline]: <../../glossary/timeline.md>
+[userheap-protocol]: <../../userheap-protocol.md>
+[young-generation]: <../../glossary/young-generation.md>
 
 # Deep UserHeap support
 

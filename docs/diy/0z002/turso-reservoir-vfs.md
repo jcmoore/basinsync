@@ -1,44 +1,44 @@
 ---
 prerequisites:
-  - 0z001-datashed-timeline-race.md
+  - 0z001/datashed-timeline-race.md
 ---
 
-[0003-commit-baseline]: <../benchmarks/0003-commit-baseline.md>
-[0003-disk-shadow]: <../benchmarks/0003-disk-shadow.md>
-[0003-s3-latency]: <../benchmarks/0003-s3-latency.md>
-[0003-snapshot-readers]: <../benchmarks/0003-snapshot-readers.md>
-[0003-wal-experiments]: <../benchmarks/0003-wal-experiments.md>
-[0003-zset-experiments]: <../benchmarks/0003-zset-experiments.md>
-[0z001-datashed-timeline-race]: <0z001-datashed-timeline-race.md>
-[commit-marker]: <../glossary/commit-marker.md>
-[conditional-write]: <../glossary/conditional-write.md>
-[datashed]: <../glossary/datashed.md>
-[datashed-timeline]: <../datashed-timeline.md>
-[development]: <../development.md>
-[differential-event]: <../glossary/differential-event.md>
-[downstream]: <../glossary/downstream.md>
-[durable-storage]: <../glossary/durable-storage.md>
-[envbuf]: <../glossary/envbuf.md>
-[epilogue]: <../glossary/epilogue.md>
-[flexbuffers]: <../glossary/flexbuffers.md>
-[flow]: <../glossary/flow.md>
-[leader]: <../glossary/leader.md>
-[lexidecimal]: <../glossary/lexidecimal.md>
-[logical-frame]: <../glossary/logical-frame.md>
-[milestone]: <../glossary/milestone.md>
-[mvcc]: <../glossary/mvcc.md>
-[object-keys]: <../object-keys.md>
-[physical-frame]: <../glossary/physical-frame.md>
-[range-manifest]: <../glossary/range-manifest.md>
-[revision]: <../glossary/revision.md>
-[timeline]: <../glossary/timeline.md>
-[turso]: <../glossary/turso.md>
-[turso-state]: <../turso-state.md>
-[upstream]: <../glossary/upstream.md>
-[viewpoint]: <../glossary/viewpoint.md>
-[virtual-file-system]: <../glossary/virtual-file-system.md>
-[wal]: <../glossary/wal.md>
-[z-set]: <../glossary/z-set.md>
+[0003-commit-baseline]: <../../benchmarks/0003-commit-baseline.md>
+[0003-disk-shadow]: <../../benchmarks/0003-disk-shadow.md>
+[0003-s3-latency]: <../../benchmarks/0003-s3-latency.md>
+[0003-snapshot-readers]: <../../benchmarks/0003-snapshot-readers.md>
+[0003-wal-experiments]: <../../benchmarks/0003-wal-experiments.md>
+[0003-zset-experiments]: <../../benchmarks/0003-zset-experiments.md>
+[commit-marker]: <../../glossary/commit-marker.md>
+[conditional-write]: <../../glossary/conditional-write.md>
+[datashed]: <../../glossary/datashed.md>
+[datashed-timeline]: <../../datashed-timeline.md>
+[datashed-timeline-race]: <../0z001/datashed-timeline-race.md>
+[development]: <../../development.md>
+[differential-event]: <../../glossary/differential-event.md>
+[downstream]: <../../glossary/downstream.md>
+[durable-storage]: <../../glossary/durable-storage.md>
+[envbuf]: <../../glossary/envbuf.md>
+[epilogue]: <../../glossary/epilogue.md>
+[flexbuffers]: <../../glossary/flexbuffers.md>
+[flow]: <../../glossary/flow.md>
+[leader]: <../../glossary/leader.md>
+[lexidecimal]: <../../glossary/lexidecimal.md>
+[logical-frame]: <../../glossary/logical-frame.md>
+[milestone]: <../../glossary/milestone.md>
+[mvcc]: <../../glossary/mvcc.md>
+[object-keys]: <../../object-keys.md>
+[physical-frame]: <../../glossary/physical-frame.md>
+[range-manifest]: <../../glossary/range-manifest.md>
+[revision]: <../../glossary/revision.md>
+[timeline]: <../../glossary/timeline.md>
+[turso]: <../../glossary/turso.md>
+[turso-state]: <../../turso-state.md>
+[upstream]: <../../glossary/upstream.md>
+[viewpoint]: <../../glossary/viewpoint.md>
+[virtual-file-system]: <../../glossary/virtual-file-system.md>
+[wal]: <../../glossary/wal.md>
+[z-set]: <../../glossary/z-set.md>
 
 # Turso Reservoir VFS
 
@@ -76,7 +76,7 @@ Assign each new *Flow*[^][flow] a UUIDv4 *revision*[^][revision] in its first co
 transaction; retain it on later commits and recover it from captured frames.
 Include it in the *Flow object-key patterns*[^][object-keys].
 
-Materialize *Datashed Timeline race's*[^][0z001-datashed-timeline-race] blob locations in `marker_ranges`
+Materialize *Datashed Timeline race's*[^][datashed-timeline-race] blob locations in `marker_ranges`
 in the commit transaction. Its *upstream*[^][upstream] *Milestones*[^][milestone]
 and *downstream*[^][downstream] *Viewpoints*[^][viewpoint] use positive
 *Lexidecimal*[^][lexidecimal] text. Preserve locations for intermediate
@@ -131,7 +131,7 @@ request data per batch. A larger individual request forms its own batch.
 admission and the queue remain bounded, with room for two full batches
 (64 requests at the default size).
 
-Recover the complete history as in *Datashed Timeline race*[^][0z001-datashed-timeline-race], ingesting
+Recover the complete history as in *Datashed Timeline race*[^][datashed-timeline-race], ingesting
 *physical frames*[^][physical-frame] instead of rerunning commit SQL. Check
 versions, native framing, initial-image identity, predecessor linkage, and
 cursors; verify affected rows. Earlier image-delta entries remain readable, and

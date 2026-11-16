@@ -27,10 +27,11 @@ Call skippable format `110` envelopes *margins*[^][margin]; reserve padding for 
 
 # Tutorial dependencies
 
-Tutorial filenames use canonical unsigned *Lexidecimal*[^][lexidecimal] depth prefixes; frontmatter
-lists direct prerequisites, each at a strictly smaller depth. Tutorial slug
-suffixes must be unique across all depths. For tutorial graph
-edits or audits, use the *tutorial DAG skill*[^][SKILL] and its bundled Node.js linter.
+Group tutorials as `diy/<height>/<slug>.md`, using canonical unsigned
+*Lexidecimal*[^][lexidecimal] height folders and unprefixed, globally unique slugs.
+Frontmatter lists prerequisite paths relative to `diy/`, each at a strictly
+smaller height. For tutorial graph edits or audits, use the *tutorial DAG
+skill*[^][SKILL] and its bundled Python linter.
 
 # Documentation links
 
