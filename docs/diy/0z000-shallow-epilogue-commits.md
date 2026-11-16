@@ -28,9 +28,10 @@ sentinels*[^][empty-sentinel]; even an empty blob has framing.
 Bootstrap the *empty-reference object*[^][object-keys] with `If-None-Match: *`,
 verify it is empty, and learn
 its *ETag*[^][etag] from the bucket. Probe distinct *tombstone*[^][tombstone] and
-zero-message padding representations too. After each successful upload, require
-an *ETag*[^][etag] different from the empty reference; otherwise append proven
-padding to the *feed*[^][envbuf] and retry with `If-Match`.
+single padding *EnvBufs*[^][envbuf] with message lengths 1–8 too; fail startup
+if none differs. After each successful upload, require
+an *ETag*[^][etag] different from the empty reference; otherwise append one proven
+padding *EnvBuf*[^][envbuf] to the *feed*[^][envbuf] and retry with `If-Match`.
 
 1. Build a Rust server that recovers its next *viewpoint*[^][viewpoint] from the
    bucket's lowest non-sentinel *Epilogue*[^][epilogue] key, treating

@@ -19,7 +19,8 @@ competing metadata revisions.
 
 Require every successful sequence write to return an *ETag*[^][etag] distinct
 from the empty reference before acknowledging publication. A match fails the
-postcondition: append bucket-proven zero-message padding *EnvBufs*[^][envbuf]
-and retry with `If-Match` on that observed validator. Probe padding itself
-conditionally at startup; extend it with further empty padding until distinct,
-and fail startup if the provider cannot distinguish it. Opaque user blobs outside sequences may still be empty.
+postcondition: append one bucket-proven padding *EnvBuf*[^][envbuf]
+and retry with `If-Match` on that observed validator. At startup, conditionally
+probe single padding *EnvBufs*[^][envbuf] with message lengths 1 through 8,
+in order, using `0xee` message bytes (each envelope is 32 bytes); fail startup
+if none has a distinct validator. Opaque user blobs outside sequences may still be empty.

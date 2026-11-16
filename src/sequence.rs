@@ -86,16 +86,28 @@ pub async fn initialize(bucket: &Bucket) -> Result<String> {
     }
     let tombstone =
         chosen.context("no distinct tombstone below 16 bytes; refusing 16-byte tombstone")?;
-    let mut bytes = vec![];
     let mut chosen = None;
-    for _ in 0..ATTEMPTS {
-        crate::envbuf::append(&mut bytes, &[], crate::envbuf::PADDING)?;
-        if probe(bucket, &format!("sentinel/padding/{}", bytes.len()), &bytes).await? != empty {
+    for message_length in 1..=8 {
+        let mut bytes = vec![];
+        crate::envbuf::append(
+            &mut bytes,
+            &[0xee; 8][..message_length],
+            crate::envbuf::PADDING,
+        )?;
+        if probe(
+            bucket,
+            &format!("sentinel/padding/{message_length}"),
+            &bytes,
+        )
+        .await?
+            != empty
+        {
             chosen = Some(bytes);
             break;
         }
     }
-    let padding = chosen.context("cannot distinguish empty padding from sentinel")?;
+    let padding =
+        chosen.context("cannot distinguish padding with message lengths 1–8 from sentinel")?;
     references().lock().unwrap().insert(
         bucket.url(),
         References {

@@ -29,7 +29,7 @@ All implemented S3 key patterns, relative to the configured bucket:
 | --- | --- |
 | Empty-validator reference | `sentinel/empty` |
 | *Tombstone*[^][tombstone] probes | `sentinel/tombstone/${length}` |
-| Empty-padding probes | `sentinel/padding/${length}` |
+| Padding probes | `sentinel/padding/${message_length}` |
 | *Datashed*[^][datashed] *DifferentialEvent*[^][differential-event] | `timeline/${diffuse16(milestone)}` |
 | *Datashed*[^][datashed] backup *CommitMarker*[^][commit-marker] | `epilogue/${lex(~viewpoint)}` |
 | *Datashed*[^][datashed] *PromotionSign*[^][promotion-sign] | `epilogue/${lex(viewpoint)}` |
@@ -84,9 +84,9 @@ Sequence objects reserve zero bytes for *empty sentinels*[^][empty-sentinel].
 *DifferentialEvents*[^][differential-event] are *EnvBuf feeds*[^][envbuf];
 *CommitMarkers*[^][commit-marker], including database backups, wrap their blob in
 one raw message; *PromotionSigns*[^][promotion-sign] use a padding envelope with
-message length zero. Their framing keeps valid empty messages distinct from
+message length 1–8. Their framing keeps valid empty messages distinct from
 *sentinels*[^][empty-sentinel]. *UserHeap*[^][userheap] objects stay opaque, including valid empty blobs.
 The empty reference is always zero bytes. Probe objects are created only if
 absent and verified on reuse. *Tombstone*[^][tombstone] probe lengths are decimal
-2, 4, …, 14; sixteen-byte candidates are refused. Padding probes contain one or
-more zero-message *envelopes*[^][envbuf], growing in sixteen-byte steps.
+2, 4, …, 14; sixteen-byte candidates are refused. Padding probes each contain a single
+32-byte *EnvBuf*[^][envbuf], with `message_length` from 1 through 8 and `0xee` message bytes.

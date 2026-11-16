@@ -16,9 +16,9 @@
 The S3 complement of a *CommitMarker*[^][commit-marker], stored in the same
 *Epilogue*[^][epilogue] using its uncomplemented *Lexidecimal*[^][lexidecimal]
 *Viewpoint*[^][viewpoint]; see the *object-key patterns*[^][object-keys].
-Its object uses bucket-proven padding *EnvBufs*[^][envbuf] (`110`) with message
-length zero, rather than a zero-byte *sentinel*[^][empty-sentinel]. Startup checks
-that their *ETag*[^][etag] differs from the empty reference; publication verifies
+Its object is a bucket-proven padding *EnvBuf*[^][envbuf] (`110`) with message
+length 1–8, rather than a zero-byte *sentinel*[^][empty-sentinel]. Startup checks
+that its *ETag*[^][etag] differs from the empty reference; publication verifies
 that postcondition again. Its presence certifies that the entire graph has completed *promotion*[^][node-promotion],
 including an empty graph. Its `x-amz-meta-upstream` records the source
 *upstream*[^][upstream] *Milestone*[^][milestone] as canonical decimal.
