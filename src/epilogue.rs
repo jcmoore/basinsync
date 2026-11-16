@@ -55,10 +55,8 @@ pub async fn confirm_promotion_sign(bucket: &Bucket, key: &str, upstream: &BigUi
     }
     let mut headers = conditional_headers();
     headers.insert("x-amz-meta-upstream", upstream.to_string().parse()?);
-    let mut bytes = vec![];
-    crate::envbuf::append(&mut bytes, &[], crate::envbuf::PADDING)?;
-    crate::envbuf::seal(&mut bytes, &crate::sequence::reference(bucket)?)?;
-    let result = crate::sequence::put(bucket, key, &bytes, headers).await;
+    let bytes = crate::sequence::padding(bucket)?;
+    let result = crate::sequence::put_feed(bucket, key, &bytes, headers).await;
     ensure!(
         promotion_sign_matches(bucket, key, upstream).await?,
         "PromotionSign not confirmed: {result:?}"
@@ -70,10 +68,11 @@ async fn promotion_sign_matches(bucket: &Bucket, key: &str, upstream: &BigUint) 
         .head_object(key)
         .await?;
     match status {
-        200 if head.content_length == Some(0) => Ok(false),
+        200 if head.content_length.is_some_and(|length| length < 16) => Ok(false),
         200 => {
             ensure!(
-                head.content_length == Some(16),
+                head.content_length
+                    .is_some_and(|length| length >= 16 && length % 16 == 0),
                 "invalid PromotionSign envelope length"
             );
             ensure!(
@@ -119,10 +118,20 @@ pub async fn latest_key(bucket: &Bucket, prefix: &str) -> Result<Option<(String,
             return Ok(None);
         }
         let viewpoint = Viewpoint::from_key(&format!("{DATASHED_PREFIX}{suffix}"))?;
-        if object.size > 0 {
+        if object.size >= 16 {
             return Ok(Some((object.key.clone(), viewpoint)));
         }
-        // A metadata-only sentinel is an exclusive bound, never a recovery anchor.
+        if object.size > 0 {
+            let existing = crate::object_read::if_present(bucket)?
+                .get_object(&object.key)
+                .await?;
+            ensure!(
+                existing.status_code() == 200
+                    && existing.as_slice() == crate::sequence::tombstone(bucket)?,
+                "invalid Epilogue tombstone"
+            );
+        }
+        // Sentinels and immutable tombstones are not recovery anchors.
         after = Some(object.key.clone());
     }
 }
@@ -229,7 +238,7 @@ pub async fn latest_checkpoint(bucket: &Bucket) -> Result<Option<Checkpoint>> {
             .head_object(key)
             .await?;
         ensure!(status == 200, "backup HEAD returned HTTP {status}");
-        if head.content_length == Some(0) {
+        if head.content_length.is_some_and(|length| length < 16) {
             continue;
         }
         let headers = head
@@ -253,8 +262,8 @@ pub async fn replicate(
     let mut headers = conditional_headers();
     headers.insert("x-amz-meta-sha384", marker.sha384.parse()?);
     headers.extend(crate::details::context_headers(&marker.context)?);
-    let bytes = crate::envbuf::wrap(&marker.blob, &crate::sequence::reference(bucket)?)?;
-    let result = crate::sequence::put(bucket, &key, &bytes, headers).await;
+    let bytes = crate::envbuf::wrap(&marker.blob)?;
+    let result = crate::sequence::put_feed(bucket, &key, &bytes, headers).await;
     match result {
         Ok(response) if (200..300).contains(&response.status_code()) => return Ok(()),
         // Resolve conflicts and ambiguous replies by verifying the immutable object.

@@ -297,6 +297,12 @@ pub fn manifest_range(bytes: &[u8]) -> Result<Option<std::ops::Range<usize>>> {
     anyhow::bail!("missing range manifest envelope")
 }
 
+/// Retry padding follows the manifest and is excluded from predecessor bindings.
+pub fn entry_digest(bytes: &[u8]) -> Result<String> {
+    let end = manifest_range(bytes)?.map_or(bytes.len(), |range| range.end);
+    Ok(digest(&bytes[..end]))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlobRange {
     pub flow: String,

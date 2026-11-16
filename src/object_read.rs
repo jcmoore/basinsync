@@ -1,5 +1,5 @@
 //! Conditional object reads; only existence probes interpret absent objects.
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use axum::http::{HeaderValue, header};
 use s3::Bucket;
 
@@ -16,7 +16,18 @@ pub async fn exists(bucket: &Bucket, key: &str) -> Result<bool> {
     match status {
         // A provider that ignores preconditions can still answer correctly.
         200 => match head.content_length {
-            Some(length) if length >= 0 => Ok(length > 0),
+            Some(0) => Ok(false),
+            Some(length) if (1..16).contains(&length) => {
+                let expected = crate::sequence::tombstone(bucket)?;
+                let object = if_present(bucket)?.get_object(key).await?;
+                ensure!(
+                    object.status_code() == 200 && object.as_slice() == expected,
+                    "invalid sub-EnvBuf sequence object"
+                );
+                // An immutable tombstone occupies an older position: a lower bound.
+                Ok(true)
+            }
+            Some(length) if length >= 16 => Ok(true),
             _ => bail!("sequence HEAD has no valid content length"),
         },
         304 => Ok(false),

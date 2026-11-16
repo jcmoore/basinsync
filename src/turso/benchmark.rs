@@ -127,10 +127,11 @@ fn commits() -> Result<()> {
             observed("event_encode");
             if let Some(bucket) = &bucket {
                 let key = diffuse16::key(&num_bigint::BigUint::from(index + 2))?;
-                let response = runtime.block_on(bucket.put_object_with_headers(
+                let response = runtime.block_on(crate::sequence::put_entry(
+                    bucket,
                     &key,
                     &bytes,
-                    Some(crate::timeline::entry_headers(&bytes)?),
+                    crate::timeline::entry_headers(&bytes)?,
                 ))?;
                 ensure!(
                     (200..300).contains(&response.status_code()),

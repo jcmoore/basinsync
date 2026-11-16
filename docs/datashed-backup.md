@@ -2,7 +2,6 @@
 [conditional-write]: <glossary/conditional-write.md>
 [context]: <glossary/context.md>
 [datashed]: <glossary/datashed.md>
-[empty-sentinel]: <glossary/empty-sentinel.md>
 [envbuf]: <glossary/envbuf.md>
 [epilogue]: <glossary/epilogue.md>
 [epilogue-compaction]: <glossary/epilogue-compaction.md>
@@ -16,6 +15,7 @@
 [sha384]: <glossary/sha384.md>
 [timeline]: <glossary/timeline.md>
 [timeline-eviction]: <glossary/timeline-eviction.md>
+[tombstone]: <glossary/tombstone.md>
 [turso]: <glossary/turso.md>
 [viewpoint]: <glossary/viewpoint.md>
 
@@ -54,7 +54,8 @@ available prefix of stored *CommitMarker*[^][commit-marker]/*PromotionSign*[^][p
 pairs. *Markers*[^][commit-marker] must have reached their *Epilogues*[^][epilogue]
 from the *Datashed*[^][datashed] *Timeline*[^][timeline]; a recovery anchor alone
 is insufficient. Compact up to, but not through, the retained *Viewpoint*[^][viewpoint].
-Tombstone compacted *markers*[^][commit-marker] with *empty sentinels*[^][empty-sentinel],
+Replace compacted *markers*[^][commit-marker] with bucket-proven
+*tombstones*[^][tombstone],
 retaining their keys and metadata, and DELETE their
 *PromotionSigns*[^][promotion-sign]. A sign LISTer checks the corresponding
 *marker*[^][commit-marker] metadata, deleting and skipping stale signs on demand

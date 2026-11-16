@@ -752,7 +752,7 @@ fn command_reads_and_hook_agree_for_repeated_flow_batches() -> Result<()> {
             delta.physical.ingest(&before, &base, parent.as_deref())?,
             writer.image()?
         );
-        parent = Some(event::digest(&bytes));
+        parent = Some(event::entry_digest(&bytes)?);
     }
     Ok(())
 }
@@ -886,10 +886,6 @@ fn measure() -> Result<()> {
     } else {
         None
     };
-    let empty_etag = bucket
-        .as_ref()
-        .map(|bucket| runtime.block_on(crate::sequence::initialize(bucket)))
-        .transpose()?;
     let blob: Vec<_> = (0..4096).map(|n| (n % 251) as u8).collect();
     let mut parent = Some("seed".into());
     let mut samples = Vec::new();
@@ -934,26 +930,23 @@ fn measure() -> Result<()> {
         if variant == "cdc" {
             feed = Some(cdc_feed(&writer.state.native, &schema, &mut watermark)?);
         }
-        let mut encoded = if variant == "hook-cache-record" {
+        let encoded = if variant == "hook-cache-record" {
             encode(&commands, &delta, record_feed.as_ref())?
         } else {
             encode(&commands, &delta, feed.as_ref())?
         };
-        if let Some(etag) = &empty_etag {
-            crate::envbuf::seal(&mut encoded, etag)?;
-        }
-        let digest = event::digest(&encoded);
+        let digest = event::entry_digest(&encoded)?;
         let cpu = start.elapsed();
         let put = Instant::now();
         if let Some(bucket) = &bucket {
             runtime.block_on(async {
-                let response = bucket
-                    .put_object_with_headers(
-                        crate::diffuse16::key(&(&base + 1u8))?,
-                        &encoded,
-                        Some(crate::timeline::entry_headers(&encoded)?),
-                    )
-                    .await?;
+                let response = crate::sequence::put_entry(
+                    bucket,
+                    crate::diffuse16::key(&(&base + 1u8))?,
+                    &encoded,
+                    crate::timeline::entry_headers(&encoded)?,
+                )
+                .await?;
                 ensure!((200..300).contains(&response.status_code()), "PUT failed");
                 Ok::<_, anyhow::Error>(())
             })?;

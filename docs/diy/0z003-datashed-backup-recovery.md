@@ -51,7 +51,7 @@ through that durable *Milestone*[^][milestone] into its
 publish the pinned backup at the next *Datashed*[^][datashed]
 *Viewpoint*[^][viewpoint] using a single streamed *conditional PUT*[^][conditional-write]
 with the complete enveloped object's content length. The raw database remains
-one *message*[^][envbuf], bounded by its `u32` message-length field.
+one *message*[^][envbuf]; `u64` message-length support is pending work for the format.
 Keep one active backup and coalesce pending targets. Bound independent
 *Flow*[^][flow] copies to eight concurrent workers, preserving each
 *Flow*[^][flow] sequence and completing each *Milestone*[^][milestone] before

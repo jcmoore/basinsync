@@ -691,7 +691,6 @@ fn run_pipeline(
     warmup: usize,
     window: usize,
     initial_head: String,
-    empty_etag: Option<String>,
     shadow_delay: Duration,
     progress: Arc<AtomicU64>,
     mut publish: impl FnMut(u64, Vec<u8>) -> Result<()>,
@@ -822,11 +821,8 @@ fn run_pipeline(
                 .delta
                 .physical
                 .validate_binding(&cursor.into(), Some(&parent))?;
-            let mut bytes = encode(&draft.commands, &draft.delta, draft.feed.as_ref())?;
-            if let Some(etag) = &empty_etag {
-                crate::envbuf::seal(&mut bytes, etag)?;
-            }
-            let digest = event::digest(&bytes);
+            let bytes = encode(&draft.commands, &draft.delta, draft.feed.as_ref())?;
+            let digest = event::entry_digest(&bytes)?;
             let event_bytes = bytes.len();
             let encode_us = encoding.elapsed().as_secs_f64() * 1e6;
             let put = Instant::now();
@@ -1057,7 +1053,7 @@ fn verify_history(
             integrated.retain(|_, weight| *weight != 0);
         }
         datashed.apply_entry(n.into(), &event::encode_wal(commands, delta)?)?;
-        datashed.head = Some(event::digest(&bytes));
+        datashed.head = Some(event::entry_digest(&bytes)?);
     }
     let state = datashed.database.unwrap();
     ensure!(
@@ -1099,7 +1095,7 @@ fn pipeline_overlap_is_bounded_and_publication_gates_completion() -> Result<()> 
         let (entered, waiting) = std::sync::mpsc::channel();
         let (release, gate) = std::sync::mpsc::channel();
         let bytes = fs::read(&seed_event)?;
-        let head = event::digest(&bytes);
+        let head = event::entry_digest(&bytes)?;
         let (done, result) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             let mut stored = Vec::new();
@@ -1112,7 +1108,6 @@ fn pipeline_overlap_is_bounded_and_publication_gates_completion() -> Result<()> 
                 1,
                 4,
                 head,
-                None,
                 Duration::ZERO,
                 progress,
                 |milestone, bytes| {
@@ -1187,8 +1182,7 @@ fn publication_failure_discards_speculation_and_keeps_recoverable_prefix() -> Re
             16,
             1,
             4,
-            event::digest(&seed),
-            None,
+            event::entry_digest(&seed)?,
             Duration::ZERO,
             Arc::new(AtomicU64::new(0)),
             |milestone, bytes| {
@@ -1272,7 +1266,7 @@ fn measure_disk() -> Result<()> {
     let primary = dir.path("primary.turso");
     fs::copy(env::var("DISK_SEED")?, &primary)?;
     let initial_bytes = fs::metadata(&primary)?.len();
-    let mut seed = fs::read(env::var("DISK_SEED_EVENT")?)?;
+    let seed = fs::read(env::var("DISK_SEED_EVENT")?)?;
     let setup = Instant::now();
     let capture = make_capture(&kind, &dir, &env::var("DISK_SEED")?, &primary)?;
     let put_delay_ms: u64 = env::var("DISK_PUT_DELAY_MS")
@@ -1309,22 +1303,15 @@ fn measure_disk() -> Result<()> {
     } else {
         None
     };
-    let empty_etag = bucket
-        .as_ref()
-        .map(|bucket| runtime.block_on(crate::sequence::initialize(bucket)))
-        .transpose()?;
-    if let Some(etag) = &empty_etag {
-        crate::envbuf::seal(&mut seed, etag)?;
-    }
     if let Some(bucket) = &bucket {
         runtime.block_on(async {
-            let r = bucket
-                .put_object_with_headers(
-                    crate::diffuse16::key(&1u8.into())?,
-                    &seed,
-                    Some(crate::timeline::entry_headers(&seed)?),
-                )
-                .await?;
+            let r = crate::sequence::put_entry(
+                bucket,
+                crate::diffuse16::key(&1u8.into())?,
+                &seed,
+                crate::timeline::entry_headers(&seed)?,
+            )
+            .await?;
             ensure!((200..300).contains(&r.status_code()), "seed PUT");
             Ok::<_, anyhow::Error>(())
         })?;
@@ -1337,8 +1324,7 @@ fn measure_disk() -> Result<()> {
         groups,
         warmup,
         window,
-        event::digest(&seed),
-        empty_etag,
+        event::entry_digest(&seed)?,
         Duration::ZERO,
         Arc::new(AtomicU64::new(0)),
         |milestone, bytes| {
@@ -1347,13 +1333,13 @@ fn measure_disk() -> Result<()> {
             }
             if let Some(bucket) = &bucket {
                 runtime.block_on(async {
-                    let r = bucket
-                        .put_object_with_headers(
-                            crate::diffuse16::key(&milestone.into())?,
-                            &bytes,
-                            Some(crate::timeline::entry_headers(&bytes)?),
-                        )
-                        .await?;
+                    let r = crate::sequence::put_entry(
+                        bucket,
+                        crate::diffuse16::key(&milestone.into())?,
+                        &bytes,
+                        crate::timeline::entry_headers(&bytes)?,
+                    )
+                    .await?;
                     ensure!((200..300).contains(&r.status_code()), "event PUT");
                     Ok::<_, anyhow::Error>(())
                 })?;

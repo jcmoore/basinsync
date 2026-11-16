@@ -72,6 +72,9 @@ Append a final *range manifest*[^][range-manifest] indexing preceding
 object to the complete manifest *envelope's*[^][envbuf] inclusive decimal byte range,
 excluding trailing padding, so clients can fetch it directly.
 Later appended commands must preserve earlier blob offsets.
+A *Timeline*[^][timeline] predecessor's *SHA-384*[^][sha384] covers the feed through
+its *range manifest*[^][range-manifest], excluding trailing padding. A retry can
+therefore append padding without changing already-prepared successor bindings.
 
 Track each *Flow*[^][flow] and *downstream*[^][downstream]
 *Viewpoint's*[^][viewpoint] *upstream*[^][upstream] *Milestone*[^][milestone],

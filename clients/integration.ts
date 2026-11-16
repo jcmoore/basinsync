@@ -10,7 +10,7 @@ import { commit, form, epilogueStatus as fullStatus, latestBlob, sha384, sha384B
 import { parse, stringify } from "./json0";
 import { key, fromKey } from "./diffuse16";
 import { key as epilogueKey, encode as lex, decode as unlex } from "./lexidecimal";
-import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, type WalDelta, type Marker } from "./events";
+import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, entryDigest, type WalDelta, type Marker } from "./events";
 import { ingestWal } from "./wal";
 import { all as envelopes, before as previousEnvelope, message as envelopeMessage, wrap as wrapEnvelope } from "./envbuf";
 import { stress } from "./stress";
@@ -201,7 +201,7 @@ async function eventually<T>(read:()=>Promise<T>,done:(value:T)=>boolean):Promis
 }
 async function datashedBackup(bucket:string){
   const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/"}));
-  const key=list.Contents?.find(o=>o.Size!>0&&o.Key!.startsWith("epilogue/0y"))?.Key;if(!key)return null;
+  const key=list.Contents?.find(o=>o.Size!>=16&&o.Key!.startsWith("epilogue/0y"))?.Key;if(!key)return null;
   const response=await s3.send(new GetObjectCommand({Bucket:bucket,Key:key}));
   const object=await response.Body!.transformToByteArray();
   return {key,milestone:BigInt(response.Metadata!.milestone),metadata:response.Metadata!,object,blob:envelopeMessage(object)};
@@ -255,6 +255,93 @@ try {
     const invalid=await bucket();await s3.send(new PutObjectCommand({Bucket:invalid,Key:"sentinel/empty",Body:bytes("not empty")}));await badStartup(invalid);
     assert.deepEqual(await (await s3.send(new GetObjectCommand({Bucket:invalid,Key:"sentinel/empty"}))).Body!.transformToByteArray(),bytes("not empty"));
   }
+  const a = bytes("359");assert(sha384(a).startsWith("00"));
+  // Probe collisions grow tombstones only below sixteen bytes and prove empty padding too.
+  for(const mode of ["selected","all-tombstones","all-padding"]){
+    const b=await bucket(),writes:string[]=[];
+    const proxy=relay(async(request,response)=>{
+      const path=new URL(request.url).pathname;
+      const tomb=path.match(/\/sentinel\/tombstone\/(\d+)$/),pad=path.match(/\/sentinel\/padding\/(\d+)$/);
+      const collide=!!tomb&&(mode==="all-tombstones"||mode==="selected"&&Number(tomb[1])<6)||!!pad&&(mode==="all-padding"||mode==="selected"&&Number(pad[1])===16);
+      if(response.ok&&collide){const headers=new Headers(response.headers);headers.set("etag",emptyETag);return new Response(await response.arrayBuffer(),{status:response.status,headers});}
+      return response;
+    },async request=>{const path=new URL(request.url).pathname;if(request.method==="PUT"&&path.includes("/sentinel/")){assert.equal(request.headers.get("if-none-match"),"*");writes.push(path);}});
+    if(mode!=="selected"){
+      const process=serverProcess(b,proxy.url,"127.0.0.1:0");assert.equal(await timeout(process.exited),1);
+      const log=readFileSync(processLogs.get(process)!,"utf8");assert(log.includes(mode==="all-tombstones"?"refusing 16-byte tombstone":"cannot distinguish empty padding"));
+      assert(!writes.some(p=>p.endsWith("/tombstone/16")),"sixteen-byte tombstones must never be written");continue;
+    }
+    let app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_BACKUP_INTERVAL_MS:"10"});
+    assert.deepEqual(writes.filter(p=>p.includes("/tombstone/")).map(p=>p.split("/").at(-1)),["2","4","6"]);
+    assert.deepEqual(writes.filter(p=>p.includes("/padding/")).map(p=>p.split("/").at(-1)),["16","32"]);
+    await status(await commit(app.url,"probed",a,0n),201);
+    const sign=await signKey(b,"probed",0n);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),head=>head.ContentLength===32);
+    const signFrames=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key:sign}))).Body!.transformToByteArray());assert.equal(signFrames.length,2);assert(signFrames.every(f=>f.format===6&&f.content.length===0));
+    await eventually(()=>datashedBackup(b),Boolean);await stop(app.process);
+    const cp=await datashedBackup(b);assert(cp);const vp=~unlex(cp.key.slice(9));
+    await s3.send(new PutObjectCommand({Bucket:b,Key:epilogueKey(vp+1n),Body:new Uint8Array([0xde,0xad,0xde,0xad,0xde,0xad])}));
+    app=await server(b,proxy.url);assert.equal((await fullStatus(app.url,"probed")).latest?.viewpoint,0n);await stop(app.process);
+  }
+  {
+    const b=await bucket();let armed=false;
+    const proxy=relay((_,response)=>response,async request=>{
+      if(armed&&request.method==="PUT"&&new URL(request.url).pathname.endsWith(`/${key(1n)}`)){armed=false;await s3.send(new PutObjectCommand({Bucket:b,Key:key(1n),Body:new Uint8Array([0xde,0xad])}));}
+    });
+    const app=await server(b,proxy.url);armed=true;await status(await commit(app.url,"tombstone",a,0n),503);assert.equal(await timeout(app.process.exited),1);
+    assert.deepEqual(await get(b,1n),new Uint8Array([0xde,0xad]),"a competing tombstone can never be replaced");await badStartup(b);
+  }
+  // This provider adapter gives one successful upload the empty ETag, then honors its CAS retry.
+  function collisionProxy(b:string,select:(request:Request)=>boolean,hold=false,missing=false){
+    const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+    const originals=new Map<string,{body:Uint8Array;etag:string}>(),bodies=new Map<string,Uint8Array>();let retries=0;
+    const proxy=relay(async(request,response)=>{
+      if(request.method==="PUT"&&select(request)&&response.ok){
+        const Key=decodeURIComponent(new URL(request.url).pathname.slice(b.length+2));
+        if(!originals.has(Key)){
+          originals.set(Key,{body:bodies.get(Key)!,etag:response.headers.get("etag")!});entered.resolve();if(hold)await release.promise;
+          const headers=new Headers(response.headers);if(missing)headers.delete("etag");else headers.set("etag",emptyETag);
+          return new Response(await response.arrayBuffer(),{status:response.status,headers});
+        }
+      }
+      return response;
+    },async request=>{
+      if(request.method!=="PUT"||!select(request))return;
+      const Key=decodeURIComponent(new URL(request.url).pathname.slice(b.length+2)),body=new Uint8Array(await request.clone().arrayBuffer());bodies.set(Key,body);
+      const original=originals.get(Key);
+      if(original&&request.headers.get("if-match")===emptyETag){
+        retries++;assert.equal(request.headers.get("if-none-match"),null);assert.deepEqual(body.subarray(0,original.body.length),original.body);
+        assert(body.length>original.body.length);assert(envelopes(body).filter(e=>e.start>=original.body.length).every(e=>e.format===6&&e.content.length===0));
+        const Metadata=Object.fromEntries([...request.headers].filter(([name])=>name.startsWith("x-amz-meta-")).map(([name,value])=>[name.slice(11),value]));
+        const put=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:body,IfMatch:original.etag,Metadata}));return new Response(null,{status:200,headers:{etag:put.ETag!}});
+      }
+    });
+    return {...proxy,entered,release,originals,retries:()=>retries};
+  }
+  {
+    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.endsWith(`/${key(1n)}`),true);
+    const app=await server(b,proxy.url,{BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});let done=0;
+    const first=commit(app.url,"collision",a,0n).then(r=>{done++;return r});await timeout(proxy.entered.promise);
+    const next=commit(app.url,"collision",bytes("second"),1n).then(r=>{done++;return r});await batchLogged(app.log,2);assert.equal(done,0);
+    proxy.release.resolve();await status(await first,201);await status(await next,201);assert.equal(proxy.retries(),1);
+    const payload=await get(b,1n),original=proxy.originals.get(key(1n))!.body;assert.equal(entryDigest(payload),entryDigest(original));assert.notEqual(sha384(payload),sha384(original));
+    assert.equal((deltasAt(await get(b,2n)).turso["default.turso"] as WalDelta).physical.parent,entryDigest(payload));await assertManifestRange(b,1n,payload);await stop(app.process);
+    const replayed=await server(b);assert.equal((await fullStatus(replayed.url,"collision")).latest?.viewpoint,1n);await stop(replayed.process);
+    const backed=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await eventually(()=>datashedBackup(b),cp=>cp?.milestone===2n);await stop(backed.process);
+    const restored=await server(b);assert.deepEqual(await latestBlob((await fullStatus(restored.url,"collision")).latest!),bytes("second"));await stop(restored.process);
+  }
+  for(const kind of ["marker","backup","sign"]){
+    const b=await bucket(),proxy=collisionProxy(b,r=>{const path=new URL(r.url).pathname;return kind==="marker"?path.includes("/flows/"):kind==="backup"?isDatashedPut(r):path.includes("/epilogue/0z");});
+    const app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await status(await commit(app.url,"collision",a,0n),201);
+    await eventually(()=>datashedBackup(b),Boolean);await eventually(async()=>proxy.retries(),n=>n>0);await stop(app.process);
+    const cp=await datashedBackup(b);assert(cp);assert.equal((await inspectImage(cp.blob)).flows.collision,"0");
+    const restored=await server(b);assert.deepEqual(await latestBlob((await fullStatus(restored.url,"collision")).latest!),a);await stop(restored.process);
+  }
+  {
+    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes("/timeline/"),false,true);
+    const app=await server(b,proxy.url);await status(await commit(app.url,"missing-validator",a,0n),503);assert.equal(await timeout(app.process.exited),1);
+    const restored=await server(b);assert.equal((await fullStatus(restored.url,"missing-validator")).latest?.viewpoint,0n);await stop(restored.process);
+  }
+  console.log("put of success: bounded tombstone/padding probes, immutable tombstones, upload postconditions, padding retries across all sequence writers, and stable pipelined Timeline digest/recovery");
   // Sequence sentinels are excluded from search and replaced only with their observed ETag.
   {
     const b=await bucket(),replaced=new Set<string>();
@@ -274,6 +361,7 @@ try {
     const markerObject=await s3.send(new GetObjectCommand({Bucket:b,Key:markerKey}));
     const markerBytes=await markerObject.Body!.transformToByteArray();assert.equal(envelopeMessage(markerBytes).length,0);assert(markerBytes.length>0);assert.notEqual(markerObject.ETag,emptyETag);
     for(const signKey of [sign,`epilogue/${lex(0n)}`]){
+      await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:signKey})),head=>head.ContentLength!>=16);
       const signObject=await s3.send(new GetObjectCommand({Bucket:b,Key:signKey}));const frames=envelopes(await signObject.Body!.transformToByteArray());assert.equal(frames.length,1);assert.equal(frames[0].format,6);assert.equal(frames[0].content.length,0);assert.notEqual(signObject.ETag,emptyETag);
     }
     await stop(app.process);
@@ -308,8 +396,7 @@ try {
   let writer = await server(b,traced.url);
   const observer = await server(b,traced.url);
   const flowA = "0x-first", flowB = "__proto__";
-  const a = bytes("359");
-  assert(sha384(a).startsWith("00"));
+
   {
     const name=await bucket(),app=await server(name,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     const node:UserHeapNode={auth:[0,0,bytes("flow-id-case-test")],length:1,edges:[]};
@@ -442,7 +529,7 @@ try {
     else assert.equal(delta.physical.base_sha384,null);
     image=ingestWal(image,delta.physical.segments);
     for(const {flow,marker} of entries){const vp=BigInt(marker.viewpoint);assert.equal(vp,(replayed.get(flow)??-1n)+1n);replayed.set(flow,vp);seen++;}
-    parent=sha384(payload);
+    parent=entryDigest(payload);
   }
   assert.equal(seen,total);
   const database=`${artifacts}/typescript-recovered.turso`;writeFileSync(database,image);
@@ -755,7 +842,7 @@ try {
       if(m===1n)image=new Uint8Array(delta.logical.base!);
       image=ingestWal(image,delta.physical.segments);
       const saved=submitted.find(s=>s.milestone===m);
-      if(saved){assert.deepEqual(saved.blob,image,"snapshot equals independent physical replay at its own prefix");assert.equal(saved.metadata.sha384,sha384(image));assert.equal(saved.metadata["event-sha384"],sha384(payload));}
+      if(saved){assert.deepEqual(saved.blob,image,"snapshot equals independent physical replay at its own prefix");assert.equal(saved.metadata.sha384,sha384(image));assert.equal(saved.metadata["event-sha384"],entryDigest(payload));}
     }
     const inspected=await inspectImage(checkpoint.blob);
     assert.equal(inspected.milestone,"14");assert.equal(inspected.flows[flow],"1");

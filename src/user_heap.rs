@@ -597,7 +597,7 @@ mod tests {
                 .unwrap()
                 .verify_user_heap(Some(&before), &command)?;
             assert_eq!(recovered.database.as_ref().unwrap().image, physical);
-            parent = Some(event::digest(&bytes));
+            parent = Some(event::entry_digest(&bytes)?);
             image = physical;
         }
         Ok(())

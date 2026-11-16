@@ -1,14 +1,20 @@
 [empty-sentinel]: <empty-sentinel.md>
+[envbuf]: <envbuf.md>
 [http-preconditions]: <https://www.rfc-editor.org/rfc/rfc9110.html#section-13.2.1>
 [tigris-pricing]: <https://www.tigrisdata.com/pricing/>
+[tombstone]: <tombstone.md>
 
 # Conditional read
 
 A GET or HEAD guarded by HTTP preconditions. Use `If-Match: *` for S3 reads.
 Sequence probes also send `If-None-Match: <bucket empty-reference ETag>`:
-304 marks an *empty sentinel*[^][empty-sentinel]; 200 with positive content length
-marks a published entry; 404 or 412 means absent. Check length when an endpoint
-ignores conditions. Treat sentinels as exclusive bounds. Other responses are
+304 marks an *empty sentinel*[^][empty-sentinel]; 200 requires checking length:
+zero is still a sentinel, positive lengths below the sixteen-byte *EnvBuf*[^][envbuf]
+floor may be *tombstones*[^][tombstone], and data entries require framing.
+Validate short objects against the bucket-proven representation. 404 or 412 means
+absent. *Sentinels*[^][empty-sentinel] bound the unpublished tail;
+*tombstones*[^][tombstone] occupy older positions
+without becoming replayable data. Other responses are
 errors. Reads needing bytes or metadata omit `If-None-Match`.
 
 *Tigris pricing*[^][tigris-pricing] exempts 304 and 412 responses. Missing objects

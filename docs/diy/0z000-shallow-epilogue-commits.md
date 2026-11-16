@@ -16,6 +16,7 @@ prerequisites: []
 [object-keys]: <../object-keys.md>
 [range-get]: <../glossary/range-get.md>
 [sha384]: <../glossary/sha384.md>
+[tombstone]: <../glossary/tombstone.md>
 [viewpoint]: <../glossary/viewpoint.md>
 
 # Shallow epilogue commits
@@ -26,8 +27,10 @@ sentinels*[^][empty-sentinel]; even an empty blob has framing.
 
 Bootstrap the *empty-reference object*[^][object-keys] with `If-None-Match: *`,
 verify it is empty, and learn
-its *ETag*[^][etag] from the bucket. Append padding to server-controlled
-*feeds*[^][envbuf] if their predicted validator would match this reference.
+its *ETag*[^][etag] from the bucket. Probe distinct *tombstone*[^][tombstone] and
+zero-message padding representations too. After each successful upload, require
+an *ETag*[^][etag] different from the empty reference; otherwise append proven
+padding to the *feed*[^][envbuf] and retry with `If-Match`.
 
 1. Build a Rust server that recovers its next *viewpoint*[^][viewpoint] from the
    bucket's lowest non-sentinel *Epilogue*[^][epilogue] key, treating

@@ -19,6 +19,7 @@
 [range-manifest]: <glossary/range-manifest.md>
 [sha384]: <glossary/sha384.md>
 [timeline]: <glossary/timeline.md>
+[tombstone]: <glossary/tombstone.md>
 [turso-state]: <turso-state.md>
 [viewpoint]: <glossary/viewpoint.md>
 
@@ -32,8 +33,9 @@ recorded *Milestone*[^][milestone] seeds exponential search for the tail.
 Without a *CommitMarker*[^][commit-marker], list a seed in the
 *Timeline*[^][timeline] keyspace and replay from the beginning.
 *Diffuse16*[^][diffuse16] key order does not reveal the latest.
-Treat *empty sentinels*[^][empty-sentinel] as exclusive search bounds, never seeds
-or replayable entries. An empty *Timeline*[^][timeline] expects *Milestone*[^][milestone] one.
+Treat trailing *empty sentinels*[^][empty-sentinel] as exclusive upper search
+bounds. Leading *tombstones*[^][tombstone] occupy retired positions, not replayable
+entries; recovery needs a snapshot covering them. An empty *Timeline*[^][timeline] expects *Milestone*[^][milestone] one.
 Use *conditional reads*[^][conditional-read] for GETs and HEADs, including search probes.
 
 Commitflow tuples begin with `Symbol.species`, using the
@@ -53,6 +55,9 @@ Regardless of in-flight limits, durable publication must follow
 *Milestone*[^][milestone] order to preserve *causal consistency*[^][causal-consistency].
 Complete one *conditional PUT*[^][conditional-write] before starting the next;
 acknowledge a batch only after it and all predecessors are durable.
+Predecessor *digests*[^][sha384] cover the feed through its *range manifest*[^][range-manifest],
+excluding trailing retry padding; commands, internal padding, and the manifest
+remain covered.
 
 `PUT /api/v0/epilogue` adds a `flow` string to the
 *commit details*[^][epilogue-protocol] and validates against that

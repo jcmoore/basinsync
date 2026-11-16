@@ -1009,13 +1009,13 @@ fn measure() -> Result<()> {
     let records = runtime.block_on(publish_ordered(rx, |milestone, bytes| {
         let bucket = &bucket;
         async move {
-            let response = bucket
-                .put_object_with_headers(
-                    crate::diffuse16::key(&milestone.into())?,
-                    &bytes,
-                    Some(crate::timeline::entry_headers(&bytes)?),
-                )
-                .await?;
+            let response = crate::sequence::put_entry(
+                bucket,
+                crate::diffuse16::key(&milestone.into())?,
+                &bytes,
+                crate::timeline::entry_headers(&bytes)?,
+            )
+            .await?;
             ensure!(
                 (200..300).contains(&response.status_code()),
                 "conditional PUT failed: {}",

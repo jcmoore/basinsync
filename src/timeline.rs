@@ -11,16 +11,9 @@ pub struct Datashed {
     pub stopped: bool,
     pub writer: Option<crate::turso::wal::Writer>,
     pub head: Option<String>,
-    pub empty_etag: Option<String>,
 }
 
 impl Datashed {
-    fn seal_entry(&self, bytes: &mut Vec<u8>) -> Result<()> {
-        if let Some(etag) = &self.empty_etag {
-            crate::envbuf::seal(bytes, etag)?;
-        }
-        Ok(())
-    }
     pub fn flow_revision(&self, flow: &str) -> Result<Option<uuid::Uuid>> {
         if let Some(writer) = &self.writer {
             ensure!(
@@ -256,10 +249,9 @@ impl Stager {
         else {
             return Ok(None);
         };
-        let mut bytes = event::encode_wal(vec![], delta)?;
-        self.state.seal_entry(&mut bytes)?;
+        let bytes = event::encode_wal(vec![], delta)?;
         let prepared = Prepared {
-            digest: event::digest(&bytes),
+            digest: event::entry_digest(&bytes)?,
             bytes,
             milestone: &self.state.milestone + 1u8,
             parent: self.state.head.clone(),
@@ -280,10 +272,9 @@ impl Stager {
             request,
         )?;
         let prepared = if let Some((_command, delta)) = captured {
-            let mut bytes = event::encode_wal(vec![], delta)?;
-            self.state.seal_entry(&mut bytes)?;
+            let bytes = event::encode_wal(vec![], delta)?;
             let prepared = Prepared {
-                digest: event::digest(&bytes),
+                digest: event::entry_digest(&bytes)?,
                 bytes,
                 milestone: &self.state.milestone + 1u8,
                 parent: self.state.head.clone(),
@@ -310,10 +301,9 @@ impl Stager {
         let Some((_command, delta)) = captured else {
             return Ok(None);
         };
-        let mut bytes = event::encode_wal(vec![], delta)?;
-        self.state.seal_entry(&mut bytes)?;
+        let bytes = event::encode_wal(vec![], delta)?;
         let prepared = Prepared {
-            digest: event::digest(&bytes),
+            digest: event::entry_digest(&bytes)?,
             bytes,
             milestone: &self.state.milestone + 1u8,
             parent: self.state.head.clone(),
@@ -366,7 +356,7 @@ impl Prepared {
             self.milestone == &prefix.milestone + 1u8 && self.parent == prefix.digest,
             "publication prefix mismatch"
         );
-        let response = crate::sequence::put(
+        let response = crate::sequence::put_feed(
             bucket,
             &diffuse16::key(&self.milestone)?,
             &self.bytes,
@@ -457,9 +447,8 @@ impl Datashed {
             &commands,
             chunks.ranges(),
         )?;
-        let mut bytes = chunks.finish(delta)?;
-        self.seal_entry(&mut bytes)?;
-        let digest = event::digest(&bytes);
+        let bytes = chunks.finish(delta)?;
+        let digest = event::entry_digest(&bytes)?;
         Ok(Prepared {
             bytes,
             milestone,
@@ -539,7 +528,7 @@ impl Datashed {
                 self.milestone = milestone;
             }
         }
-        self.head = Some(event::digest(bytes));
+        self.head = Some(event::entry_digest(bytes)?);
         Ok(())
     }
 }
@@ -609,6 +598,10 @@ async fn replay(bucket: &Bucket, state: &mut Datashed, tail: BigUint) -> Result<
             "Timeline GET at {milestone} returned HTTP {}",
             response.status_code()
         );
+        ensure!(
+            response.as_slice().len() >= 16,
+            "Timeline tombstone at {milestone} requires a covering snapshot"
+        );
         state
             .apply_entry(milestone.clone(), response.as_slice())
             .with_context(|| format!("invalid DifferentialEvent at Milestone {milestone}"))?;
@@ -655,7 +648,6 @@ pub async fn refresh_if_advanced(bucket: &Bucket, state: &mut Datashed) -> Resul
 }
 
 pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
-    let empty_etag = crate::sequence::reference(bucket)?;
     if let Some(checkpoint) = crate::epilogue::latest_checkpoint(bucket).await? {
         if checkpoint.milestone > state.milestone {
             *state = checkpoint.load(bucket).await?;
@@ -666,7 +658,6 @@ pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
             );
         }
     }
-    state.empty_etag = Some(empty_etag);
 
     // A Datashed Epilogue supplies the seed directly; no Timeline listing is needed.
     // Genesis has no anchor yet, so discover a seed with one minimum-sized LIST.
@@ -797,7 +788,7 @@ mod tests {
         let second = stager.prepare(vec![event::FlowCommand {
             markers: BTreeMap::from([("flow".into(), marker("1"))]),
         }])?;
-        assert_eq!(second.parent, Some(event::digest(first.bytes())));
+        assert_eq!(second.parent, Some(event::entry_digest(first.bytes())?));
         assert_eq!(second.milestone(), &BigUint::from(2u8));
         let mut recovered = Datashed::default();
         recovered.apply_entry(1u8.into(), first.bytes())?;

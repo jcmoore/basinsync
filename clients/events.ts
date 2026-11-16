@@ -1,3 +1,4 @@
+import {createHash} from "node:crypto";
 import assert from "node:assert/strict";
 import { encode, toReference, type Reference } from "./flexbuffer";
 import { all, readable, wrap, concat, PADDING } from "./envbuf";
@@ -77,3 +78,12 @@ export function markerAt(bytes:Uint8Array,flow:string,viewpoint?:string):Marker 
 }
 export function deltasAt(bytes:Uint8Array):Deltas {const commands=tuples(bytes),last=commands.at(-1)!.tuple;return (last.get(2).stringValue()===ingest?last.get(3):last.get(3).get("deltas")).toObject() as Deltas;}
 export function legacyDeltasAt(bytes:Uint8Array):Deltas<TursoDelta>{const deltas=deltasAt(bytes);for(const delta of Object.values(deltas.turso))assert("pages" in delta.physical);return deltas as Deltas<TursoDelta>;}
+
+export function entryDigest(bytes:Uint8Array):string {
+  let end=bytes.length;
+  if(bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56){
+    const frame=readable(bytes).at(-1)!;
+    assert.equal(toReference(new Uint8Array(frame.content).buffer).get(2).stringValue(),manifestPath);end=frame.end;
+  }
+  return createHash("sha384").update(bytes.subarray(0,end)).digest("hex");
+}

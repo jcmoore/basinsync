@@ -77,7 +77,7 @@ pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
             copy??;
         }
         milestone = next;
-        parent = Some(event::digest(bytes));
+        parent = Some(event::entry_digest(bytes)?);
     }
     ensure!(
         parent.as_deref() == snapshot.prefix.digest(),
@@ -101,10 +101,8 @@ pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
         sha384,
         version: turso::VERSION.into(),
     };
-    let empty_etag = crate::sequence::reference(bucket)?;
     let wrapped =
-        tokio::task::spawn_blocking(move || crate::envbuf::wrap_file(file.path(), &empty_etag))
-            .await??;
+        tokio::task::spawn_blocking(move || crate::envbuf::wrap_file(file.path())).await??;
     crate::sequence::put_file(
         bucket,
         &checkpoint.viewpoint.key()?,

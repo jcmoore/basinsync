@@ -53,6 +53,30 @@ fn unpublished_state_is_not_readable_and_bootstrap_is_verified() -> Result<()> {
 }
 
 #[test]
+fn retry_padding_preserves_prepared_successors_and_locations() -> Result<()> {
+    let mut stager = Datashed::default().into_stager();
+    let first = stager.prepare(vec![command("f", "0")])?;
+    let second = stager.prepare(vec![command("f", "1")])?;
+    let digest = event::entry_digest(first.bytes())?;
+    let locations = event::blob_ranges(first.bytes())?;
+    let manifest = event::manifest_range(first.bytes())?;
+    let mut retried = first.bytes().to_vec();
+    for _ in 0..3 {
+        basinsync::envbuf::append(&mut retried, &[], basinsync::envbuf::PADDING)?;
+        assert_eq!(event::entry_digest(&retried)?, digest);
+        assert_ne!(event::digest(&retried), digest);
+        assert_eq!(event::blob_ranges(&retried)?, locations);
+        assert_eq!(event::manifest_range(&retried)?, manifest);
+    }
+    let mut recovered = Datashed::default();
+    recovered.apply_entry(1u8.into(), &retried)?;
+    recovered.apply_entry(2u8.into(), second.bytes())?;
+    assert_eq!(recovered.prefix(), stager.prefix());
+    assert_eq!(recovered.latest("f")?.unwrap().decimal(), "1");
+    Ok(())
+}
+
+#[test]
 fn legacy_history_can_be_extended_with_wal_batches() -> Result<()> {
     let mut reader = Datashed::default();
     let (_, legacy) = reader.prepare(command("f", "0").markers)?;
@@ -68,7 +92,7 @@ fn legacy_history_can_be_extended_with_wal_batches() -> Result<()> {
     recovered.apply_entry(2u8.into(), prepared.bytes())?;
     assert_eq!(recovered.latest("f")?.unwrap().decimal(), "2");
     assert_eq!(recovered.latest("g")?.unwrap().decimal(), "0");
-    assert_eq!(recovered.head, Some(event::digest(prepared.bytes())));
+    assert_eq!(recovered.head, Some(event::entry_digest(prepared.bytes())?));
     Ok(())
 }
 
@@ -81,7 +105,7 @@ fn corrupt_frames_lineage_order_and_versions_fail_atomically() -> Result<()> {
     let mut reader = Datashed::default();
     reader.apply_entry(1u8.into(), &first)?;
     let commands = vec![command("f", "1"), command("f", "2")];
-    let delta = writer.prepare(&1u8.into(), Some(&event::digest(&first)), &commands)?;
+    let delta = writer.prepare(&1u8.into(), Some(&event::entry_digest(&first)?), &commands)?;
     for fault in 0..7 {
         let mut bad = delta.clone();
         let mut inputs = commands.clone();
@@ -104,7 +128,7 @@ fn corrupt_frames_lineage_order_and_versions_fail_atomically() -> Result<()> {
         );
         assert_eq!(reader.milestone, 1u8.into());
         assert_eq!(reader.latest("f")?.unwrap().decimal(), "0");
-        assert_eq!(reader.head, Some(event::digest(&first)));
+        assert_eq!(reader.head, Some(event::entry_digest(&first)?));
     }
     reader.apply_entry(2u8.into(), &event::encode_wal(commands, delta)?)?;
     assert_eq!(reader.latest("f")?.unwrap().decimal(), "2");

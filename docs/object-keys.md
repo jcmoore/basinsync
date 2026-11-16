@@ -16,6 +16,7 @@
 [retainer]: <glossary/retainer.md>
 [revision]: <glossary/revision.md>
 [sha384]: <glossary/sha384.md>
+[tombstone]: <glossary/tombstone.md>
 [userheap]: <glossary/userheap.md>
 [viewpoint]: <glossary/viewpoint.md>
 [young-generation]: <glossary/young-generation.md>
@@ -27,6 +28,8 @@ All implemented S3 key patterns, relative to the configured bucket:
 | Object | Key |
 | --- | --- |
 | Empty-validator reference | `sentinel/empty` |
+| *Tombstone*[^][tombstone] probes | `sentinel/tombstone/${length}` |
+| Empty-padding probes | `sentinel/padding/${length}` |
 | *Datashed*[^][datashed] *DifferentialEvent*[^][differential-event] | `timeline/${diffuse16(milestone)}` |
 | *Datashed*[^][datashed] backup *CommitMarker*[^][commit-marker] | `epilogue/${lex(~viewpoint)}` |
 | *Datashed*[^][datashed] *PromotionSign*[^][promotion-sign] | `epilogue/${lex(viewpoint)}` |
@@ -82,5 +85,8 @@ Sequence objects reserve zero bytes for *empty sentinels*[^][empty-sentinel].
 *CommitMarkers*[^][commit-marker], including database backups, wrap their blob in
 one raw message; *PromotionSigns*[^][promotion-sign] use a padding envelope with
 message length zero. Their framing keeps valid empty messages distinct from
-sentinels. *UserHeap*[^][userheap] objects stay opaque, including valid empty blobs.
-The reference object is always zero bytes and is created only if absent.
+*sentinels*[^][empty-sentinel]. *UserHeap*[^][userheap] objects stay opaque, including valid empty blobs.
+The empty reference is always zero bytes. Probe objects are created only if
+absent and verified on reuse. *Tombstone*[^][tombstone] probe lengths are decimal
+2, 4, …, 14; sixteen-byte candidates are refused. Padding probes contain one or
+more zero-message *envelopes*[^][envbuf], growing in sixteen-byte steps.

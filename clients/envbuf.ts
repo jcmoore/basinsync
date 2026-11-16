@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import {createHash} from "node:crypto";
 export type Envelope={start:number;contentStart:number;end:number;format:number;content:Uint8Array};
 export const PADDING=6;
 export const PLATFORM_EXTENSION=7;
@@ -34,10 +33,6 @@ export function all(bytes:Uint8Array):Envelope[]{const frames:Envelope[]=[];let 
 export function readable(bytes:Uint8Array):Envelope[]{return all(bytes).filter(frame=>frame.format!==PADDING);}
 export function concat(chunks:Uint8Array[]):Uint8Array {const result=new Uint8Array(chunks.reduce((n,c)=>n+c.length,0));let offset=0;for(const chunk of chunks){result.set(chunk,offset);offset+=chunk.length;}return result;}
 
-export function seal(bytes:Uint8Array,emptyETag:string):Uint8Array {
-  while(`"${createHash("md5").update(bytes).digest("hex")}"`===emptyETag)bytes=concat([bytes,wrap(new Uint8Array(),PADDING)]);
-  return bytes;
-}
 export function message(bytes:Uint8Array):Uint8Array {
   const frames=readable(bytes);assert(frames.length===1&&frames[0].format===0&&frames[0].start===0,"expected one raw EnvBuf message");return new Uint8Array(frames[0].content);
 }
