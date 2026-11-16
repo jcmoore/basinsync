@@ -1,6 +1,6 @@
 ---
 name: basinsync-tutorial-dag
-description: Rename or audit nested basinsync tutorial README folders, Lexidecimal heights, folder-name uniqueness within diy/, and prerequisite graphs.
+description: Rename or audit nested basinsync tutorial README folders, Lexidecimal heights, tutorial-slug uniqueness within diy/, and prerequisite graphs.
 ---
 
 [check_dag]: <scripts/check_dag.py>
@@ -10,9 +10,9 @@ description: Rename or audit nested basinsync tutorial README folders, Lexidecim
 
 Tutorial paths alternate canonical unsigned *Lexidecimal*[^][lexidecimal] height
 folders and named folders, ending in `README.md`. Nesting is supported:
-`diy/<height>/<unique>/<height>/<distinct>/README.md`. Every folder name under
-`diy/`, including asset folders, must be globally unique; only canonical height
-folder names may repeat. Each tutorial's height must exceed every direct
+`diy/<height>/<unique>/<height>/<distinct>/README.md`. Tutorial slug folder names
+must be unique throughout `diy/`; supporting folder names and filenames may repeat.
+Each tutorial's height must exceed every direct
 prerequisite's height; equal-height branches and height gaps are valid. Use zero
 for a new root; height is not a sequence number.
 
@@ -37,9 +37,9 @@ allow independent branches.
 
 Run the bundled *Python linter*[^][check_dag]. Python 3.9+ is required, without
 third-party packages. It locates `diy/` relative to the skill regardless of working
-directory. An optional argument selects another tutorial directory; folder-name
+directory. An optional argument selects another tutorial directory; tutorial-slug
 uniqueness is checked only within the selected tutorial tree. It rejects
-invalid layouts/heights, repeated non-height folder names, malformed frontmatter,
+invalid layouts/heights, repeated tutorial slugs, malformed frontmatter,
 missing/duplicate/self prerequisites, cycles, and non-increasing edges. It does
 not judge whether the stated prerequisites are sufficient.
 

@@ -1,11 +1,11 @@
 [0004-backup-samples]: <data/0004-backup-samples.json>
-[commit-marker]: <../glossary/commit-marker.md>
-[datashed]: <../glossary/datashed.md>
-[epilogue]: <../glossary/epilogue.md>
-[flow]: <../glossary/flow.md>
-[timeline]: <../glossary/timeline.md>
-[turso]: <../glossary/turso.md>
-[virtual-file-system]: <../glossary/virtual-file-system.md>
+[commit-marker]: <../../../../glossary/commit-marker.md>
+[datashed]: <../../../../glossary/datashed.md>
+[epilogue]: <../../../../glossary/epilogue.md>
+[flow]: <../../../../glossary/flow.md>
+[timeline]: <../../../../glossary/timeline.md>
+[turso]: <../../../../glossary/turso.md>
+[virtual-file-system]: <../../../../glossary/virtual-file-system.md>
 
 # 0004 backup overhead — 2026-10-24
 

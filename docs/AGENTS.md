@@ -17,7 +17,8 @@ implementation choices into requirements.
 
 Keep milestone scope, temporary limitations, and deferred work in the relevant
 `diy/` tutorial; shared references and glossary entries should describe enduring
-concepts and interfaces.
+concepts and interfaces. Keep benchmark reports and measurements in the corresponding
+tutorial's `benchmark/` folder.
 
 Use `Basin` for the tenancy domain and `Datashed` for the data-state `Reservoir`.
 Use `UserHeap` for client-driven `Flow` nodes and `KernelHeap` for server-driven
@@ -29,8 +30,8 @@ Call skippable format `110` envelopes *margins*[^][margin]; reserve padding for 
 
 Tutorial paths alternate canonical unsigned *Lexidecimal*[^][lexidecimal] height
 folders and named folders, ending in `README.md`; nesting may continue as
-`diy/<height>/<unique>/<height>/<distinct>/README.md`. Within `diy/`, all
-folder names must be globally unique except canonical height folder names.
+`diy/<height>/<unique>/<height>/<distinct>/README.md`. Tutorial slug folder
+names must be unique throughout `diy/`; supporting folder names and filenames may repeat.
 Frontmatter lists prerequisite folders relative to `diy/`, each at a strictly
 smaller height. For tutorial graph edits or audits, use the *tutorial DAG
 skill*[^][SKILL] and its bundled Python linter.
@@ -56,8 +57,7 @@ the defining entry and links inside code.
 For tutorial links, use the full tutorial folder path from `docs/` as the
 reference label (including every nested height/name pair), targeting its `README.md`. Otherwise, name local labels after the destination
 filename without its extension, preserving case (e.g. `[server]: <../server.md>`).
-Verify this correspondence during audits. Except for `README.md`, filenames under
-`docs/` should be unique; external references may use descriptive names.
+Verify this correspondence during audits; external references may use descriptive names.
 
 Avoid inline links and bare/autolink URLs in prose, including tables and lists.
 Keep literal links inside code examples unchanged. Check that reference labels

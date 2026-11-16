@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate nested tutorial DAGs and unique folder names within diy/; Python 3.9+."""
+"""Validate nested tutorial DAGs and unique tutorial slugs; Python 3.9+."""
 import os
 import re
 import sys
@@ -63,8 +63,7 @@ def lint_tutorials(directory):
     directory = Path(directory).resolve()
     errors, graph, names, readmes = [], {}, {}, set()
 
-    # Folder names within this tutorial tree share one namespace, including assets.
-    # Only canonical Lexidecimal heights are exempt from uniqueness.
+    # Inspect supporting folders too, without following symlinks out of the bundle.
     def on_error(error):
         raise error
 
@@ -76,18 +75,6 @@ def lint_tutorials(directory):
             if folder.is_symlink():
                 errors.append(f"{name}: folders must not be symlinks")
                 continue
-            try:
-                decode_height(slug)
-            except ValueError:
-                height_folder = False
-            else:
-                # A tutorial's name is still unique even if it resembles a height.
-                height_folder = not re.fullmatch(TUTORIAL, name)
-            if not height_folder:
-                if slug in names:
-                    errors.append(f'{name}: duplicate folder name "{slug}" (also {names[slug]})')
-                else:
-                    names[slug] = name
         if "README.md" in files:
             readmes.add((Path(parent) / "README.md").relative_to(directory).as_posix())
 
@@ -98,6 +85,10 @@ def lint_tutorials(directory):
             return
         if not re.fullmatch(SLUG, folder.name):
             errors.append(f"{name}: expected a <lowercase-slug> folder")
+        if folder.name in names:
+            errors.append(f'{name}: duplicate tutorial slug "{folder.name}" (also {names[folder.name]})')
+        else:
+            names[folder.name] = name
         # Check the actual spelling even on case-insensitive filesystems.
         readme = next((path for path in folder.iterdir() if path.name == "README.md"), None)
         if readme is None:
@@ -123,7 +114,7 @@ def lint_tutorials(directory):
                 if parent == directory and folder.suffix.lower() == ".md":
                     errors.append(f"{folder.name}: expected <unsigned-Lexidecimal-height>/<lowercase-slug>/README.md")
                 continue
-            # Other subfolders can hold assets; their names are still unique.
+            # Other subfolders can hold supporting material and may share names.
             if parent != directory and not re.fullmatch(r"0[zZyY][0-9a-fA-F]+", folder.name):
                 continue
             height = None

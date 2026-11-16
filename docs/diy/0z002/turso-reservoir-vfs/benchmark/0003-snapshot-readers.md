@@ -1,15 +1,15 @@
 [0003-portable-prior-rows]: <0003-portable-prior-rows.md>
 [0003-snapshot-readers-samples]: <data/0003-snapshot-readers-samples.gz>
 [0003-snapshot-readers-summary]: <data/0003-snapshot-readers-summary.json>
-[datashed]: <../glossary/datashed.md>
-[flow]: <../glossary/flow.md>
-[logical-frame]: <../glossary/logical-frame.md>
-[mvcc]: <../glossary/mvcc.md>
-[timeline]: <../glossary/timeline.md>
-[turso]: <../glossary/turso.md>
-[virtual-file-system]: <../glossary/virtual-file-system.md>
-[wal]: <../glossary/wal.md>
-[z-set]: <../glossary/z-set.md>
+[datashed]: <../../../../glossary/datashed.md>
+[flow]: <../../../../glossary/flow.md>
+[logical-frame]: <../../../../glossary/logical-frame.md>
+[mvcc]: <../../../../glossary/mvcc.md>
+[timeline]: <../../../../glossary/timeline.md>
+[turso]: <../../../../glossary/turso.md>
+[virtual-file-system]: <../../../../glossary/virtual-file-system.md>
+[wal]: <../../../../glossary/wal.md>
+[z-set]: <../../../../glossary/z-set.md>
 
 # 0003 snapshot readers — 2026-10-24
 

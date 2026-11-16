@@ -3,12 +3,12 @@ prerequisites:
   - 0z001/datashed-timeline-race
 ---
 
-[0003-commit-baseline]: <../../../benchmarks/0003-commit-baseline.md>
-[0003-disk-shadow]: <../../../benchmarks/0003-disk-shadow.md>
-[0003-s3-latency]: <../../../benchmarks/0003-s3-latency.md>
-[0003-snapshot-readers]: <../../../benchmarks/0003-snapshot-readers.md>
-[0003-wal-experiments]: <../../../benchmarks/0003-wal-experiments.md>
-[0003-zset-experiments]: <../../../benchmarks/0003-zset-experiments.md>
+[0003-commit-baseline]: <benchmark/0003-commit-baseline.md>
+[0003-disk-shadow]: <benchmark/0003-disk-shadow.md>
+[0003-s3-latency]: <benchmark/0003-s3-latency.md>
+[0003-snapshot-readers]: <benchmark/0003-snapshot-readers.md>
+[0003-wal-experiments]: <benchmark/0003-wal-experiments.md>
+[0003-zset-experiments]: <benchmark/0003-zset-experiments.md>
 [commit-marker]: <../../../glossary/commit-marker.md>
 [conditional-write]: <../../../glossary/conditional-write.md>
 [datashed]: <../../../glossary/datashed.md>

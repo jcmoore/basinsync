@@ -1,20 +1,20 @@
 [0003-disk-shadow-samples]: <data/0003-disk-shadow-samples.gz>
 [0003-disk-shadow-summary]: <data/0003-disk-shadow-summary.json>
 [0003-zset-experiments]: <0003-zset-experiments.md>
-[commit-marker]: <../glossary/commit-marker.md>
-[conditional-write]: <../glossary/conditional-write.md>
-[differential-event]: <../glossary/differential-event.md>
-[flexbuffers]: <../glossary/flexbuffers.md>
-[flow]: <../glossary/flow.md>
-[logical-frame]: <../glossary/logical-frame.md>
-[milestone]: <../glossary/milestone.md>
-[mvcc]: <../glossary/mvcc.md>
-[physical-frame]: <../glossary/physical-frame.md>
-[redb]: <../glossary/redb.md>
+[commit-marker]: <../../../../glossary/commit-marker.md>
+[conditional-write]: <../../../../glossary/conditional-write.md>
+[differential-event]: <../../../../glossary/differential-event.md>
+[flexbuffers]: <../../../../glossary/flexbuffers.md>
+[flow]: <../../../../glossary/flow.md>
+[logical-frame]: <../../../../glossary/logical-frame.md>
+[milestone]: <../../../../glossary/milestone.md>
+[mvcc]: <../../../../glossary/mvcc.md>
+[physical-frame]: <../../../../glossary/physical-frame.md>
+[redb]: <../../../../glossary/redb.md>
 [rust-file-sync]: <https://github.com/rust-lang/rust/blob/1.92.0/library/std/src/sys/fs/unix.rs>
-[turso]: <../glossary/turso.md>
-[wal]: <../glossary/wal.md>
-[z-set]: <../glossary/z-set.md>
+[turso]: <../../../../glossary/turso.md>
+[wal]: <../../../../glossary/wal.md>
+[z-set]: <../../../../glossary/z-set.md>
 
 # 0003 on-disk capture pipeline — 2026-10-24
 

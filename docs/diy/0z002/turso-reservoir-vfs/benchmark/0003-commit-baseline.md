@@ -1,13 +1,13 @@
 [0003-commit-samples]: <data/0003-commit-samples.gz>
 [0003-commit-summary]: <data/0003-commit-summary.json>
-[diy/0z002/turso-reservoir-vfs]: <../diy/0z002/turso-reservoir-vfs/README.md>
-[durable-storage]: <../glossary/durable-storage.md>
-[flow]: <../glossary/flow.md>
-[logical-frame]: <../glossary/logical-frame.md>
-[mvcc]: <../glossary/mvcc.md>
-[sha384]: <../glossary/sha384.md>
-[timeline]: <../glossary/timeline.md>
-[turso]: <../glossary/turso.md>
+[diy/0z002/turso-reservoir-vfs]: <../README.md>
+[durable-storage]: <../../../../glossary/durable-storage.md>
+[flow]: <../../../../glossary/flow.md>
+[logical-frame]: <../../../../glossary/logical-frame.md>
+[mvcc]: <../../../../glossary/mvcc.md>
+[sha384]: <../../../../glossary/sha384.md>
+[timeline]: <../../../../glossary/timeline.md>
+[turso]: <../../../../glossary/turso.md>
 
 # 0003 commit baseline — 2026-10-23
 

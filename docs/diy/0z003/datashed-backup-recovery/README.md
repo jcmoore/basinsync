@@ -3,7 +3,7 @@ prerequisites:
   - 0z002/turso-reservoir-vfs
 ---
 
-[0004-backup-overhead]: <../../../benchmarks/0004-backup-overhead.md>
+[0004-backup-overhead]: <benchmark/0004-backup-overhead.md>
 [commit-marker]: <../../../glossary/commit-marker.md>
 [conditional-write]: <../../../glossary/conditional-write.md>
 [datashed]: <../../../glossary/datashed.md>

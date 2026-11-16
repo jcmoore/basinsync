@@ -1,14 +1,14 @@
 [0003-s3-latency-samples]: <data/0003-s3-latency-samples.gz>
 [0003-s3-latency-summary]: <data/0003-s3-latency-summary.json>
 [0003-snapshot-readers]: <0003-snapshot-readers.md>
-[conditional-write]: <../glossary/conditional-write.md>
-[diy/0z002/turso-reservoir-vfs]: <../diy/0z002/turso-reservoir-vfs/README.md>
-[flow]: <../glossary/flow.md>
-[physical-frame]: <../glossary/physical-frame.md>
-[timeline]: <../glossary/timeline.md>
-[turso]: <../glossary/turso.md>
-[virtual-file-system]: <../glossary/virtual-file-system.md>
-[z-set]: <../glossary/z-set.md>
+[conditional-write]: <../../../../glossary/conditional-write.md>
+[diy/0z002/turso-reservoir-vfs]: <../README.md>
+[flow]: <../../../../glossary/flow.md>
+[physical-frame]: <../../../../glossary/physical-frame.md>
+[timeline]: <../../../../glossary/timeline.md>
+[turso]: <../../../../glossary/turso.md>
+[virtual-file-system]: <../../../../glossary/virtual-file-system.md>
+[z-set]: <../../../../glossary/z-set.md>
 
 # 0003 S3 latency — 2026-10-24
 

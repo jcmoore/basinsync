@@ -2,21 +2,21 @@
 [0003-s3-latency]: <0003-s3-latency.md>
 [0003-wal-samples]: <data/0003-wal-samples.gz>
 [0003-wal-summary]: <data/0003-wal-summary.json>
-[commit-marker]: <../glossary/commit-marker.md>
-[conditional-write]: <../glossary/conditional-write.md>
-[differential-event]: <../glossary/differential-event.md>
-[diy/0z002/turso-reservoir-vfs]: <../diy/0z002/turso-reservoir-vfs/README.md>
-[flexbuffers]: <../glossary/flexbuffers.md>
-[flow]: <../glossary/flow.md>
-[logical-frame]: <../glossary/logical-frame.md>
-[milestone]: <../glossary/milestone.md>
-[physical-frame]: <../glossary/physical-frame.md>
+[commit-marker]: <../../../../glossary/commit-marker.md>
+[conditional-write]: <../../../../glossary/conditional-write.md>
+[differential-event]: <../../../../glossary/differential-event.md>
+[diy/0z002/turso-reservoir-vfs]: <../README.md>
+[flexbuffers]: <../../../../glossary/flexbuffers.md>
+[flow]: <../../../../glossary/flow.md>
+[logical-frame]: <../../../../glossary/logical-frame.md>
+[milestone]: <../../../../glossary/milestone.md>
+[physical-frame]: <../../../../glossary/physical-frame.md>
 [s3-conditional-writes]: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html>
-[sha384]: <../glossary/sha384.md>
-[timeline]: <../glossary/timeline.md>
-[turso]: <../glossary/turso.md>
-[viewpoint]: <../glossary/viewpoint.md>
-[wal]: <../glossary/wal.md>
+[sha384]: <../../../../glossary/sha384.md>
+[timeline]: <../../../../glossary/timeline.md>
+[turso]: <../../../../glossary/turso.md>
+[viewpoint]: <../../../../glossary/viewpoint.md>
+[wal]: <../../../../glossary/wal.md>
 
 # 0003 WAL and publication experiments — 2026-10-24
 

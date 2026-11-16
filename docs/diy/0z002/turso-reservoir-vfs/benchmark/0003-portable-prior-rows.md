@@ -1,12 +1,12 @@
 [0003-disk-shadow]: <0003-disk-shadow.md>
 [0003-portable-prior-rows-samples]: <data/0003-portable-prior-rows-samples.json>
 [0003-snapshot-readers]: <0003-snapshot-readers.md>
-[logical-frame]: <../glossary/logical-frame.md>
-[mvcc]: <../glossary/mvcc.md>
-[turso]: <../glossary/turso.md>
-[virtual-file-system]: <../glossary/virtual-file-system.md>
-[wal]: <../glossary/wal.md>
-[z-set]: <../glossary/z-set.md>
+[logical-frame]: <../../../../glossary/logical-frame.md>
+[mvcc]: <../../../../glossary/mvcc.md>
+[turso]: <../../../../glossary/turso.md>
+[virtual-file-system]: <../../../../glossary/virtual-file-system.md>
+[wal]: <../../../../glossary/wal.md>
+[z-set]: <../../../../glossary/z-set.md>
 
 # 0003 native prior-row experiment — 2026-10-24
 

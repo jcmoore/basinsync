@@ -1,23 +1,23 @@
 [0003-zset-samples]: <data/0003-zset-samples.gz>
 [0003-zset-summary]: <data/0003-zset-summary.json>
-[change-data-capture]: <../glossary/change-data-capture.md>
-[datashed]: <../glossary/datashed.md>
+[change-data-capture]: <../../../../glossary/change-data-capture.md>
+[datashed]: <../../../../glossary/datashed.md>
 [differential-dataflow]: <https://docs.rs/differential-dataflow/latest/differential_dataflow/input/struct.InputSession.html>
 [feldera-grammar]: <https://docs.feldera.com/sql/grammar/#materialized-tables>
 [feldera-json]: <https://docs.feldera.com/formats/json/>
-[flexbuffers]: <../glossary/flexbuffers.md>
-[flow]: <../glossary/flow.md>
-[logical-frame]: <../glossary/logical-frame.md>
-[milestone]: <../glossary/milestone.md>
-[physical-frame]: <../glossary/physical-frame.md>
+[flexbuffers]: <../../../../glossary/flexbuffers.md>
+[flow]: <../../../../glossary/flow.md>
+[logical-frame]: <../../../../glossary/logical-frame.md>
+[milestone]: <../../../../glossary/milestone.md>
+[physical-frame]: <../../../../glossary/physical-frame.md>
 [sqlite-session]: <https://www.sqlite.org/sessionintro.html>
-[turso]: <../glossary/turso.md>
+[turso]: <../../../../glossary/turso.md>
 [turso-compatibility]: <https://github.com/tursodatabase/turso/blob/032f5bb2c7e74107f7ef9b66d576312379000a88/COMPAT.md#callback-functions>
 [turso-manual]: <https://github.com/tursodatabase/turso/blob/main/docs/manual.md>
 [turso-triggers]: <https://github.com/tursodatabase/turso/blob/032f5bb2c7e74107f7ef9b66d576312379000a88/docs/sql-reference/statements/create-trigger.mdx>
-[viewpoint]: <../glossary/viewpoint.md>
-[wal]: <../glossary/wal.md>
-[z-set]: <../glossary/z-set.md>
+[viewpoint]: <../../../../glossary/viewpoint.md>
+[wal]: <../../../../glossary/wal.md>
+[z-set]: <../../../../glossary/z-set.md>
 
 # 0003 weighted-row experiments — 2026-10-24
 
