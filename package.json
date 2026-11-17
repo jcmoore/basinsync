@@ -5,7 +5,7 @@
   "engines": { "node": ">=18" },
   "scripts": {
     "test": "bun test clients/*.test.ts",
-    "test:integration": "bun clients/integration.ts && bun clients/cancellation-integration.ts",
+    "test:integration": "bun clients/integration.ts && bun clients/cancellation-integration.ts && bun clients/analogue-integration.ts",
     "stress": "bun clients/stress.ts",
     "check": "tsc --noEmit",
     "check:docs": "python3 docs/skills/basinsync-tutorial-dag/scripts/check_dag.py",

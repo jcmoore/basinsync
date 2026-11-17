@@ -1,3 +1,4 @@
+[analogue]: <analogue.md>
 [datashed]: <datashed.md>
 [epilogue]: <epilogue.md>
 [flow]: <flow.md>
@@ -8,5 +9,5 @@
 # Reservoir
 
 A *Datashed*[~][datashed], *Flow*[~][flow], or *Jet*[~][jet]. Each has an
-*Epilogue*[~][epilogue], a *Timeline (Chronologue)*[~][timeline], and a
-*Prologue*[~][prologue].
+*Epilogue*[~][epilogue], a *Timeline (Chronologue)*[~][timeline], a
+*Prologue*[~][prologue], and an *Analogue*[~][analogue].

@@ -9,6 +9,7 @@ import { toObject, encode as extensionEncode } from "./flexbuffer";
 import { commit, form, epilogueStatus as fullStatus, latestBlob, sha384, sha384Bytes, type ApiError, type CommitResponse, type Timelines, type ViewpointMismatch, reserveHeap, type HeapResponse, type HeapNode } from "./client";
 import { parse, stringify } from "./json0";
 import { key, fromKey } from "./timeline";
+import { key as bulkKey, decodeBulkOrder } from "./bulkorder";
 import { key as epilogueKey, encode as lex, decode as unlex } from "./lexidecimal";
 import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, entryDigest, commandFrames, type WalDelta, type Marker } from "./events";
 import { ingestWal } from "./wal";
@@ -75,7 +76,7 @@ function serverProcess(bucket: string, s3Endpoint: string, address: string, opti
   return launch([`${root}/target/debug/basinsync`],{
     S3_ENDPOINT:s3Endpoint,S3_BUCKET:bucket,AWS_REGION:"us-east-1",
     AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,
-    AWS_SESSION_TOKEN:"",BASINSYNC_LISTEN:address,BASINSYNC_CLEANUP_INTERVAL_MS:"0",BASINSYNC_BACKUP_INTERVAL_MS:"0",BASINSYNC_STATUS_PROBE_MAX_AGE_MS:"0",...options,
+    AWS_SESSION_TOKEN:"",BASINSYNC_LISTEN:address,BASINSYNC_CLEANUP_INTERVAL_MS:"0",BASINSYNC_BULK_MAX_AGE_MS:"0",BASINSYNC_BACKUP_INTERVAL_MS:"0",BASINSYNC_STATUS_PROBE_MAX_AGE_MS:"0",...options,
   });
 }
 async function server(bucket: string, s3Endpoint = endpoint, options:Record<string,string>={}) {
@@ -319,7 +320,7 @@ try {
       const original=originals.get(Key);
       if(original&&request.headers.get("if-match")===emptyETag){
         retries++;assert.equal(request.headers.get("if-none-match"),null);
-        const frames=(b:Uint8Array)=>(b[3]>>5)===4?commandFrames(b):envelopes(b);
+        const frames=(b:Uint8Array)=>{const outer=envelopes(b);return outer.length===1&&outer[0].format===4?commandFrames(b):outer;};
         const previous=frames(original.body).at(-1)!,margin=frames(body).at(-1)!;
         assert.equal(previous.format,6);assert.equal(margin.format,6);assert.equal(body.length,original.body.length);
         assert.deepEqual(body.subarray(0,previous.start),original.body.subarray(0,previous.start));assert.equal(margin.start,previous.start);
@@ -335,11 +336,13 @@ try {
   }
   {
     const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.endsWith(`/${key(1n)}`),true,false,259);
-    const app=await server(b,proxy.url,{BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});let done=0;
+    const app=await server(b,proxy.url,{BASINSYNC_BULK_MAX_AGE_MS:"10",BASINSYNC_BULK_TARGET_BYTES:"1",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});let done=0;
     const first=commit(app.url,"collision",a,0n).then(r=>{done++;return r});await timeout(proxy.entered.promise);
     const next=commit(app.url,"collision",bytes("second"),1n).then(r=>{done++;return r});await batchLogged(app.log,2);assert.equal(done,0);
     proxy.release.resolve();await status(await first,201);await status(await next,201);assert.equal(proxy.retries(),259);
     const payload=await get(b,1n),original=proxy.originals.get(key(1n))!.body;assert.equal(entryDigest(payload),entryDigest(original));assert.notEqual(sha384(payload),sha384(original));
+    await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:bulkKey(1n,2n)})),head=>!!head.ContentLength);
+    const archived=await s3.send(new GetObjectCommand({Bucket:b,Key:bulkKey(1n,2n)}));assert.deepEqual(decodeBulkOrder(await archived.Body!.transformToByteArray()).events[0],payload,"archive handoff receives the accepted 259th retry margin");
     assert.equal((deltasAt(await get(b,2n)).turso["default.turso"] as WalDelta).physical.parent,entryDigest(payload));await assertManifestRange(b,1n,payload);await stop(app.process);
     const replayed=await server(b);assert.equal((await fullStatus(replayed.url,"collision")).latest?.viewpoint,1n);await stop(replayed.process);
     const backed=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await eventually(()=>datashedBackup(b),cp=>cp?.milestone===2n);await stop(backed.process);
@@ -364,6 +367,17 @@ try {
     assert.equal(proxy.retries(),6);const Key=await signKey(b,"bounded-sign",0n);
     const sign=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key}))).Body!.transformToByteArray());
     assert.equal(sign.length,1);assert.deepEqual(sign[0]!.content,new Uint8Array([7]));await stop(app.process);
+  }
+  {
+    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes("/analogue/"),false,false,3);
+    const app=await server(b,proxy.url,{BASINSYNC_BULK_MAX_AGE_MS:"10",BASINSYNC_BULK_TARGET_BYTES:"1"});
+    await status(await commit(app.url,"bulk-margin",a,0n),201);
+    await eventually(async()=>proxy.retries(),n=>n===3);
+    const object=await s3.send(new GetObjectCommand({Bucket:b,Key:bulkKey(1n,2n)}));
+    const body=await object.Body!.transformToByteArray(),order=decodeBulkOrder(body);
+    assert.deepEqual(order.events[0],await get(b,1n));assert.equal(envelopes(body).at(-1)!.content[0],3);
+    assert.equal(object.Metadata!["bulkorder-range"],`bytes=${order.range.start}-${order.range.end-1}`);
+    await stop(app.process);
   }
   console.log("put of success: bounded tombstone/margin probes, immutable tombstones, upload postconditions, margin retries across all sequence writers, and stable pipelined Timeline digest/recovery");
   // Sequence sentinels are excluded from search and replaced only with their observed ETag.

@@ -218,10 +218,19 @@ pub async fn put_feed(
     bucket: &Bucket,
     key: &str,
     bytes: &[u8],
-    mut headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<ResponseData> {
+    Ok(put_feed_returning(bucket, key, bytes, headers).await?.0)
+}
+
+pub async fn put_feed_returning<'a>(
+    bucket: &Bucket,
+    key: &str,
+    bytes: &'a [u8],
+    mut headers: HeaderMap,
+) -> Result<(ResponseData, Cow<'a, [u8]>)> {
     let outer = crate::envbuf::at(bytes, 0)?;
-    let (feed, base) = if outer.format == crate::envbuf::NESTED {
+    let (feed, base) = if outer.format == crate::envbuf::NESTED && outer.end == bytes.len() {
         (crate::envbuf::nested_message(bytes)?, outer.content_start)
     } else {
         (bytes, 0)
@@ -243,7 +252,7 @@ pub async fn put_feed(
     loop {
         let response = send(bucket, key, &bytes, headers.clone()).await?;
         if !(200..300).contains(&response.status_code()) || etag(&response)? != reference(bucket)? {
-            return Ok(response);
+            return Ok((response, bytes));
         }
         let margin = retry_margin(&mut counter)?;
         ensure!(

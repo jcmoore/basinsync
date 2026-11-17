@@ -35,6 +35,8 @@ pub fn from_key(key: &str) -> Result<BigUint> {
 
 #[derive(Default)]
 pub struct Datashed {
+    pub recovery: crate::recovery::Config,
+    pub recovery_stats: crate::recovery::Stats,
     pub milestone: BigUint,
     pub database: Option<crate::turso::State>,
     pub stopped: bool,
@@ -376,12 +378,19 @@ impl Prepared {
         &self.milestone
     }
     pub async fn publish(self, bucket: &Bucket, prefix: &Prefix) -> Result<Prefix> {
+        Ok(self.publish_with_bytes(bucket, prefix).await?.0)
+    }
+    pub async fn publish_with_bytes(
+        self,
+        bucket: &Bucket,
+        prefix: &Prefix,
+    ) -> Result<(Prefix, Vec<u8>)> {
         check_write_base(bucket, prefix).await?;
         ensure!(
             self.milestone == &prefix.milestone + 1u8 && self.parent == prefix.digest,
             "publication prefix mismatch"
         );
-        let response = crate::sequence::put_feed(
+        let (response, accepted) = crate::sequence::put_feed_returning(
             bucket,
             &key(&self.milestone)?,
             &self.bytes,
@@ -393,10 +402,17 @@ impl Prepared {
             "conditional PUT returned HTTP {}",
             response.status_code()
         );
-        Ok(Prefix {
-            milestone: self.milestone,
-            digest: Some(self.digest),
-        })
+        let bytes = match accepted {
+            std::borrow::Cow::Borrowed(_) => self.bytes,
+            std::borrow::Cow::Owned(bytes) => bytes,
+        };
+        Ok((
+            Prefix {
+                milestone: self.milestone,
+                digest: Some(self.digest),
+            },
+            bytes,
+        ))
     }
 }
 impl Datashed {
@@ -613,24 +629,10 @@ pub async fn exists(bucket: &Bucket, milestone: &BigUint) -> Result<bool> {
 }
 
 async fn replay(bucket: &Bucket, state: &mut Datashed, tail: BigUint) -> Result<()> {
-    while state.milestone < tail {
-        let milestone = &state.milestone + 1u8;
-        let response = crate::object_read::if_present(bucket)?
-            .get_object(key(&milestone)?)
-            .await?;
-        ensure!(
-            response.status_code() == 200,
-            "Timeline GET at {milestone} returned HTTP {}",
-            response.status_code()
-        );
-        ensure!(
-            response.as_slice().len() >= 16,
-            "Timeline tombstone at {milestone} requires a covering snapshot"
-        );
-        state
-            .apply_entry(milestone.clone(), response.as_slice())
-            .with_context(|| format!("invalid DifferentialEvent at Milestone {milestone}"))?;
-    }
+    let config = state.recovery.clone();
+    let stats = crate::recovery::replay(bucket, state, tail, &config).await?;
+    tracing::debug!(?stats, "Timeline recovery downloads complete");
+    state.recovery_stats = stats;
     Ok(())
 }
 
@@ -657,8 +659,15 @@ pub async fn check_write_base(bucket: &Bucket, prefix: &Prefix) -> Result<()> {
 }
 
 pub async fn recover(bucket: &Bucket) -> Result<Datashed> {
+    recover_with(bucket, crate::recovery::Config::default()).await
+}
+
+pub async fn recover_with(bucket: &Bucket, config: crate::recovery::Config) -> Result<Datashed> {
     crate::sequence::initialize(bucket).await?;
-    let mut state = Datashed::default();
+    let mut state = Datashed {
+        recovery: config,
+        ..Default::default()
+    };
     refresh(bucket, &mut state).await?;
     Ok(state)
 }
@@ -675,7 +684,9 @@ pub async fn refresh_if_advanced(bucket: &Bucket, state: &mut Datashed) -> Resul
 pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
     if let Some(checkpoint) = crate::epilogue::latest_checkpoint(bucket).await? {
         if checkpoint.milestone > state.milestone {
+            let config = state.recovery.clone();
             *state = checkpoint.load(bucket).await?;
+            state.recovery = config;
         } else if checkpoint.milestone == state.milestone {
             ensure!(
                 Some(checkpoint.digest.as_str()) == state.head.as_deref(),

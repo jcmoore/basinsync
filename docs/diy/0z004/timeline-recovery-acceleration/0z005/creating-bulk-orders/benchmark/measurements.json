@@ -1,0 +1,101 @@
+{
+  "recorded_at": "2026-11-17T18:59:13.101Z",
+  "machine": {
+    "cpu": "Apple M2",
+    "platform": "darwin",
+    "release": "27.0.0",
+    "memory": 25769803776
+  },
+  "foreground": [
+    {
+      "round": 0,
+      "target": 0,
+      "requests_per_second": 20.983259845126796,
+      "p50_ms": 190.78175000002375,
+      "p95_ms": 196.33108400000492,
+      "timeline_gets": 0,
+      "bulk_puts": 0,
+      "peak_requests": 1
+    },
+    {
+      "round": 0,
+      "target": 5242880,
+      "requests_per_second": 21.61673929482663,
+      "p50_ms": 187.58629199999268,
+      "p95_ms": 204.11133300000802,
+      "timeline_gets": 0,
+      "bulk_puts": 2,
+      "peak_requests": 2
+    },
+    {
+      "round": 0,
+      "target": 524288,
+      "requests_per_second": 22.80144202062455,
+      "p50_ms": 173.4982500000042,
+      "p95_ms": 189.07854200000293,
+      "timeline_gets": 0,
+      "bulk_puts": 16,
+      "peak_requests": 2
+    },
+    {
+      "round": 1,
+      "target": 5242880,
+      "requests_per_second": 22.110908893548228,
+      "p50_ms": 183.3277919999964,
+      "p95_ms": 200.30241599999135,
+      "timeline_gets": 0,
+      "bulk_puts": 2,
+      "peak_requests": 2
+    },
+    {
+      "round": 1,
+      "target": 524288,
+      "requests_per_second": 22.320556838157678,
+      "p50_ms": 176.78424999999697,
+      "p95_ms": 192.95558400001028,
+      "timeline_gets": 0,
+      "bulk_puts": 16,
+      "peak_requests": 2
+    },
+    {
+      "round": 1,
+      "target": 0,
+      "requests_per_second": 20.18949510575629,
+      "p50_ms": 190.92725000000792,
+      "p95_ms": 217.80570799999987,
+      "timeline_gets": 0,
+      "bulk_puts": 0,
+      "peak_requests": 1
+    },
+    {
+      "round": 2,
+      "target": 524288,
+      "requests_per_second": 21.851457801655442,
+      "p50_ms": 182.4854580000101,
+      "p95_ms": 199.59658300000592,
+      "timeline_gets": 0,
+      "bulk_puts": 17,
+      "peak_requests": 2
+    },
+    {
+      "round": 2,
+      "target": 0,
+      "requests_per_second": 23.579792079723106,
+      "p50_ms": 174.0501670000085,
+      "p95_ms": 197.99833400000352,
+      "timeline_gets": 0,
+      "bulk_puts": 0,
+      "peak_requests": 1
+    },
+    {
+      "round": 2,
+      "target": 5242880,
+      "requests_per_second": 23.703600549145843,
+      "p50_ms": 175.22983299999032,
+      "p95_ms": 191.03074999997625,
+      "timeline_gets": 0,
+      "bulk_puts": 2,
+      "peak_requests": 2
+    }
+  ]
+}

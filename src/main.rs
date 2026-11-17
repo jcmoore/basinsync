@@ -356,6 +356,7 @@ struct Worker {
     batch_max: usize,
     batch_wait: Duration,
     backup_interval: Duration,
+    analogue: basinsync::analogue::Config,
     status_probe_max_age: Duration,
 }
 
@@ -492,7 +493,7 @@ async fn main() -> Result<()> {
     let bucket = Bucket::new(&required("S3_BUCKET")?, region, credentials)?
         .with_path_style()
         .with_request_timeout(Duration::from_secs(10))?;
-    let state = timeline::recover(&bucket)
+    let state = timeline::recover_with(&bucket, basinsync::recovery::Config::from_env()?)
         .await
         .context("recover Datashed Timeline")?;
     let (published, published_rx) = watch::channel(state.prefix());
@@ -564,6 +565,16 @@ async fn main() -> Result<()> {
         "invalid cleanup limits"
     );
     let worker = Worker {
+        analogue: basinsync::analogue::Config {
+            target_bytes: env::var("BASINSYNC_BULK_TARGET_BYTES")
+                .unwrap_or_else(|_| (5 * 1024 * 1024).to_string())
+                .parse()?,
+            max_age: Duration::from_millis(
+                env::var("BASINSYNC_BULK_MAX_AGE_MS")
+                    .unwrap_or_else(|_| "30000".into())
+                    .parse()?,
+            ),
+        },
         maintenance: queue.clone(),
         cleanup,
         bucket,
@@ -581,6 +592,10 @@ async fn main() -> Result<()> {
                 .parse()?,
         ),
     };
+    anyhow::ensure!(
+        worker.analogue.target_bytes > 0,
+        "BulkOrder byte target must be positive"
+    );
     let job = tokio::spawn(worker.run(receiver, published, shutdown_rx.clone()));
     let supervisor = tokio::spawn(async move {
         let result = job.await.context("commit worker panicked").and_then(|r| r);

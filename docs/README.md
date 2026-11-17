@@ -4,6 +4,7 @@
 [diy/0z003/datashed-backup-recovery]: <diy/0z003/datashed-backup-recovery/README.md>
 [diy/0z003/shallow-heap-management]: <diy/0z003/shallow-heap-management/README.md>
 [diy/0z004/async-shallow-cleanup]: <diy/0z004/async-shallow-cleanup/README.md>
+[diy/0z004/timeline-recovery-acceleration]: <diy/0z004/timeline-recovery-acceleration/README.md>
 [diy/0z005/deep-heap-support]: <diy/0z005/deep-heap-support/README.md>
 [diy/0z006/commit-marker-edges-with-node-promotion]: <diy/0z006/commit-marker-edges-with-node-promotion/README.md>
 [lexidecimal]: <glossary/lexidecimal.md>
@@ -37,5 +38,7 @@ Build deeper graphs with *Deep Heap support*[~][diy/0z005/deep-heap-support].
 
 Retain and promote committed graphs with
 *CommitMarker edges with node promotion*[~][diy/0z006/commit-marker-edges-with-node-promotion].
+
+Coalesce and retrieve history with *Timeline recovery acceleration*[~][diy/0z004/timeline-recovery-acceleration].
 
 Audit storage layouts in the *object-key reference*[~][object-keys].

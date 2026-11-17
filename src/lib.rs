@@ -12,7 +12,9 @@ pub mod lexidecimal;
 pub mod object_read;
 pub mod promotion;
 pub mod range_get;
+pub mod recovery;
 pub mod sequence;
 pub mod timeline;
 
+pub mod analogue;
 pub mod turso;

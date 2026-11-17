@@ -96,6 +96,7 @@ async fn publish(
     stop: Stop,
     mut halted: watch::Receiver<bool>,
     backups: Option<watch::Sender<Option<timeline::Snapshot>>>,
+    orders: Option<mpsc::Sender<basinsync::analogue::DurableEvent>>,
 ) -> Result<()> {
     let mut prefix = published.borrow().clone();
     let result = async {
@@ -114,8 +115,13 @@ async fn publish(
                 Publication::Batch(mut batch) => {
                     let snapshot = batch.prepared.as_ref().and_then(|p| p.snapshot());
                     let next = match batch.prepared.take() {
-                        Some(prepared) => match prepared.publish(&bucket, &prefix).await {
-                            Ok(next) => next,
+                        Some(prepared) => match prepared.publish_with_bytes(&bucket, &prefix).await {
+                            Ok((next, bytes)) => {
+                                if let Some(orders) = &orders {
+                                    let _ = orders.try_send(basinsync::analogue::DurableEvent { milestone: next.milestone().clone(), bytes });
+                                }
+                                next
+                            },
                             Err(error) => {
                                 batch.finish(false, &prefix);
                                 return Err(error);
@@ -587,6 +593,16 @@ impl Worker {
         shutdown: watch::Receiver<bool>,
     ) -> Result<()> {
         self.state.enable_vfs()?;
+        let (orders, events) = mpsc::channel(2);
+        let analogue_enabled = !self.analogue.max_age.is_zero();
+        let analogue_job = analogue_enabled.then(|| {
+            tokio::spawn(basinsync::analogue::run(
+                self.bucket.clone(),
+                published.subscribe(),
+                self.analogue.clone(),
+                events,
+            ))
+        });
         let (targets, snapshots) = watch::channel(self.state.snapshot()?);
         let backup_job = if !self.backup_interval.is_zero() {
             Some(tokio::spawn(basinsync::backup::run(
@@ -614,6 +630,7 @@ impl Worker {
             stop.clone(),
             halted.clone(),
             backups,
+            analogue_enabled.then_some(orders),
         ));
         let cleanup_job = snapshots.map(|snapshots| {
             tokio::spawn(cleanup_loop(
@@ -665,6 +682,9 @@ impl Worker {
         };
         cleanup_result?;
         backup_result?;
+        if let Some(job) = analogue_job {
+            job.await.context("Analogue worker panicked")?;
+        }
         result.and(publication)
     }
 }

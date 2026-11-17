@@ -1,4 +1,6 @@
 [access-token]: <glossary/access-token.md>
+[analogue]: <glossary/analogue.md>
+[bulk-order]: <glossary/bulk-order.md>
 [commit-marker]: <glossary/commit-marker.md>
 [datashed]: <glossary/datashed.md>
 [derived-subkey]: <glossary/derived-subkey.md>
@@ -32,6 +34,7 @@ All implemented S3 key patterns, relative to the configured bucket:
 | *Tombstone*[~][tombstone] probes | `sentinel/tombstone/${length}` |
 | *Margin*[~][margin] probes | `sentinel/margin/${counter}` |
 | *Datashed*[~][datashed] *DifferentialEvent*[~][differential-event] | `timeline/${lex(~milestone)}` |
+| *Datashed*[~][datashed] *Analogue*[~][analogue] *BulkOrder*[~][bulk-order] | `analogue/${lex(~lowest)}/${lex(~highest)}` |
 | *Datashed*[~][datashed] backup *CommitMarker*[~][commit-marker] | `epilogue/${lex(~viewpoint)}` |
 | *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `epilogue/${lex(viewpoint)}` |
 | *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
@@ -93,3 +96,7 @@ The empty reference is always zero bytes. Probe objects are created only if
 absent and verified on reuse. *Tombstone*[~][tombstone] probe lengths are decimal
 2, 4, …, 14; sixteen-byte candidates are refused. *Margin*[~][margin] probes each contain a single
 24-byte *EnvBuf*[~][envbuf], with a one-byte message containing `counter` from 1 through 7.
+
+*BulkOrder*[~][bulk-order] bounds are inclusive `lowest` and exclusive `highest`, with `lowest >= 1`.
+*BulkOrders*[~][bulk-order] contain complete event envelopes, their own footer tuple,
+and a trailing *counter margin*[~][margin].
