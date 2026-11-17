@@ -36,14 +36,15 @@ cursor; advertised candidate endpoints never do. A failed or invalid order falls
 back to the *Timeline*[~][timeline]. Discovery must not hold up direct progress.
 Use *conditional reads*[~][conditional-read].
 
-`BASINSYNC_RECOVERY_MODE` selects `sequential`, `parallel`, `bulk` (default),
-`range`, or `hedged`. Parallel mode prefetches individual events; Bulk mode overlaps
+`BASINSYNC_RECOVERY_MODE` defaults to `bulk-parallel`; alternatives are `sequential`,
+`parallel`, `bulk`, `range`, `hedged`, and `range-parallel`.
+Parallel mode prefetches individual events; Bulk mode overlaps
 LIST discovery with retrieval; range mode selects useful suffixes; hedged mode
 keeps one individual GET progressing beside a BulkOrder GET. Apply all results in
 order. `BASINSYNC_RECOVERY_CONCURRENCY` defaults to four;
 `BASINSYNC_RECOVERY_MAX_BYTES` bounds each data response, defaulting to 128 MiB.
 
-Experimental `bulk-parallel` and `range-parallel` modes prefetch beyond unfinished
+`bulk-parallel` and `range-parallel` modes prefetch beyond unfinished
 orders using their advertised endpoints, while still ingesting strictly in order.
 `BASINSYNC_RECOVERY_BULK_CONCURRENCY` defaults to two; completed future orders
 retain their slots. `BASINSYNC_RECOVERY_BULK_BUFFER_BYTES` defaults to 32 MiB,

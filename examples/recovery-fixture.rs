@@ -70,7 +70,9 @@ async fn main() -> Result<()> {
             )?
             .with_path_style();
             let mut config = recovery::Config::from_env()?;
-            config.mode = recovery::Mode::parse(args.get(2).context("missing mode")?)?;
+            if let Some(mode) = args.get(2) {
+                config.mode = recovery::Mode::parse(mode)?;
+            }
             let started = std::time::Instant::now();
             let state = timeline::recover_with(&bucket, config).await?;
             let elapsed = started.elapsed();

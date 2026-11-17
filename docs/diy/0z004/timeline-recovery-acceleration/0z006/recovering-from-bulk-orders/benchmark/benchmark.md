@@ -33,7 +33,7 @@ excludes in-flight responses, parser/database allocations, and process RSS.
 Parallel wins locally and on the constrained link. After the snapshot, the
 constrained-link times are 2705/1796/2414/2034/2436 ms respectively: Range avoids
 most already-applied bytes but adds HEAD/footer requests. Hedging spends extra
-bandwidth for little gain here. Keep Bulk as the latency-oriented default;
+bandwidth for little gain here. Bulk favors latency;
 choose parallel or range when bandwidth dominates. See *raw measurements*[~][measurements].
 
 With a competing order covering the entire history, the same snapshot/link test

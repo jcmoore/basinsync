@@ -35,8 +35,8 @@ Completed future bodies keep their slots, bounding lookahead when an earlier rea
 With the snapshot, 100 ms times are 2389/2370/2367 ms for Bulk ×1/×2/×4:
 bootstrap and tail probes dominate. Under the shared 5 MiB/s link, individual
 prefetch still wins; Bulk ×2 narrows the gap to 5055 versus 4909 ms.
-Keep serial Bulk as the default while exposing the parallel modes for tuning;
-two slots are a reasonable first choice. Four are more promising for Range reads.
+Use `bulk-parallel` with two slots and a 32 MiB archive budget by default.
+Four slots are more promising for Range reads.
 See *raw measurements*[~][parallel].
 
 For six staggered orders (24 events each, 16-event stride), parallel whole-order

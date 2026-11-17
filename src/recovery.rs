@@ -54,7 +54,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            mode: Mode::Bulk,
+            mode: Mode::BulkParallel,
             concurrency: 4,
             max_bytes: 128 * 1024 * 1024,
             bulk_concurrency: 2,

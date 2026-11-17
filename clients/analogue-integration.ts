@@ -31,7 +31,7 @@ try{
     }
     return response;
   });
-  for(const mode of ["parallel","bulk","range","hedged","bulk-parallel","range-parallel"]){
+  for(const mode of ["default","parallel","bulk","range","hedged","bulk-parallel","range-parallel"]){
     calls.length=0;const restored=await f.recover(bucket,mode,traced);assert.equal(restored.sha384,baseline.sha384);assert.deepEqual(restored.flows,baseline.flows);
     if(mode!=="parallel")assert(calls.some(c=>c.method==="GET"&&c.url.pathname.includes("/analogue/")),`${mode} used BulkOrders`);
     if(mode==="range")assert(calls.some(c=>c.method==="HEAD"&&c.url.pathname.includes("/analogue/")));
@@ -107,7 +107,7 @@ try{
           return response;
         }finally{active--;}
       });
-      const restored=await f.recover(b,"bulk-parallel",observed);
+      const restored=await f.recover(b,fault==="none"?"default":"bulk-parallel",observed);
       assert.equal(restored.sha384,baseline.sha384);assert(second,"LIST discovers the next order before its predecessor finishes");assert.equal(peak,2);assert(!premature,"a completed future order retains its prefetch slot");assert.equal(restored.stats.peak_bulk_downloads,2);
       assert.equal(restored.stats.rejected_orders,fault==="none"?0:1,"out-of-order completion is buffered, not ingested early");
     }
