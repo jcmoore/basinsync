@@ -13,7 +13,6 @@ use axum::{
 use basinsync::{
     cleanup,
     details::CommitDetails,
-    diffuse16,
     event::{self, Marker},
     lexidecimal::Viewpoint,
     timeline, user_heap,
@@ -506,7 +505,7 @@ async fn main() -> Result<()> {
         .context("recover Datashed Timeline")?;
     let (published, published_rx) = watch::channel(state.prefix());
     let next = &state.milestone + 1u8;
-    diffuse16::key(&next)?;
+    timeline::key(&next)?;
     let (fatal_tx, mut fatal_rx) = watch::channel(false);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_timeout = Duration::from_millis(

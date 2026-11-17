@@ -361,7 +361,7 @@ impl Preparation {
                             let mut milestone = datashed.milestone.clone();
                             while milestone > 0u8.into() {
                                 let bytes = basinsync::object_read::if_present(&self.bucket)?
-                                    .get_object(diffuse16::key(&milestone)?)
+                                    .get_object(timeline::key(&milestone)?)
                                     .await?;
                                 anyhow::ensure!(
                                     bytes.status_code() == 200,
@@ -407,7 +407,7 @@ impl Preparation {
                             Some(
                                 basinsync::range_get::presign(
                                     &self.bucket,
-                                    &diffuse16::key(&location.upstream)?,
+                                    &timeline::key(&location.upstream)?,
                                     location.offset,
                                     location.length,
                                 )

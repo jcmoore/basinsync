@@ -942,7 +942,7 @@ fn measure() -> Result<()> {
             runtime.block_on(async {
                 let response = crate::sequence::put_entry(
                     bucket,
-                    crate::diffuse16::key(&(&base + 1u8))?,
+                    crate::timeline::key(&(&base + 1u8))?,
                     &encoded,
                     crate::timeline::entry_headers(&encoded)?,
                 )
@@ -974,9 +974,7 @@ fn measure() -> Result<()> {
     if let Some(bucket) = &bucket {
         runtime.block_on(async {
             for (milestone, bytes) in stored {
-                let response = bucket
-                    .get_object(crate::diffuse16::key(&milestone)?)
-                    .await?;
+                let response = bucket.get_object(crate::timeline::key(&milestone)?).await?;
                 ensure!(
                     response.status_code() == 200 && response.as_slice() == bytes,
                     "stored event mismatch"

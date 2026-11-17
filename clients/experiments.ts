@@ -1,3 +1,4 @@
+import { key as timelineKey } from "./timeline";
 import {s3Fixture,s3FixtureVersion} from "./s3-fixture";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, existsSync, readFileSync, writeFileSync, openSync, closeSync, rmSync } from "node:fs";
@@ -78,7 +79,7 @@ try {
    const bucket=`experiment-${name}`;
    if(!isCpu){
     await s3.send(new CreateBucketCommand({Bucket:bucket}));
-    await s3.send(new PutObjectCommand({Bucket:bucket,Key:"timeline/0w1z",Body:readFileSync(`${artifacts}/seed-${flows}.event`),IfNoneMatch:"*"}));
+    await s3.send(new PutObjectCommand({Bucket:bucket,Key:timelineKey(1n),Body:readFileSync(`${artifacts}/seed-${flows}.event`),IfNoneMatch:"*"}));
    }
    await run([binary,"--exact","turso::experiments::measure","--ignored","--nocapture","--test-threads=1"],{
     EXP_ENGINE:config.engine,EXP_MODE:config.mode,EXP_BATCH:String(config.batch),EXP_FLOWS:String(flows),EXP_COUNT:String(isCpu?cpuCount:s3Count),EXP_WARMUP:String(isCpu?cpuWarmup:s3Warmup),EXP_OUTPUT:`${artifacts}/${name}.json`,BENCH_SEED_IMAGE:`${artifacts}/seed-${flows}.turso`,

@@ -1,3 +1,4 @@
+import { key as timelineKey } from "./timeline";
 import {s3Fixture,s3FixtureVersion} from "./s3-fixture";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, existsSync, readFileSync, writeFileSync, openSync, closeSync, rmSync } from "node:fs";
@@ -81,7 +82,7 @@ try {
         const bucket=`benchmark-${name}`;
         if(variant==="capture-s3") {
           await s3.send(new CreateBucketCommand({Bucket:bucket}));
-          await s3.send(new PutObjectCommand({Bucket:bucket,Key:"timeline/0w1z",Body:readFileSync(`${artifacts}/seed-${flows}.event`),IfNoneMatch:"*"}));
+          await s3.send(new PutObjectCommand({Bucket:bucket,Key:timelineKey(1n),Body:readFileSync(`${artifacts}/seed-${flows}.event`),IfNoneMatch:"*"}));
         }
         await run([binary,"--exact","turso::benchmark::commits","--ignored","--nocapture","--test-threads=1"],{
           BENCH_VARIANT:variant,BENCH_COMMITS:String(commits),BENCH_WARMUP:String(warmup),BENCH_FLOWS:String(flows),BENCH_BLOB_BYTES:String(blobBytes),

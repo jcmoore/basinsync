@@ -9,7 +9,6 @@ prerequisites:
 [datashed-timeline]: <../../../datashed-timeline.md>
 [development]: <../../../development.md>
 [differential-event]: <../../../glossary/differential-event.md>
-[diffuse16]: <../../../glossary/diffuse16.md>
 [downstream]: <../../../glossary/downstream.md>
 [empty-sentinel]: <../../../glossary/empty-sentinel.md>
 [envbuf]: <../../../glossary/envbuf.md>
@@ -33,9 +32,9 @@ Give the *Datashed*[~][datashed] a shared *Timeline*[~][timeline] for changes ac
 *Flows*[~][flow], replacing *Epilogue*[~][epilogue] listings for state recovery
 and refresh.
 
-1. Number *Milestones*[~][milestone] from one; name objects with *Diffuse16*[~][diffuse16].
-   List a seed, then search exponentially upward to find the latest; *empty
-   sentinels*[~][empty-sentinel] are exclusive bounds, including a listed seed.
+1. Number *Milestones*[~][milestone] from one; name objects with complemented
+   *Lexidecimal*[~][lexidecimal]. LIST the lowest published key to find the latest,
+   skipping zero-byte *sentinels*[~][empty-sentinel].
 2. Replay every *DifferentialEvent*[~][differential-event] to recover the mapping
    from *Flow*[~][flow] id to latest *Viewpoint*[~][viewpoint].
 3. Add `flow` to the multipart `details` field. Race to conditionally append the
@@ -81,7 +80,7 @@ Track each *Flow*[~][flow] and *downstream*[~][downstream]
 *Viewpoint's*[~][viewpoint] *upstream*[~][upstream] *Milestone*[~][milestone],
 absolute blob offset, content length, and hexadecimal *SHA-384*[~][sha384].
 Encode both positions as positive *Lexidecimal*[~][lexidecimal] text for indexing;
-derive object keys from *Milestones*[~][milestone] using *Diffuse16*[~][diffuse16].
+complement *Milestones*[~][milestone] before encoding their object keys.
 
 Return `latest`'s length and a signed *Range GET*[~][range-get] for its bytes in
 the *Datashed*[~][datashed] *Timeline*[~][timeline]. Every successful GET must expose

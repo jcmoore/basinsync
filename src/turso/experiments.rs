@@ -1011,7 +1011,7 @@ fn measure() -> Result<()> {
         async move {
             let response = crate::sequence::put_entry(
                 bucket,
-                crate::diffuse16::key(&milestone.into())?,
+                crate::timeline::key(&milestone.into())?,
                 &bytes,
                 crate::timeline::entry_headers(&bytes)?,
             )
@@ -1038,7 +1038,7 @@ fn measure() -> Result<()> {
     let mut recovered = initial.clone();
     for milestone in 2..(warmup + count) / batch + 2 {
         let response =
-            runtime.block_on(bucket.get_object(crate::diffuse16::key(&milestone.into())?))?;
+            runtime.block_on(bucket.get_object(crate::timeline::key(&milestone.into())?))?;
         ensure!(response.status_code() == 200, "missing acknowledged event");
         if kind == "image-verify" || kind == "image-no-replay" || kind == "wal-copy-hashed" {
             let command = crate::event::decode(response.as_slice())?;

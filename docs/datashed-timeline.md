@@ -6,12 +6,12 @@
 [datashed]: <glossary/datashed.md>
 [datashed-backup]: <datashed-backup.md>
 [differential-event]: <glossary/differential-event.md>
-[diffuse16]: <glossary/diffuse16.md>
 [empty-sentinel]: <glossary/empty-sentinel.md>
 [envbuf]: <glossary/envbuf.md>
 [epilogue-protocol]: <epilogue-protocol.md>
 [flexbuffers]: <glossary/flexbuffers.md>
 [flow]: <glossary/flow.md>
+[lexidecimal]: <glossary/lexidecimal.md>
 [margin]: <glossary/margin.md>
 [milestone]: <glossary/milestone.md>
 [node]: <glossary/node.md>
@@ -31,9 +31,10 @@ The *Datashed's*[~][datashed] shared *Timeline*[~][timeline] records state chang
 without gaps. Before writing, read the latest *Datashed*[~][datashed] *recovery anchor*[~][datashed-backup]
 and ingest every subsequent *DifferentialEvent*[~][differential-event]. Its
 recorded *Milestone*[~][milestone] seeds exponential search for the tail.
-Without a *CommitMarker*[~][commit-marker], list a seed in the
-*Timeline*[~][timeline] keyspace and replay from the beginning.
-*Diffuse16*[~][diffuse16] key order does not reveal the latest.
+Encode complemented *Milestones*[~][milestone] as *Lexidecimal*[~][lexidecimal],
+so newer entries sort first. Without a *CommitMarker*[~][commit-marker], LIST the
+lowest published key, skipping zero-byte *sentinels*[~][empty-sentinel], and
+replay from the beginning through that *Milestone*[~][milestone].
 Treat trailing *empty sentinels*[~][empty-sentinel] as exclusive upper search
 bounds. Leading *tombstones*[~][tombstone] occupy retired positions, not replayable
 entries; recovery needs a snapshot covering them. An empty *Timeline*[~][timeline] expects *Milestone*[~][milestone] one.

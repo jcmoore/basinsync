@@ -1,5 +1,10 @@
 //! A coalescing background consumer: replicate Flow markers before backing up a Datashed.
-use crate::{diffuse16, epilogue, event, lexidecimal::Viewpoint, timeline::Snapshot, turso};
+use crate::{
+    epilogue, event,
+    lexidecimal::Viewpoint,
+    timeline::{self, Snapshot},
+    turso,
+};
 use anyhow::{Context, Result, ensure};
 use num_bigint::BigUint;
 use s3::Bucket;
@@ -30,7 +35,7 @@ pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
     while milestone < *snapshot.prefix.milestone() {
         let next = &milestone + 1u8;
         let response = crate::object_read::if_present(bucket)?
-            .get_object(diffuse16::key(&next)?)
+            .get_object(timeline::key(&next)?)
             .await?;
         ensure!(
             response.status_code() == 200,

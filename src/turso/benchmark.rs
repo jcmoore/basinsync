@@ -1,5 +1,5 @@
 use super::*;
-use crate::{diffuse16, event};
+use crate::{event, timeline};
 use s3::{Bucket, Region, creds::Credentials};
 use serde::Serialize;
 use std::{env, fs, path::PathBuf, time::Instant};
@@ -126,7 +126,7 @@ fn commits() -> Result<()> {
             let bytes = event::encode(command)?;
             observed("event_encode");
             if let Some(bucket) = &bucket {
-                let key = diffuse16::key(&num_bigint::BigUint::from(index + 2))?;
+                let key = timeline::key(&num_bigint::BigUint::from(index + 2))?;
                 let response = runtime.block_on(crate::sequence::put_entry(
                     bucket,
                     &key,
@@ -178,7 +178,7 @@ fn commits() -> Result<()> {
         "database integrity failure"
     );
     if let Some(bucket) = &bucket {
-        let last = runtime.block_on(bucket.get_object(diffuse16::key(
+        let last = runtime.block_on(bucket.get_object(timeline::key(
             &num_bigint::BigUint::from(warmup + count + 1),
         )?))?;
         ensure!(last.status_code() == 200, "missing final event");

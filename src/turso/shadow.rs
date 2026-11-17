@@ -1307,7 +1307,7 @@ fn measure_disk() -> Result<()> {
         runtime.block_on(async {
             let r = crate::sequence::put_entry(
                 bucket,
-                crate::diffuse16::key(&1u8.into())?,
+                crate::timeline::key(&1u8.into())?,
                 &seed,
                 crate::timeline::entry_headers(&seed)?,
             )
@@ -1335,7 +1335,7 @@ fn measure_disk() -> Result<()> {
                 runtime.block_on(async {
                     let r = crate::sequence::put_entry(
                         bucket,
-                        crate::diffuse16::key(&milestone.into())?,
+                        crate::timeline::key(&milestone.into())?,
                         &bytes,
                         crate::timeline::entry_headers(&bytes)?,
                     )
@@ -1354,7 +1354,7 @@ fn measure_disk() -> Result<()> {
     let mut events = Vec::new();
     for n in 2..groups + 2 {
         events.push(if let Some(bucket) = &bucket {
-            let r = runtime.block_on(bucket.get_object(crate::diffuse16::key(&n.into())?))?;
+            let r = runtime.block_on(bucket.get_object(crate::timeline::key(&n.into())?))?;
             ensure!(r.status_code() == 200, "missing stored event");
             r.as_slice().to_vec()
         } else {

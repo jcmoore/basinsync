@@ -8,7 +8,7 @@ import { encode as flexEncode } from "flatbuffers/js/flexbuffers.js";
 import { toObject, encode as extensionEncode } from "./flexbuffer";
 import { commit, form, epilogueStatus as fullStatus, latestBlob, sha384, sha384Bytes, type ApiError, type CommitResponse, type Timelines, type ViewpointMismatch, reserveUserHeap, type UserHeapResponse, type UserHeapNode } from "./client";
 import { parse, stringify } from "./json0";
-import { key, fromKey } from "./diffuse16";
+import { key, fromKey } from "./timeline";
 import { key as epilogueKey, encode as lex, decode as unlex } from "./lexidecimal";
 import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, entryDigest, type WalDelta, type Marker } from "./events";
 import { ingestWal } from "./wal";
@@ -395,10 +395,14 @@ try {
     const b=await bucket(),writer=await server(b);
     for(let n=0;n<3;n++)await status(await commit(writer.url,"bounds",bytes(`marker-${n}`),BigInt(n)),201);
     await stop(writer.process);
-    for(const n of [4n,16n])await s3.send(new PutObjectCommand({Bucket:b,Key:key(n),Body:new Uint8Array()}));
-    // Diffuse16(16) sorts before the live seed. Ignore conditional reads to exercise length-based detection too.
-    const proxy=relay((request,response)=>request.method==="HEAD"&&response.status===304?new Response(null,{status:200,headers:{"content-length":"0"}}):response);
-    const restored=await server(b,proxy.url);assert.equal((await fullStatus(restored.url,"bounds")).latest?.viewpoint,2n);
+    for(const n of [4n,16n,1n<<64n])await s3.send(new PutObjectCommand({Bucket:b,Key:key(n),Body:new Uint8Array()}));
+    // Empty sentinels sort before published entries. Ignore conditional reads to exercise length-based detection too.
+    const reads:{method:string;url:URL}[]=[];
+    const proxy=relay((request,response)=>{reads.push({method:request.method,url:new URL(request.url)});return request.method==="HEAD"&&response.status===304?new Response(null,{status:200,headers:{"content-length":"0"}}):response;});
+    const restored=await server(b,proxy.url);
+    assert.equal(reads.filter(r=>r.method==="GET"&&r.url.searchParams.get("prefix")==="timeline/").length,4,"skip each sentinel using ordered LIST pages");
+    assert(!reads.some(r=>r.method==="HEAD"&&r.url.pathname.includes("/timeline/")),"LIST gives the tail without exponential probes");
+    assert.equal((await fullStatus(restored.url,"bounds")).latest?.viewpoint,2n);
     await status(await commit(restored.url,"bounds",bytes("marker-3"),3n),201);
     assert.equal(markerAt(await get(b,4n),"bounds").viewpoint,"3");await stop(restored.process);
   }
@@ -525,7 +529,8 @@ try {
   for await(const page of paginateListObjectsV2({client:s3,pageSize:137},{Bucket:b,Prefix:"timeline/"})) keys.push(...(page.Contents??[]).map(o=>o.Key!));
   const eventCount=keys.length;
   assert.deepEqual(keys,Array.from({length:eventCount},(_,i)=>key(BigInt(i+1))).sort());
-  assert(fromKey(keys[0])<BigInt(eventCount),"lowest key is a seed, not the latest Milestone");
+  assert.deepEqual(keys,Array.from({length:eventCount},(_,i)=>key(BigInt(eventCount-i))),"keys list newest Milestones first");
+  assert.equal(fromKey(keys[0]),BigInt(eventCount),"lowest key is the latest Milestone");
   const replayed=new Map<string,bigint>();
   const events=new Map<number,{payload:Uint8Array;delta:WalDelta;entries:ReturnType<typeof entriesAt>}>();
   let read=1;
@@ -571,7 +576,7 @@ try {
   assert(trace.some(r=>r.url.searchParams.get("prefix")==="epilogue/"),"read the Datashed recovery anchor before writing");
   await accepted(writer.url,flowA,bytes("after recovery"),2n);
   await stop(writer.process);await stop(observer.process);
-  console.log(`put of success: ${total} markers across ${eventCount} gapless Milestones; independent TS WAL ingestion, full replay, and minimum-key seed search`);
+  console.log(`put of success: ${total} markers across ${eventCount} gapless Milestones; independent TS WAL ingestion, full replay, and minimum-key latest discovery`);
 
   for(let round=0;round<Number(process.env.RACE_ROUNDS??8);round++){
     const raceBucket=await bucket(); let armed=false,arrived=0;

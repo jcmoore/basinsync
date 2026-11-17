@@ -3,7 +3,6 @@
 [datashed]: <glossary/datashed.md>
 [derived-subkey]: <glossary/derived-subkey.md>
 [differential-event]: <glossary/differential-event.md>
-[diffuse16]: <glossary/diffuse16.md>
 [empty-sentinel]: <glossary/empty-sentinel.md>
 [envbuf]: <glossary/envbuf.md>
 [flow]: <glossary/flow.md>
@@ -31,7 +30,7 @@ All implemented S3 key patterns, relative to the configured bucket:
 | Empty-validator reference | `sentinel/empty` |
 | *Tombstone*[~][tombstone] probes | `sentinel/tombstone/${length}` |
 | *Margin*[~][margin] probes | `sentinel/margin/${counter}` |
-| *Datashed*[~][datashed] *DifferentialEvent*[~][differential-event] | `timeline/${diffuse16(milestone)}` |
+| *Datashed*[~][datashed] *DifferentialEvent*[~][differential-event] | `timeline/${lex(~milestone)}` |
 | *Datashed*[~][datashed] backup *CommitMarker*[~][commit-marker] | `epilogue/${lex(~viewpoint)}` |
 | *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `epilogue/${lex(viewpoint)}` |
 | *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
@@ -40,7 +39,7 @@ All implemented S3 key patterns, relative to the configured bucket:
 | *Old-generation*[~][old-generation] *node*[~][node] | `userheap/old/${node_id}/${node_revision}` |
 
 `lex` is signed *Lexidecimal*[~][lexidecimal]; `~` is arbitrary-precision bitwise
-complement. `diffuse16` is *Diffuse16*[~][diffuse16]. *Viewpoints*[~][viewpoint]
+complement. *Viewpoints*[~][viewpoint]
 start at zero; *Milestones*[~][milestone] start at one.
 *Revisions*[~][revision] are lowercase UUIDv4 strings. A *Flow's*[~][flow]
 revision is assigned at its first commit; each *node*[~][node] allocation gets a

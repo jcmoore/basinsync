@@ -1,8 +1,37 @@
-use crate::{diffuse16, event, lexidecimal::Viewpoint};
+use crate::{
+    event,
+    lexidecimal::{self, Viewpoint},
+};
 use anyhow::{Context, Result, ensure};
-use num_bigint::BigUint;
+use num_bigint::{BigInt, BigUint};
 use s3::Bucket;
 use std::{collections::BTreeMap, future::Future};
+
+pub const PREFIX: &str = "timeline/";
+
+pub fn key(milestone: &BigUint) -> Result<String> {
+    ensure!(
+        *milestone != BigUint::from(0u8),
+        "Milestone zero has no Timeline object"
+    );
+    let key = format!(
+        "{PREFIX}{}",
+        lexidecimal::encode(&!BigInt::from(milestone.clone()))
+    );
+    ensure!(key.len() <= 1024, "Milestone exceeds S3 key limit");
+    Ok(key)
+}
+
+pub fn from_key(key: &str) -> Result<BigUint> {
+    let encoded = key
+        .strip_prefix(PREFIX)
+        .context("invalid Timeline prefix")?;
+    let milestone = (!lexidecimal::decode(encoded)?)
+        .to_biguint()
+        .context("Timeline keys must encode complemented positive Milestones")?;
+    ensure!(self::key(&milestone)? == key, "invalid Timeline key");
+    Ok(milestone)
+}
 
 #[derive(Default)]
 pub struct Datashed {
@@ -358,7 +387,7 @@ impl Prepared {
         );
         let response = crate::sequence::put_feed(
             bucket,
-            &diffuse16::key(&self.milestone)?,
+            &key(&self.milestone)?,
             &self.bytes,
             entry_headers(&self.bytes)?,
         )
@@ -434,7 +463,7 @@ impl Datashed {
     }
     pub fn prepare_wal(&mut self, commands: Vec<event::FlowCommand>) -> Result<Prepared> {
         let milestone = &self.milestone + 1u8;
-        diffuse16::key(&milestone)?;
+        key(&milestone)?;
         ensure!(
             self.milestone == 0u8.into() || self.head.is_some(),
             "missing predecessor event digest"
@@ -558,7 +587,7 @@ fn validate_locations(
 }
 
 // The seed exists. Exponential probes bracket the tail, then binary search
-// resolves the last present Milestone. Key order is intentionally irrelevant.
+// resolves the last present Milestone without listing the Timeline.
 pub async fn last_existing<F, Fut>(seed: BigUint, mut exists: F) -> Result<BigUint>
 where
     F: FnMut(BigUint) -> Fut,
@@ -584,14 +613,14 @@ where
 }
 
 pub async fn exists(bucket: &Bucket, milestone: &BigUint) -> Result<bool> {
-    crate::object_read::exists(bucket, &diffuse16::key(milestone)?).await
+    crate::object_read::exists(bucket, &key(milestone)?).await
 }
 
 async fn replay(bucket: &Bucket, state: &mut Datashed, tail: BigUint) -> Result<()> {
     while state.milestone < tail {
         let milestone = &state.milestone + 1u8;
         let response = crate::object_read::if_present(bucket)?
-            .get_object(diffuse16::key(&milestone)?)
+            .get_object(key(&milestone)?)
             .await?;
         ensure!(
             response.status_code() == 200,
@@ -659,44 +688,90 @@ pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
         }
     }
 
-    // A Datashed Epilogue supplies the seed directly; no Timeline listing is needed.
-    // Genesis has no anchor yet, so discover a seed with one minimum-sized LIST.
-    let seed = if state.milestone == 0u8.into() {
-        let (page, status) = bucket
-            .list_page(diffuse16::PREFIX.into(), None, None, None, Some(1))
-            .await?;
-        ensure!(status == 200, "Timeline LIST returned HTTP {status}");
-        page.contents
-            .first()
-            .map(|o| diffuse16::from_key(&o.key))
-            .transpose()?
-    } else {
-        Some(state.milestone.clone())
-    };
-    if let Some(seed) = seed {
-        let tail = if seed == state.milestone || exists(bucket, &seed).await? {
-            last_existing(seed, |m| async move { exists(bucket, &m).await }).await?
-        } else {
-            let mut low = BigUint::from(0u8);
-            let mut high = seed;
-            while &low + 1u8 < high {
-                let mid = (&low + &high) >> 1usize;
-                if exists(bucket, &mid).await? {
-                    low = mid;
-                } else {
-                    high = mid;
-                }
+    let tail = if state.milestone == 0u8.into() {
+        // Descending keys list the newest Milestone first. Skip replaceable sentinels.
+        let mut after = None;
+        loop {
+            let (page, status) = bucket
+                .list_page(PREFIX.into(), None, None, after.clone(), Some(1))
+                .await?;
+            ensure!(status == 200, "Timeline LIST returned HTTP {status}");
+            let Some(object) = page.contents.first() else {
+                return Ok(());
+            };
+            ensure!(
+                after.as_ref().is_none_or(|key: &String| object.key > *key),
+                "Timeline LIST did not advance"
+            );
+            let milestone = from_key(&object.key)?;
+            if object.size > 0 {
+                break milestone;
             }
-            low
-        };
-        replay(bucket, state, tail).await?;
-    }
+            after = Some(object.key.clone());
+        }
+    } else {
+        // A Datashed Epilogue supplies the seed; no Timeline listing is needed.
+        last_existing(state.milestone.clone(), |m| async move {
+            exists(bucket, &m).await
+        })
+        .await?
+    };
+    replay(bucket, state, tail).await?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    #[test]
+    fn keys_complement_positive_milestones_and_descend_across_width_boundaries() -> Result<()> {
+        for (n, encoded) in [
+            (1u16, "0yffe"),
+            (15, "0yff0"),
+            (16, "0yfeef"),
+            (256, "0yfdeff"),
+        ] {
+            let milestone = BigUint::from(n);
+            assert_eq!(key(&milestone)?, format!("timeline/{encoded}"));
+            assert_eq!(from_key(&key(&milestone)?)?, milestone);
+        }
+        for bits in [4usize, 8, 64, 68, 256, 1024] {
+            let n = BigUint::from(1u8) << bits;
+            let values = [&n - 1u8, n.clone(), &n + 1u8];
+            for pair in values.windows(2) {
+                assert!(key(&pair[0])? > key(&pair[1])?);
+                assert_eq!(from_key(&key(&pair[0])?)?, pair[0]);
+            }
+        }
+        assert!(key(&0u8.into()).is_err());
+        assert!(key(&(BigUint::from(1u8) << 4096usize)).is_err());
+        for bad in [
+            "timeline/0yfff",
+            "timeline/0z001",
+            "timeline/0w1z",
+            "timeline/0yFFE",
+            "timeline/0yffe/extra",
+            "epilogue/0yffe",
+        ] {
+            assert!(from_key(bad).is_err(), "{bad}");
+        }
+        Ok(())
+    }
+
+    proptest! {
+        #[test]
+        fn arbitrary_precision_keys_roundtrip_and_reverse_order(
+            a in prop::collection::vec(any::<u8>(), 0..256),
+            b in prop::collection::vec(any::<u8>(), 0..256)
+        ) {
+            let a = BigUint::from_bytes_be(&a) + 1u8;
+            let b = BigUint::from_bytes_be(&b) + 1u8;
+            prop_assert_eq!(from_key(&key(&a).unwrap()).unwrap(), a.clone());
+            prop_assert_eq!(key(&a).unwrap().cmp(&key(&b).unwrap()), b.cmp(&a));
+        }
+    }
     fn marker(viewpoint: &str) -> event::Marker {
         use sha2::{Digest, Sha384};
         event::Marker {

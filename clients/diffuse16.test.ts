@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { encode, decode, key, fromKey } from "./diffuse16";
+import { encode, decode } from "./diffuse16";
 import { encodeEvent, markerAt } from "./events";
 import { toReference } from "./flexbuffer";
 import { sha384 } from "./client";
 
-test("Diffuse16 reverses nibbles and scatters positive arbitrary-precision Milestones", () => {
+test("Diffuse16 reverses nibbles and scatters arbitrary-precision integers", () => {
   for (const [n, wire] of [[0n,"0w0z"],[1n,"0w1z"],[16n,"0w01z"],[27n,"0wb1z"],[256n,"0w001z"],[-1n,"0wfy"],[-16n,"0w0y"],[-17n,"0wfey"],[-256n,"0w00y"]] as const) {
     expect(encode(n)).toBe(wire); expect(decode(wire)).toBe(n);
   }
@@ -13,11 +13,8 @@ test("Diffuse16 reverses nibbles and scatters positive arbitrary-precision Miles
     const value=BigInt(`0x${randomBytes(200).toString("hex")}`);
     expect(decode(encode(value))).toBe(value);
     expect(decode(encode(~value))).toBe(~value);
-    expect(fromKey(key(value))).toBe(value);
   }
-  expect(key(16n)<key(1n)).toBe(true);
   for (const wire of ["", "0wz", "0w00z", "0w10z", "0wFz", "0w-1z"]) expect(()=>decode(wire)).toThrow();
-  expect(()=>key(0n)).toThrow();
 });
 
 test("FlexBuffers uses a unary command vector and exact binary blobs", () => {

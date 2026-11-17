@@ -1,3 +1,4 @@
+[milestone]: <milestone.md>
 [twos-complement]: <twos-complement.md>
 [viewpoint]: <viewpoint.md>
 
@@ -23,5 +24,6 @@ and parsing the magnitude; complement the resulting integer for `0y`.
 Canonical spellings reproduce themselves when re-encoded.
 
 Examples: `0 → 0z000`, `16 → 0z0110`, `-1 → 0yfff`, `-17 → 0yfeef`.
-Encoding the *complemented*[~][twos-complement] *viewpoint*[~][viewpoint] reverses *viewpoint*[~][viewpoint] order,
-so the minimum object key identifies the maximum *viewpoint*[~][viewpoint].
+Encoding *complemented*[~][twos-complement] *Viewpoints*[~][viewpoint] or
+*Milestones*[~][milestone] reverses sequence order, so the minimum published
+object key identifies the latest position.
