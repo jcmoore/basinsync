@@ -26,6 +26,8 @@ pub enum Mode {
     Bulk,
     Range,
     Hedged,
+    BulkParallel,
+    RangeParallel,
 }
 impl Mode {
     pub fn parse(value: &str) -> Result<Self> {
@@ -35,6 +37,8 @@ impl Mode {
             "bulk" => Self::Bulk,
             "range" => Self::Range,
             "hedged" => Self::Hedged,
+            "bulk-parallel" => Self::BulkParallel,
+            "range-parallel" => Self::RangeParallel,
             _ => anyhow::bail!("unknown recovery mode"),
         })
     }
@@ -44,6 +48,8 @@ pub struct Config {
     pub mode: Mode,
     pub concurrency: usize,
     pub max_bytes: usize,
+    pub bulk_concurrency: usize,
+    pub bulk_buffer_bytes: usize,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -51,6 +57,8 @@ impl Default for Config {
             mode: Mode::Bulk,
             concurrency: 4,
             max_bytes: 128 * 1024 * 1024,
+            bulk_concurrency: 2,
+            bulk_buffer_bytes: 32 * 1024 * 1024,
         }
     }
 }
@@ -66,6 +74,12 @@ impl Config {
         if let Ok(value) = std::env::var("BASINSYNC_RECOVERY_MAX_BYTES") {
             config.max_bytes = value.parse()?;
         }
+        if let Ok(value) = std::env::var("BASINSYNC_RECOVERY_BULK_CONCURRENCY") {
+            config.bulk_concurrency = value.parse()?;
+        }
+        if let Ok(value) = std::env::var("BASINSYNC_RECOVERY_BULK_BUFFER_BYTES") {
+            config.bulk_buffer_bytes = value.parse()?;
+        }
         Ok(config)
     }
 }
@@ -77,6 +91,8 @@ pub struct Stats {
     pub applied: usize,
     pub rejected_orders: usize,
     pub peak_buffer_bytes: usize,
+    pub peak_bulk_downloads: usize,
+    pub peak_bulk_reserved_bytes: usize,
 }
 #[derive(Clone, Debug)]
 pub struct Candidate {
@@ -270,6 +286,7 @@ async fn get_order(
     max_bytes: usize,
 ) -> Result<Download> {
     let high = candidate.order.highest.clone().min(tail + 1u8);
+    let max_bytes = max_bytes.min(usize::try_from(candidate.size)?);
     let (bytes, index, base) = if range_reads {
         let (head, status) = crate::object_read::if_present(bucket)?
             .head_object(&candidate.key)
@@ -343,6 +360,45 @@ async fn get_order(
     Ok(Download { entries })
 }
 
+struct ActiveOrder {
+    range: Range<BigUint>,
+    bytes: usize,
+}
+
+/// Bytes already buffered and those reserved by unfinished archive reads share a
+/// budget. Count each shared body once; the individual fallback has its own
+/// per-response limit and does not occupy an archive slot.
+fn bulk_usage(
+    waiting: &BTreeMap<BigUint, Entry>,
+    active: &HashMap<String, ActiveOrder>,
+) -> (usize, usize) {
+    let mut bodies = BTreeMap::new();
+    for entry in waiting.values().filter(|entry| entry.source.is_some()) {
+        bodies.insert(Arc::as_ptr(&entry.bytes) as usize, entry.bytes.len());
+    }
+    (
+        bodies.len() + active.len(),
+        bodies.values().sum::<usize>() + active.values().map(|order| order.bytes).sum::<usize>(),
+    )
+}
+
+fn next_uncovered(
+    cursor: &BigUint,
+    waiting: &BTreeMap<BigUint, Entry>,
+    active: &HashMap<String, ActiveOrder>,
+) -> BigUint {
+    let mut next = cursor.clone();
+    loop {
+        if waiting.contains_key(&next) {
+            next += 1u8;
+        } else if let Some(order) = active.values().find(|order| order.range.contains(&next)) {
+            next = order.range.end.clone();
+        } else {
+            return next;
+        }
+    }
+}
+
 pub async fn replay(
     bucket: &Bucket,
     state: &mut Datashed,
@@ -350,7 +406,10 @@ pub async fn replay(
     config: &Config,
 ) -> Result<Stats> {
     ensure!(
-        (1..=32).contains(&config.concurrency) && config.max_bytes > 0,
+        (1..=32).contains(&config.concurrency)
+            && (1..=32).contains(&config.bulk_concurrency)
+            && config.max_bytes > 0
+            && config.bulk_buffer_bytes > 0,
         "invalid recovery limits"
     );
     let mut stats = Stats::default();
@@ -358,7 +417,18 @@ pub async fn replay(
     if cursor > tail {
         return Ok(stats);
     }
-    let bulk = matches!(config.mode, Mode::Bulk | Mode::Range | Mode::Hedged);
+    let parallel_bulk = matches!(config.mode, Mode::BulkParallel | Mode::RangeParallel);
+    let bulk = parallel_bulk || matches!(config.mode, Mode::Bulk | Mode::Range | Mode::Hedged);
+    let bulk_window = if parallel_bulk {
+        config.bulk_concurrency
+    } else {
+        1
+    };
+    let bulk_budget = if parallel_bulk {
+        config.bulk_buffer_bytes
+    } else {
+        usize::MAX
+    };
     let (position, positions) = watch::channel(cursor.clone());
     let (output, mut discovered) = mpsc::channel(64);
     let listing =
@@ -368,17 +438,24 @@ pub async fn replay(
         let mut failed = BTreeSet::<String>::new();
         let mut waiting = BTreeMap::<BigUint, Entry>::new();
         let mut individuals = BTreeSet::<BigUint>::new();
-        let mut active_bulk = false;
+        let mut active = HashMap::<String, ActiveOrder>::new();
         let mut downloads = JoinSet::new();
         let mut discovery_open = bulk;
         loop {
-            while let Ok(candidate) = discovered.try_recv() { candidates.insert(candidate.key.clone(), candidate); }
+            while let Ok(candidate) = discovered.try_recv() {
+                candidates.insert(candidate.key.clone(), candidate);
+            }
             while let Some(entry) = waiting.remove(&cursor) {
                 match state.apply_entry(cursor.clone(), &entry.bytes[entry.range]) {
-                    Ok(()) => { stats.applied += 1; if entry.source.is_some() { stats.bulk_events += 1; } cursor += 1u8; }
+                    Ok(()) => {
+                        stats.applied += 1;
+                        if entry.source.is_some() { stats.bulk_events += 1; }
+                        cursor += 1u8;
+                    }
                     Err(error) => if let Some(source) = entry.source {
                         tracing::warn!(%error, key=%source, "invalid BulkOrder event; using Timeline");
-                        failed.insert(source.clone()); stats.rejected_orders += 1;
+                        failed.insert(source.clone());
+                        stats.rejected_orders += 1;
                         waiting.retain(|_, entry| entry.source.as_ref() != Some(&source));
                         break;
                     } else { return Err(error); },
@@ -390,27 +467,48 @@ pub async fn replay(
             if cursor > *position.borrow() {
                 position.send_replace((&cursor + 31u8).min(&tail + 1u8));
             }
-            // Metadata is bounded too; weaker orders remain useful fallbacks, not mandatory history.
             if candidates.len() > 128 {
-                let mut ranked: Vec<_> = candidates.values().map(|c| (c.order.highest.clone(), c.key.clone())).collect(); ranked.sort();
+                let mut ranked: Vec<_> = candidates.values().map(|c| (c.order.highest.clone(), c.key.clone())).collect();
+                ranked.sort();
                 for (_, key) in ranked.into_iter().take(candidates.len()-128) { candidates.remove(&key); }
             }
-            if bulk && !active_bulk && !waiting.contains_key(&cursor)
-                && let Some(candidate) = candidates.values().filter(|c| c.order.covers(&cursor)).max_by_key(|c| &c.order.highest).cloned() {
-                    let reader = bucket.clone(); let low = cursor.clone(); let high = tail.clone(); let key = candidate.key.clone(); let config = config.clone();
-                    let frontier = candidate.order.highest.clone().min(&tail + 1u8);
-                    if frontier > *position.borrow() { position.send_replace(frontier); }
-                    downloads.spawn(async move { (Some(key), None, get_order(&reader, &candidate, low, high, config.mode == Mode::Range, config.max_bytes).await) });
-                    active_bulk = true; stats.bulk_gets += 1;
+            if bulk {
+                loop {
+                    let low = next_uncovered(&cursor, &waiting, &active);
+                    let (slots, bytes) = bulk_usage(&waiting, &active);
+                    if low > tail || slots >= bulk_window { break; }
+                    let Some(candidate) = candidates.values().filter(|candidate| {
+                        candidate.order.covers(&low) && !active.contains_key(&candidate.key)
+                            && (matches!(config.mode, Mode::Range | Mode::RangeParallel) || candidate.size <= config.max_bytes as u64)
+                            && candidate.size <= bulk_budget.saturating_sub(bytes) as u64
+                    }).max_by_key(|candidate| &candidate.order.highest).cloned() else { break; };
+                    let high = candidate.order.highest.clone().min(&tail + 1u8);
+                    if high > *position.borrow() { position.send_replace(high.clone()); }
+                    active.insert(candidate.key.clone(), ActiveOrder {
+                        range: low.clone()..high,
+                        bytes: usize::try_from(candidate.size)?,
+                    });
+                    stats.peak_bulk_downloads = stats.peak_bulk_downloads.max(active.len());
+                    stats.peak_bulk_reserved_bytes = stats.peak_bulk_reserved_bytes.max(bulk_usage(&waiting, &active).1);
+                    stats.bulk_gets += 1;
+                    let reader = bucket.clone();
+                    let tail = tail.clone();
+                    let range_reads = matches!(config.mode, Mode::Range | Mode::RangeParallel);
+                    let max_bytes = config.max_bytes;
+                    downloads.spawn(async move {
+                        (Some(candidate.key.clone()), None, get_order(&reader, &candidate, low, tail, range_reads, max_bytes).await)
+                    });
+                }
             }
             let window = if config.mode == Mode::Parallel { config.concurrency } else { 1 };
-            if !active_bulk || config.mode == Mode::Hedged {
+            // A future buffered order must not prevent filling an earlier gap.
+            if !active.values().any(|order| order.range.contains(&cursor)) || config.mode == Mode::Hedged {
                 for offset in 0..window {
                     let milestone = &cursor + offset;
-                    if milestone > tail { break; }
-                    if individuals.len() >= window { break; }
+                    if milestone > tail || individuals.len() >= window { break; }
                     if !waiting.contains_key(&milestone) && individuals.insert(milestone.clone()) {
-                        let reader = bucket.clone(); let max_bytes = config.max_bytes;
+                        let reader = bucket.clone();
+                        let max_bytes = config.max_bytes;
                         downloads.spawn(async move { (None, Some(milestone.clone()), get_event(&reader, milestone, max_bytes).await) });
                         stats.timeline_gets += 1;
                     }
@@ -424,14 +522,15 @@ pub async fn replay(
                 download = downloads.join_next(), if !downloads.is_empty() => {
                     let (source, milestone, result) = download.context("missing recovery download")?.context("recovery download panicked")?;
                     if let Some(milestone) = milestone { individuals.remove(&milestone); }
-                    if source.is_some() { active_bulk = false; }
+                    if let Some(source) = &source { active.remove(source); }
                     match result {
                         Ok(download) => for (milestone, entry) in download.entries {
                             if milestone >= cursor { waiting.entry(milestone).or_insert(entry); }
                         },
                         Err(error) => if let Some(key) = source {
                             tracing::warn!(%error, %key, "BulkOrder retrieval failed; using Timeline");
-                            failed.insert(key); stats.rejected_orders += 1;
+                            failed.insert(key);
+                            stats.rejected_orders += 1;
                         } else { return Err(error); },
                     }
                     let mut bodies = BTreeMap::new();
@@ -455,4 +554,81 @@ pub async fn replay(
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefetch_frontier_skips_downloads_and_buffered_events_without_applying_them() {
+        let cursor = 42u8.into();
+        let body = Arc::new(vec![0; 64]);
+        let waiting = BTreeMap::from([
+            (
+                80u8.into(),
+                Entry {
+                    bytes: body.clone(),
+                    range: 0..32,
+                    source: Some("second".into()),
+                },
+            ),
+            (
+                81u8.into(),
+                Entry {
+                    bytes: body,
+                    range: 32..64,
+                    source: Some("second".into()),
+                },
+            ),
+        ]);
+        let active = HashMap::from([(
+            "first".into(),
+            ActiveOrder {
+                range: 42u8.into()..80u8.into(),
+                bytes: 100,
+            },
+        )]);
+        assert_eq!(next_uncovered(&cursor, &waiting, &active), 82u8.into());
+        assert_eq!(cursor, 42u8.into());
+        assert_eq!(bulk_usage(&waiting, &active), (2, 164));
+        assert_eq!(next_uncovered(&41u8.into(), &waiting, &active), 41u8.into());
+    }
+
+    #[test]
+    fn completed_future_bodies_keep_their_slot_and_share_the_byte_budget() {
+        let body = Arc::new(vec![0; 64]);
+        let mut waiting = BTreeMap::from([
+            (
+                80u8.into(),
+                Entry {
+                    bytes: body.clone(),
+                    range: 0..32,
+                    source: Some("second".into()),
+                },
+            ),
+            (
+                81u8.into(),
+                Entry {
+                    bytes: body,
+                    range: 32..64,
+                    source: Some("second".into()),
+                },
+            ),
+            (
+                42u8.into(),
+                Entry {
+                    bytes: Arc::new(vec![0; 512]),
+                    range: 0..512,
+                    source: None,
+                },
+            ),
+        ]);
+        let active = HashMap::new();
+        assert_eq!(bulk_usage(&waiting, &active), (1, 64));
+        waiting.remove(&80u8.into());
+        assert_eq!(bulk_usage(&waiting, &active), (1, 64));
+        waiting.remove(&81u8.into());
+        assert_eq!(bulk_usage(&waiting, &active), (0, 0));
+    }
 }

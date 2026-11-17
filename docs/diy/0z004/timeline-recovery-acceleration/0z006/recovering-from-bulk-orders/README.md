@@ -43,6 +43,14 @@ keeps one individual GET progressing beside a BulkOrder GET. Apply all results i
 order. `BASINSYNC_RECOVERY_CONCURRENCY` defaults to four;
 `BASINSYNC_RECOVERY_MAX_BYTES` bounds each data response, defaulting to 128 MiB.
 
+Experimental `bulk-parallel` and `range-parallel` modes prefetch beyond unfinished
+orders using their advertised endpoints, while still ingesting strictly in order.
+`BASINSYNC_RECOVERY_BULK_CONCURRENCY` defaults to two; completed future orders
+retain their slots. `BASINSYNC_RECOVERY_BULK_BUFFER_BYTES` defaults to 32 MiB,
+covering buffered archive payloads plus in-flight reservations using listed object
+sizes, including for Range reads. Individual fallback responses, transient buffers,
+and database memory are separate. Oversized orders fall back to individual reads.
+
 Compare exact recovered database images across all strategies, including overlapping
 and contained intervals, paginated listings, snapshot suffixes, corruption,
 unavailable orders, and blocked discovery. Benchmark latency, transferred bytes,

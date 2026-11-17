@@ -31,7 +31,7 @@ try{
     }
     return response;
   });
-  for(const mode of ["parallel","bulk","range","hedged"]){
+  for(const mode of ["parallel","bulk","range","hedged","bulk-parallel","range-parallel"]){
     calls.length=0;const restored=await f.recover(bucket,mode,traced);assert.equal(restored.sha384,baseline.sha384);assert.deepEqual(restored.flows,baseline.flows);
     if(mode!=="parallel")assert(calls.some(c=>c.method==="GET"&&c.url.pathname.includes("/analogue/")),`${mode} used BulkOrders`);
     if(mode==="range")assert(calls.some(c=>c.method==="HEAD"&&c.url.pathname.includes("/analogue/")));
@@ -41,7 +41,7 @@ try{
   // A stronger but corrupt candidate must not install a false prefix or poison fallback.
   const corrupt=encodeBulkOrder(1n,events),offset=decodeBulkOrder(corrupt).index.offsets[11]+rangesAt(events[11])[0].offset;corrupt[offset]^=1;
   await put(1,65,corrupt);
-  for(const mode of ["bulk","range","hedged"]){const restored=await f.recover(bucket,mode);assert.equal(restored.sha384,baseline.sha384);}
+  for(const mode of ["bulk","range","hedged","bulk-parallel","range-parallel"]){const restored=await f.recover(bucket,mode);assert.equal(restored.sha384,baseline.sha384);}
   await f.s3.send(new DeleteObjectCommand({Bucket:bucket,Key:key(1n,65n)}));
   const malformed=encodeBulkOrder(1n,events);malformed[malformed.length-1]^=1;
   await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(1n,66n),Body:malformed}));
@@ -64,6 +64,7 @@ try{
     assert.equal((await f.recover(anchored,"range",observed)).sha384,baseline.sha384);
     assert(reads.some(r=>r.path.includes("/analogue/")&&r.range&&Number(r.range.split("-")[0].slice(6))>=decoded.index.offsets[16]&&Number(r.range.split("-")[0].slice(6))<decoded.range.start),"fetch a useful suffix without its checkpointed prefix");
     assert(!reads.some(r=>r.path.includes("/timeline/")&&timelineFromKey(r.path.slice(r.path.indexOf("timeline/")))<=16n),"never re-read the snapshot prefix");
+    const capped=await f.recover(anchored,"range",undefined,false,{BASINSYNC_RECOVERY_MAX_BYTES:String(decoded.range.start-decoded.index.offsets[16])});assert.equal(capped.sha384,baseline.sha384);assert(capped.stats.bulk_gets>0,"a Range suffix can fit even when the full object exceeds the per-response cap");
     await f.s3.send(new DeleteObjectCommand({Bucket:anchored,Key:key(1n,65n)}));
     for(const [low,high] of [[1,25],[25,41],[41,57],[57,65]]){
       const body=encodeBulkOrder(BigInt(low),events.slice(low-1,high-1)),{range}=decodeBulkOrder(body);
@@ -73,6 +74,48 @@ try{
     const delayed=f.relay(async(request,next)=>{const url=new URL(request.url);if(url.searchParams.get("prefix")==="analogue/")await Bun.sleep(40);if(request.method==="GET"&&url.pathname.includes("/timeline/")){individual++;await Bun.sleep(20);}return next();});
     assert.equal((await f.recover(anchored,"bulk",delayed)).sha384,baseline.sha384);
     assert(individual<12,`a speculative discovery frontier must retain orders ending behind it: ${individual} individual GETs`);
+  }
+  // Complete the second order while the first is blocked. Completed future
+  // bodies must occupy a slot, and corruption of the first must not lose them.
+  {
+    const b=await f.bucket();await f.seed(b,events);
+    const bodies=new Map<string,Uint8Array>();
+    for(const [low,high] of [[1,17],[17,33],[33,49],[49,65]]){
+      const body=encodeBulkOrder(BigInt(low),events.slice(low-1,high-1)),{range}=decodeBulkOrder(body),name=key(BigInt(low),BigInt(high));bodies.set(name,body);
+      await f.s3.send(new PutObjectCommand({Bucket:b,Key:name,Body:body,Metadata:{"bulkorder-range":`bytes=${range.start}-${range.end-1}`}}));
+    }
+    for(const fault of ["none","corrupt","unavailable"]){
+      const release=Promise.withResolvers<void>();let held=false,second=false,premature=false,active=0,peak=0;
+      const observed=f.relay(async(request,next)=>{
+        const path=new URL(request.url).pathname;
+        if(request.method!=="GET")return next();
+        if(path.includes("/timeline/")){await Bun.sleep(40);return next();}
+        if(!path.includes("/analogue/"))return next();
+        active++;peak=Math.max(peak,active);
+        try{
+          const name=path.slice(path.indexOf("analogue/"));
+          if(name===key(1n,17n)){
+            held=true;const response=await next();
+            await eventually(async()=>second,yes=>yes,3000);await release.promise;held=false;
+            if(fault==="unavailable")return new Response(null,{status:503});
+            if(fault!=="corrupt")return response;
+            const body=new Uint8Array(await response.arrayBuffer());body[decodeBulkOrder(body).index.offsets[11]+rangesAt(events[11])[0].offset]^=1;return new Response(body,{status:response.status,headers:response.headers});
+          }
+          const response=await next();
+          if(name===key(17n,33n)){second=true;setTimeout(()=>release.resolve(),100);}
+          else if(held)premature=true;
+          return response;
+        }finally{active--;}
+      });
+      const restored=await f.recover(b,"bulk-parallel",observed);
+      assert.equal(restored.sha384,baseline.sha384);assert(second,"LIST discovers the next order before its predecessor finishes");assert.equal(peak,2);assert(!premature,"a completed future order retains its prefetch slot");assert.equal(restored.stats.peak_bulk_downloads,2);
+      assert.equal(restored.stats.rejected_orders,fault==="none"?0:1,"out-of-order completion is buffered, not ingested early");
+    }
+    const budget=Math.max(...[...bodies.values()].map(body=>body.length));
+    const tight=await f.recover(b,"bulk-parallel",undefined,false,{BASINSYNC_RECOVERY_BULK_BUFFER_BYTES:String(budget)});
+    assert.equal(tight.sha384,baseline.sha384);assert(tight.stats.peak_bulk_reserved_bytes<=budget,"in-flight and buffered archives share a byte budget");
+    const singles=await f.recover(b,"bulk-parallel",undefined,false,{BASINSYNC_RECOVERY_BULK_CONCURRENCY:"1"});assert.equal(singles.sha384,baseline.sha384);assert.equal(singles.stats.peak_bulk_downloads,1);
+    const none=await f.recover(b,"range-parallel",undefined,false,{BASINSYNC_RECOVERY_BULK_BUFFER_BYTES:"1"});assert.equal(none.sha384,baseline.sha384);assert.equal(none.stats.bulk_gets,0,"oversized orders fall back without blocking recovery");
   }
   console.log("put of success: Rust/TS BulkOrder interoperability, overlapping and contained intervals, bounded recovery modes, exact images, range suffixes, corruption fallback, and nonblocking discovery");
 

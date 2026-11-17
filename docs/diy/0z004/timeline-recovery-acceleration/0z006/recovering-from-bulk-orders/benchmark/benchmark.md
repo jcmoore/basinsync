@@ -2,6 +2,7 @@
 [measurements]: <measurements.json>
 [milestone]: <../../../../../../glossary/milestone.md>
 [overlap]: <overlap.json>
+[parallel-reads]: <parallel-reads.md>
 
 # Recovery measurements
 
@@ -39,3 +40,5 @@ With a competing order covering the entire history, the same snapshot/link test
 takes 5477 ms with Bulk versus 1979 ms with Range: 23.85 versus 6.25 MiB transferred.
 Choosing the furthest endpoint favors fewer requests, but can over-fetch badly.
 See the *overlap measurements*[~][overlap].
+
+Continue with the *parallel-order comparison*[~][parallel-reads].
