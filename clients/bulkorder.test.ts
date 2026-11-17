@@ -11,7 +11,7 @@ test("dense BulkOrder index retains nested event boundaries and arbitrary-precis
     expect(index).toEqual({lowest,offsets:Array.from({length:count+1},(_,i)=>i*event.length)});
     expect(range.start).toBe(count*event.length);expect(events.length).toBe(count);
     for(const extracted of events){expect(extracted.buffer).toBe(bytes.buffer);expect(entryDigest(extracted)).toBe(entryDigest(event));}
-    expect(fromKey(key(lowest,lowest+BigInt(count)))).toEqual({lowest,highest:lowest+BigInt(count)});
+    expect(fromKey(key(lowest,lowest+BigInt(count),range))).toEqual({lowest,highest:lowest+BigInt(count),range});
   }
 });
 test("BulkOrder rejects malformed bounds, framing, and dense indexes",()=>{
@@ -19,7 +19,7 @@ test("BulkOrder rejects malformed bounds, framing, and dense indexes",()=>{
   for(const text of ["analogue/0yfff/0yffe","analogue/0yffe/0yffe","analogue/0z001/0z002","analogue/0yffe/0yffd/x"])expect(()=>fromKey(text)).toThrow();
   const valid=encodeBulkOrder(1n,[event]),bad=new Uint8Array(valid);bad[event.length-1]^=1;expect(()=>decodeBulkOrder(bad)).toThrow();
   for(const offsets of [[0],[1,event.length],[0,event.length+8],[0,-1],[0,1.5],[0,event.length,event.length]]){
-    const bytes=new Uint8Array([...event,...wrap(encode([Symbol.species,"sync.memoremix.com","sts/0/databasin/bulkorder",{lowest:1n,offsets}])),...wrap(new Uint8Array(8),MARGIN)]);
+    const bytes=new Uint8Array([...event,...wrap(encode([Symbol.species,"sync.memoremix.com","sts/0/databasin/bulkmanifest",{lowest:1n,offsets}])),...wrap(new Uint8Array(8),MARGIN)]);
     expect(()=>decodeBulkOrder(bytes)).toThrow();
   }
 });

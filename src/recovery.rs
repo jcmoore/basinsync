@@ -28,6 +28,7 @@ pub enum Mode {
     Hedged,
     BulkParallel,
     RangeParallel,
+    RangePrefetch,
 }
 impl Mode {
     pub fn parse(value: &str) -> Result<Self> {
@@ -39,6 +40,7 @@ impl Mode {
             "hedged" => Self::Hedged,
             "bulk-parallel" => Self::BulkParallel,
             "range-parallel" => Self::RangeParallel,
+            "range-prefetch" => Self::RangePrefetch,
             _ => anyhow::bail!("unknown recovery mode"),
         })
     }
@@ -50,6 +52,7 @@ pub struct Config {
     pub max_bytes: usize,
     pub bulk_concurrency: usize,
     pub bulk_buffer_bytes: usize,
+    pub manifest_concurrency: usize,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -59,6 +62,7 @@ impl Default for Config {
             max_bytes: 128 * 1024 * 1024,
             bulk_concurrency: 2,
             bulk_buffer_bytes: 32 * 1024 * 1024,
+            manifest_concurrency: 8,
         }
     }
 }
@@ -80,6 +84,9 @@ impl Config {
         if let Ok(value) = std::env::var("BASINSYNC_RECOVERY_BULK_BUFFER_BYTES") {
             config.bulk_buffer_bytes = value.parse()?;
         }
+        if let Ok(value) = std::env::var("BASINSYNC_RECOVERY_MANIFEST_CONCURRENCY") {
+            config.manifest_concurrency = value.parse()?;
+        }
         Ok(config)
     }
 }
@@ -93,6 +100,9 @@ pub struct Stats {
     pub peak_buffer_bytes: usize,
     pub peak_bulk_downloads: usize,
     pub peak_bulk_reserved_bytes: usize,
+    /// Independent look-ahead probes; coupled Range jobs fetch their own footer.
+    pub manifest_gets: usize,
+    pub peak_manifest_reads: usize,
 }
 #[derive(Clone, Debug)]
 pub struct Candidate {
@@ -277,6 +287,33 @@ async fn ranged_get(
     Ok(response.to_vec())
 }
 
+const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
+
+async fn get_manifest(bucket: &Bucket, candidate: &Candidate) -> Result<analogue::Index> {
+    let range = analogue::manifest_range(&candidate.key)?;
+    ensure!(
+        range.end as u64 <= candidate.size,
+        "BulkManifest lies outside its object"
+    );
+    let footer = ranged_get(bucket, &candidate.key, range.clone(), MAX_MANIFEST_BYTES).await?;
+    let frame = envbuf::at(&footer, 0)?;
+    ensure!(
+        frame.end == footer.len() && frame.format == envbuf::FLEXBUFFERS,
+        "invalid BulkManifest envelope"
+    );
+    let index = analogue::Index::decode(frame.content)?;
+    ensure!(
+        index.order() == candidate.order && index.offsets.last() == Some(&range.start),
+        "BulkManifest key/index mismatch"
+    );
+    Ok(index)
+}
+
+enum Fetched {
+    Data(Download),
+    Manifest(analogue::Index),
+}
+
 async fn get_order(
     bucket: &Bucket,
     candidate: &Candidate,
@@ -284,40 +321,16 @@ async fn get_order(
     tail: BigUint,
     range_reads: bool,
     max_bytes: usize,
+    cached: Option<analogue::Index>,
 ) -> Result<Download> {
     let high = candidate.order.highest.clone().min(tail + 1u8);
     let max_bytes = max_bytes.min(usize::try_from(candidate.size)?);
     let (bytes, index, base) = if range_reads {
-        let (head, status) = crate::object_read::if_present(bucket)?
-            .head_object(&candidate.key)
-            .await?;
-        ensure!(status == 200, "BulkOrder HEAD failed");
-        let text = head
-            .metadata
-            .as_ref()
-            .and_then(|m| m.get("bulkorder-range"))
-            .context("missing BulkOrder range metadata")?;
-        let (low, end) = text
-            .strip_prefix("bytes=")
-            .context("invalid BulkOrder range")?
-            .split_once('-')
-            .context("invalid BulkOrder range")?;
-        let range = low.parse::<usize>()?
-            ..end
-                .parse::<usize>()?
-                .checked_add(1)
-                .context("range overflow")?;
-        let footer = ranged_get(bucket, &candidate.key, range.clone(), max_bytes).await?;
-        let frame = envbuf::at(&footer, 0)?;
-        ensure!(
-            frame.end == footer.len() && frame.format == envbuf::FLEXBUFFERS,
-            "invalid BulkOrder footer"
-        );
-        let index = analogue::Index::decode(frame.content)?;
-        ensure!(
-            index.order() == candidate.order && index.offsets.last() == Some(&range.start),
-            "BulkOrder index/metadata mismatch"
-        );
+        let index = if let Some(index) = cached {
+            index
+        } else {
+            get_manifest(bucket, candidate).await?
+        };
         let selected = index.range(&start, &high)?;
         let bytes = ranged_get(bucket, &candidate.key, selected.clone(), max_bytes).await?;
         (bytes, index, selected.start)
@@ -335,6 +348,10 @@ async fn get_order(
         );
         let bytes = response.to_vec();
         let index = analogue::decode(&bytes, &candidate.order)?;
+        ensure!(
+            analogue::footer(&bytes)?.1 == analogue::manifest_range(&candidate.key)?,
+            "BulkManifest range/key mismatch"
+        );
         (bytes, index, 0)
     };
     let first = usize::try_from(&start - &index.lowest)?;
@@ -399,6 +416,26 @@ fn next_uncovered(
     }
 }
 
+fn next_probe(
+    cursor: &BigUint,
+    waiting: &BTreeMap<BigUint, Entry>,
+    active: &HashMap<String, ActiveOrder>,
+    probes: &HashMap<String, ActiveOrder>,
+    manifests: &HashMap<String, analogue::Index>,
+) -> BigUint {
+    let mut next = cursor.clone();
+    loop {
+        next = next_uncovered(&next, waiting, active);
+        if let Some(order) = probes.values().find(|order| order.range.contains(&next)) {
+            next = order.range.end.clone();
+        } else if let Some(index) = manifests.values().find(|index| index.order().covers(&next)) {
+            next = index.order().highest;
+        } else {
+            return next;
+        }
+    }
+}
+
 pub async fn replay(
     bucket: &Bucket,
     state: &mut Datashed,
@@ -409,7 +446,8 @@ pub async fn replay(
         (1..=32).contains(&config.concurrency)
             && (1..=32).contains(&config.bulk_concurrency)
             && config.max_bytes > 0
-            && config.bulk_buffer_bytes > 0,
+            && config.bulk_buffer_bytes > 0
+            && (1..=32).contains(&config.manifest_concurrency),
         "invalid recovery limits"
     );
     let mut stats = Stats::default();
@@ -417,8 +455,12 @@ pub async fn replay(
     if cursor > tail {
         return Ok(stats);
     }
-    let parallel_bulk = matches!(config.mode, Mode::BulkParallel | Mode::RangeParallel);
+    let parallel_bulk = matches!(
+        config.mode,
+        Mode::BulkParallel | Mode::RangeParallel | Mode::RangePrefetch
+    );
     let bulk = parallel_bulk || matches!(config.mode, Mode::Bulk | Mode::Range | Mode::Hedged);
+    let prefetch = config.mode == Mode::RangePrefetch;
     let bulk_window = if parallel_bulk {
         config.bulk_concurrency
     } else {
@@ -439,6 +481,8 @@ pub async fn replay(
         let mut waiting = BTreeMap::<BigUint, Entry>::new();
         let mut individuals = BTreeSet::<BigUint>::new();
         let mut active = HashMap::<String, ActiveOrder>::new();
+        let mut probes = HashMap::<String, ActiveOrder>::new();
+        let mut manifests = HashMap::<String, analogue::Index>::new();
         let mut downloads = JoinSet::new();
         let mut discovery_open = bulk;
         loop {
@@ -472,44 +516,70 @@ pub async fn replay(
                 ranked.sort();
                 for (_, key) in ranked.into_iter().take(candidates.len()-128) { candidates.remove(&key); }
             }
+            manifests.retain(|key, index| candidates.contains_key(key) && index.order().highest > cursor && !failed.contains(key));
+            if prefetch {
+                while probes.len() + manifests.len() < config.manifest_concurrency {
+                    let low = next_probe(&cursor, &waiting, &active, &probes, &manifests);
+                    if low > tail { break; }
+                    let Some(candidate) = candidates.values().filter(|candidate| {
+                        candidate.order.covers(&low) && !probes.contains_key(&candidate.key)
+                            && !manifests.contains_key(&candidate.key) && !active.contains_key(&candidate.key)
+                            && analogue::manifest_range(&candidate.key).is_ok_and(|range| range.len() <= MAX_MANIFEST_BYTES && range.end as u64 <= candidate.size)
+                    }).max_by_key(|candidate| &candidate.order.highest).cloned() else { break; };
+                    let high = candidate.order.highest.clone().min(&tail + 1u8);
+                    if high > *position.borrow() { position.send_replace(high.clone()); }
+                    probes.insert(candidate.key.clone(), ActiveOrder { range: low..high, bytes: 0 });
+                    stats.manifest_gets += 1;
+                    stats.peak_manifest_reads = stats.peak_manifest_reads.max(probes.len());
+                    let reader = bucket.clone();
+                    downloads.spawn(async move { (Some(candidate.key.clone()), None, get_manifest(&reader, &candidate).await.map(Fetched::Manifest)) });
+                }
+            }
             if bulk {
                 loop {
                     let low = next_uncovered(&cursor, &waiting, &active);
                     let (slots, bytes) = bulk_usage(&waiting, &active);
                     if low > tail || slots >= bulk_window { break; }
+                    let reservation = |candidate: &Candidate| -> Option<usize> {
+                        if prefetch {
+                            manifests.get(&candidate.key)?.range(&low, &candidate.order.highest.clone().min(&tail + 1u8)).ok().map(|range| range.len())
+                        } else { usize::try_from(candidate.size).ok() }
+                    };
                     let Some(candidate) = candidates.values().filter(|candidate| {
                         candidate.order.covers(&low) && !active.contains_key(&candidate.key)
-                            && (matches!(config.mode, Mode::Range | Mode::RangeParallel) || candidate.size <= config.max_bytes as u64)
-                            && candidate.size <= bulk_budget.saturating_sub(bytes) as u64
+                            && (matches!(config.mode, Mode::Range | Mode::RangeParallel) || reservation(candidate).is_some_and(|bytes| bytes <= config.max_bytes))
+                            && reservation(candidate).is_some_and(|reserved| reserved <= bulk_budget.saturating_sub(bytes))
                     }).max_by_key(|candidate| &candidate.order.highest).cloned() else { break; };
+                    let reserved = reservation(&candidate).context("missing BulkOrder reservation")?;
                     let high = candidate.order.highest.clone().min(&tail + 1u8);
                     if high > *position.borrow() { position.send_replace(high.clone()); }
                     active.insert(candidate.key.clone(), ActiveOrder {
                         range: low.clone()..high,
-                        bytes: usize::try_from(candidate.size)?,
+                        bytes: reserved,
                     });
                     stats.peak_bulk_downloads = stats.peak_bulk_downloads.max(active.len());
                     stats.peak_bulk_reserved_bytes = stats.peak_bulk_reserved_bytes.max(bulk_usage(&waiting, &active).1);
                     stats.bulk_gets += 1;
                     let reader = bucket.clone();
                     let tail = tail.clone();
-                    let range_reads = matches!(config.mode, Mode::Range | Mode::RangeParallel);
+                    let range_reads = matches!(config.mode, Mode::Range | Mode::RangeParallel | Mode::RangePrefetch);
+                    let cached = manifests.remove(&candidate.key);
                     let max_bytes = config.max_bytes;
                     downloads.spawn(async move {
-                        (Some(candidate.key.clone()), None, get_order(&reader, &candidate, low, tail, range_reads, max_bytes).await)
+                        (Some(candidate.key.clone()), None, get_order(&reader, &candidate, low, tail, range_reads, max_bytes, cached).await.map(Fetched::Data))
                     });
                 }
             }
             let window = if config.mode == Mode::Parallel { config.concurrency } else { 1 };
             // A future buffered order must not prevent filling an earlier gap.
-            if !active.values().any(|order| order.range.contains(&cursor)) || config.mode == Mode::Hedged {
+            if (!active.values().any(|order| order.range.contains(&cursor)) && !probes.values().any(|order| order.range.contains(&cursor))) || config.mode == Mode::Hedged {
                 for offset in 0..window {
                     let milestone = &cursor + offset;
                     if milestone > tail || individuals.len() >= window { break; }
                     if !waiting.contains_key(&milestone) && individuals.insert(milestone.clone()) {
                         let reader = bucket.clone();
                         let max_bytes = config.max_bytes;
-                        downloads.spawn(async move { (None, Some(milestone.clone()), get_event(&reader, milestone, max_bytes).await) });
+                        downloads.spawn(async move { (None, Some(milestone.clone()), get_event(&reader, milestone, max_bytes).await.map(Fetched::Data)) });
                         stats.timeline_gets += 1;
                     }
                 }
@@ -522,9 +592,10 @@ pub async fn replay(
                 download = downloads.join_next(), if !downloads.is_empty() => {
                     let (source, milestone, result) = download.context("missing recovery download")?.context("recovery download panicked")?;
                     if let Some(milestone) = milestone { individuals.remove(&milestone); }
-                    if let Some(source) = &source { active.remove(source); }
+                    if let Some(source) = &source { active.remove(source); probes.remove(source); }
                     match result {
-                        Ok(download) => for (milestone, entry) in download.entries {
+                        Ok(Fetched::Manifest(index)) => { manifests.insert(source.context("manifest without source")?, index); },
+                        Ok(Fetched::Data(download)) => for (milestone, entry) in download.entries {
                             if milestone >= cursor { waiting.entry(milestone).or_insert(entry); }
                         },
                         Err(error) => if let Some(key) = source {

@@ -9,7 +9,7 @@ import { toObject, encode as extensionEncode } from "./flexbuffer";
 import { commit, form, epilogueStatus as fullStatus, latestBlob, sha384, sha384Bytes, type ApiError, type CommitResponse, type Timelines, type ViewpointMismatch, reserveHeap, type HeapResponse, type HeapNode } from "./client";
 import { parse, stringify } from "./json0";
 import { key, fromKey } from "./timeline";
-import { key as bulkKey, decodeBulkOrder } from "./bulkorder";
+import { decodeBulkOrder } from "./bulkorder";
 import { key as epilogueKey, encode as lex, decode as unlex } from "./lexidecimal";
 import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, entryDigest, commandFrames, type WalDelta, type Marker } from "./events";
 import { ingestWal } from "./wal";
@@ -341,8 +341,8 @@ try {
     const next=commit(app.url,"collision",bytes("second"),1n).then(r=>{done++;return r});await batchLogged(app.log,2);assert.equal(done,0);
     proxy.release.resolve();await status(await first,201);await status(await next,201);assert.equal(proxy.retries(),259);
     const payload=await get(b,1n),original=proxy.originals.get(key(1n))!.body;assert.equal(entryDigest(payload),entryDigest(original));assert.notEqual(sha384(payload),sha384(original));
-    await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:bulkKey(1n,2n)})),head=>!!head.ContentLength);
-    const archived=await s3.send(new GetObjectCommand({Bucket:b,Key:bulkKey(1n,2n)}));assert.deepEqual(decodeBulkOrder(await archived.Body!.transformToByteArray()).events[0],payload,"archive handoff receives the accepted 259th retry margin");
+    const archives=await eventually(()=>s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"analogue/"})),r=>r.KeyCount===1);
+    const archived=await s3.send(new GetObjectCommand({Bucket:b,Key:archives.Contents![0].Key!}));assert.deepEqual(decodeBulkOrder(await archived.Body!.transformToByteArray()).events[0],payload,"archive handoff receives the accepted 259th retry margin");
     assert.equal((deltasAt(await get(b,2n)).turso["default.turso"] as WalDelta).physical.parent,entryDigest(payload));await assertManifestRange(b,1n,payload);await stop(app.process);
     const replayed=await server(b);assert.equal((await fullStatus(replayed.url,"collision")).latest?.viewpoint,1n);await stop(replayed.process);
     const backed=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await eventually(()=>datashedBackup(b),cp=>cp?.milestone===2n);await stop(backed.process);
@@ -373,10 +373,11 @@ try {
     const app=await server(b,proxy.url,{BASINSYNC_BULK_MAX_AGE_MS:"10",BASINSYNC_BULK_TARGET_BYTES:"1"});
     await status(await commit(app.url,"bulk-margin",a,0n),201);
     await eventually(async()=>proxy.retries(),n=>n===3);
-    const object=await s3.send(new GetObjectCommand({Bucket:b,Key:bulkKey(1n,2n)}));
+    const archives=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"analogue/"}));assert.equal(archives.KeyCount,1);
+    const object=await s3.send(new GetObjectCommand({Bucket:b,Key:archives.Contents![0].Key!}));
     const body=await object.Body!.transformToByteArray(),order=decodeBulkOrder(body);
     assert.deepEqual(order.events[0],await get(b,1n));assert.equal(envelopes(body).at(-1)!.content[0],3);
-    assert.equal(object.Metadata!["bulkorder-range"],`bytes=${order.range.start}-${order.range.end-1}`);
+    assert.equal(object.Metadata!["bulkmanifest-range"],`bytes=${order.range.start}-${order.range.end-1}`);
     await stop(app.process);
   }
   console.log("put of success: bounded tombstone/margin probes, immutable tombstones, upload postconditions, margin retries across all sequence writers, and stable pipelined Timeline digest/recovery");

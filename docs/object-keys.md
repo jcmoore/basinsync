@@ -1,5 +1,6 @@
 [access-token]: <glossary/access-token.md>
 [analogue]: <glossary/analogue.md>
+[bulk-manifest]: <glossary/bulk-manifest.md>
 [bulk-order]: <glossary/bulk-order.md>
 [commit-marker]: <glossary/commit-marker.md>
 [datashed]: <glossary/datashed.md>
@@ -34,7 +35,7 @@ All implemented S3 key patterns, relative to the configured bucket:
 | *Tombstone*[~][tombstone] probes | `sentinel/tombstone/${length}` |
 | *Margin*[~][margin] probes | `sentinel/margin/${counter}` |
 | *Datashed*[~][datashed] *DifferentialEvent*[~][differential-event] | `timeline/${lex(~milestone)}` |
-| *Datashed*[~][datashed] *Analogue*[~][analogue] *BulkOrder*[~][bulk-order] | `analogue/${lex(~lowest)}/${lex(~highest)}` |
+| *Datashed*[~][datashed] *Analogue*[~][analogue] *BulkOrder*[~][bulk-order] | `analogue/${lex(~lowest)}/${lex(~highest)}/bytes=${manifest_start}-${manifest_end_inclusive}` |
 | *Datashed*[~][datashed] backup *CommitMarker*[~][commit-marker] | `epilogue/${lex(~viewpoint)}` |
 | *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `epilogue/${lex(viewpoint)}` |
 | *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
@@ -100,3 +101,6 @@ absent and verified on reuse. *Tombstone*[~][tombstone] probe lengths are decima
 *BulkOrder*[~][bulk-order] bounds are inclusive `lowest` and exclusive `highest`, with `lowest >= 1`.
 *BulkOrders*[~][bulk-order] contain complete event envelopes, their own footer tuple,
 and a trailing *counter margin*[~][margin].
+
+The *BulkManifest*[~][bulk-manifest] range suffix uses decimal HTTP byte offsets,
+with an inclusive end; it does not affect interval ordering.

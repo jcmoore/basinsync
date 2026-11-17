@@ -5,6 +5,7 @@ prerequisites:
 
 [analogue]: <../../../../../glossary/analogue.md>
 [benchmark]: <benchmark/benchmark.md>
+[bulk-manifest]: <../../../../../glossary/bulk-manifest.md>
 [bulk-order]: <../../../../../glossary/bulk-order.md>
 [conditional-write]: <../../../../../glossary/conditional-write.md>
 [datashed]: <../../../../../glossary/datashed.md>
@@ -32,8 +33,8 @@ from the durable *Timeline*[~][timeline]; resume beyond contiguous existing orde
 
 Accumulate in memory. Upload after reaching at least 5 MiB of whole events or
 30 seconds from the first buffered event; flush a partial order during shutdown.
-Append the *BulkOrder footer*[~][bulk-order] and its own *counter margin*[~][margin],
-set the footer range metadata, and use one *conditional PUT*[~][conditional-write].
+Append the *BulkManifest*[~][bulk-manifest] and its own *counter margin*[~][margin],
+include its HTTP byte range in the key and metadata, and use one *conditional PUT*[~][conditional-write].
 Concurrent workers may create overlapping intervals; adopt an existing identical
 event sequence at the same key, allowing differing trailing event margins.
 Worker failures retry independently of client acknowledgments.

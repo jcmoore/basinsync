@@ -1,0 +1,1493 @@
+{
+  "recorded_at": "2026-11-17T22:20:40.277Z",
+  "machine": {
+    "cpu": "Apple M2",
+    "platform": "darwin",
+    "release": "27.0.0",
+    "memory": 25769803776
+  },
+  "rounds": 2,
+  "count": 96,
+  "overlap": "staggered",
+  "blob_bytes": 32768,
+  "event_bytes": 24161656,
+  "profiles": [
+    {
+      "name": "100ms",
+      "delay": 100,
+      "bandwidth": null
+    },
+    {
+      "name": "25ms-5MiBps",
+      "delay": 25,
+      "bandwidth": 5242880
+    }
+  ],
+  "samples": [
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "parallel",
+      "elapsed_ms": 3603.3195830000004,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 0,
+        "bulk_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 1352152,
+        "peak_bulk_downloads": 0,
+        "peak_bulk_reserved_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 96
+      },
+      "bytes": 24163573,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 96
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "bulk-parallel",
+      "elapsed_ms": 1616.8162499999999,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 6310832,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 12261352,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 34701417,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 6
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-parallel-4",
+      "elapsed_ms": 1744.9125,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 6310584,
+        "peak_bulk_downloads": 3,
+        "peak_bulk_reserved_bytes": 18211872,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24784025,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "LIST analogue/": 7,
+        "GET timeline": 1,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-prefetch-2",
+      "elapsed_ms": 1704.9434159999998,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 6,
+        "peak_buffer_bytes": 5702168,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9669016,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24175609,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-prefetch-8",
+      "elapsed_ms": 1709.690208,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 6,
+        "peak_buffer_bytes": 5702168,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9669016,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24175609,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "bulk-parallel",
+      "elapsed_ms": 1612.535417,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 6310832,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 12261352,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 34701417,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "LIST analogue/": 7,
+        "GET timeline": 1,
+        "GET analogue": 6
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-parallel-4",
+      "elapsed_ms": 1713.824917,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 6310584,
+        "peak_bulk_downloads": 3,
+        "peak_bulk_reserved_bytes": 18211872,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24784025,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-prefetch-2",
+      "elapsed_ms": 1718.93175,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 6,
+        "peak_buffer_bytes": 5702168,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9669016,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24175609,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-prefetch-8",
+      "elapsed_ms": 1708.26075,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 6,
+        "peak_buffer_bytes": 5702168,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9669016,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24175609,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "parallel",
+      "elapsed_ms": 3609.587833,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 0,
+        "bulk_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 1352152,
+        "peak_bulk_downloads": 0,
+        "peak_bulk_reserved_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 96
+      },
+      "bytes": 24163573,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 96
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "parallel",
+      "elapsed_ms": 2696.834333,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 0,
+        "bulk_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 743808,
+        "peak_bulk_downloads": 0,
+        "peak_bulk_reserved_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 24
+      },
+      "bytes": 6296235,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 24
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "bulk-parallel",
+      "elapsed_ms": 2371.82875,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 5950712,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9917904,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 10763666,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "LIST analogue/": 2,
+        "GET timeline": 2,
+        "GET analogue": 2
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-parallel-4",
+      "elapsed_ms": 2481.378875,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9917904,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "LIST analogue/": 2,
+        "GET timeline": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-prefetch-2",
+      "elapsed_ms": 2474.4497920000003,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 2,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 5702528,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 2,
+        "LIST analogue/": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-prefetch-8",
+      "elapsed_ms": 2475.592583,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 2,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 5702528,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "LIST analogue/": 2,
+        "GET timeline": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "bulk-parallel",
+      "elapsed_ms": 2365.104042,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 5950712,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9917904,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 10763666,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "LIST analogue/": 2,
+        "GET timeline": 2,
+        "GET analogue": 2
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-parallel-4",
+      "elapsed_ms": 2456.5617500000003,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9917904,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 2,
+        "LIST analogue/": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-prefetch-2",
+      "elapsed_ms": 2470.44875,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 2,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 5702528,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 2,
+        "LIST analogue/": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-prefetch-8",
+      "elapsed_ms": 2469.761958,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 2,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 5702528,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "LIST analogue/": 2,
+        "GET timeline": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "parallel",
+      "elapsed_ms": 2721.7567090000002,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 0,
+        "bulk_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 495872,
+        "peak_bulk_downloads": 0,
+        "peak_bulk_reserved_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 24
+      },
+      "bytes": 6296235,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 24
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "parallel",
+      "elapsed_ms": 4875.340209,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 0,
+        "bulk_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 856328,
+        "peak_bulk_downloads": 0,
+        "peak_bulk_reserved_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 96
+      },
+      "bytes": 24163573,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 96
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "bulk-parallel",
+      "elapsed_ms": 7081.275041,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 6310832,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 12261352,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 34701417,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 6
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-parallel-4",
+      "elapsed_ms": 5063.00875,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 6310584,
+        "peak_bulk_downloads": 4,
+        "peak_bulk_reserved_bytes": 24162456,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24784025,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-prefetch-2",
+      "elapsed_ms": 5043.388167,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 6,
+        "peak_buffer_bytes": 6310584,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 10277432,
+        "peak_manifest_reads": 2,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24784025,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-prefetch-8",
+      "elapsed_ms": 5059.6759999999995,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 6,
+        "peak_buffer_bytes": 6310584,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 10277432,
+        "peak_manifest_reads": 2,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24784025,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "LIST analogue/": 7,
+        "GET timeline": 1,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "bulk-parallel",
+      "elapsed_ms": 7125.113292,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 6310832,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 12261352,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 34701417,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 6
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-parallel-4",
+      "elapsed_ms": 5059.076958000001,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 6310584,
+        "peak_bulk_downloads": 4,
+        "peak_bulk_reserved_bytes": 24162456,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24784025,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-prefetch-2",
+      "elapsed_ms": 5101.286542000001,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 6,
+        "peak_buffer_bytes": 6310584,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 10277432,
+        "peak_manifest_reads": 2,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24784025,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-prefetch-8",
+      "elapsed_ms": 5048.099791000001,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 95,
+        "bulk_gets": 6,
+        "manifest_gets": 6,
+        "peak_buffer_bytes": 6310584,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 10277432,
+        "peak_manifest_reads": 2,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 24784025,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 1,
+        "LIST analogue/": 7,
+        "GET analogue": 12
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 0,
+      "orders": 6,
+      "round": 1,
+      "mode": "parallel",
+      "elapsed_ms": 4873.302834,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 0,
+        "bulk_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 608416,
+        "peak_bulk_downloads": 0,
+        "peak_bulk_reserved_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 96
+      },
+      "bytes": 24163573,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 96
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "parallel",
+      "elapsed_ms": 1805.5620000000001,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 0,
+        "bulk_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 495872,
+        "peak_bulk_downloads": 0,
+        "peak_bulk_reserved_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 24
+      },
+      "bytes": 6296235,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 24
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "bulk-parallel",
+      "elapsed_ms": 2672.043875,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 23,
+        "bulk_gets": 2,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 5950712,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9917904,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 10517950,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "LIST analogue/": 3,
+        "GET timeline": 1,
+        "GET analogue": 2
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-parallel-4",
+      "elapsed_ms": 1986.420292,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9917904,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "LIST analogue/": 2,
+        "GET timeline": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-prefetch-2",
+      "elapsed_ms": 1942.283959,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 2,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 5702528,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 2,
+        "LIST analogue/": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 0,
+      "mode": "range-prefetch-8",
+      "elapsed_ms": 1983.165917,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 2,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 5702528,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 2,
+        "LIST analogue/": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "bulk-parallel",
+      "elapsed_ms": 2752.789084,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 5950712,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9917904,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 10763666,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "LIST analogue/": 2,
+        "GET timeline": 2,
+        "GET analogue": 2
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-parallel-4",
+      "elapsed_ms": 1987.25525,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 9917904,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 2,
+        "LIST analogue/": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-prefetch-2",
+      "elapsed_ms": 1981.9209170000001,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 22,
+        "bulk_gets": 2,
+        "manifest_gets": 2,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 5702528,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 2
+      },
+      "bytes": 6548706,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "LIST analogue/": 2,
+        "GET timeline": 2,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "range-prefetch-8",
+      "elapsed_ms": 1890.8705420000001,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 23,
+        "bulk_gets": 2,
+        "manifest_gets": 2,
+        "peak_buffer_bytes": 3719040,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 5702528,
+        "peak_manifest_reads": 1,
+        "rejected_orders": 0,
+        "timeline_gets": 1
+      },
+      "bytes": 6302990,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 1,
+        "LIST analogue/": 3,
+        "GET analogue": 4
+      },
+      "peak_requests": 3
+    },
+    {
+      "profile": "25ms-5MiBps",
+      "checkpoint": 72,
+      "orders": 6,
+      "round": 1,
+      "mode": "parallel",
+      "elapsed_ms": 1793.8991250000001,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "bf283880fe1abd918c946b4a66e9f6d7d19b36e7d9027332f193b5e5e1153306578f5117ae25776986c732c04ea4f357",
+      "stats": {
+        "applied": 24,
+        "bulk_events": 0,
+        "bulk_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 743808,
+        "peak_bulk_downloads": 0,
+        "peak_bulk_reserved_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 24
+      },
+      "bytes": 6296235,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 2,
+        "GET other": 3,
+        "LIST epilogue/": 1,
+        "HEAD timeline": 10,
+        "GET timeline": 24
+      },
+      "peak_requests": 4
+    }
+  ],
+  "foreground": []
+}

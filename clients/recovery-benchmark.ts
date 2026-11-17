@@ -7,7 +7,7 @@ import {encodeBulkOrder,decodeBulkOrder,key} from "./bulkorder";
 import {commit} from "./client";
 
 const f=await fixture("recovery-benchmark"),rounds=Number(Bun.env.RECOVERY_BENCH_ROUNDS??2),count=Number(Bun.env.RECOVERY_BENCH_EVENTS??96);
-const modes=(Bun.env.RECOVERY_BENCH_MODES??"sequential,parallel,bulk,range,hedged,bulk-parallel,range-parallel").split(","),profiles=[{name:"local",delay:0,bandwidth:Infinity},{name:"25ms",delay:25,bandwidth:Infinity},{name:"100ms",delay:100,bandwidth:Infinity},{name:"25ms-5MiBps",delay:25,bandwidth:5*1024*1024}].filter(p=>!Bun.env.RECOVERY_BENCH_PROFILES||Bun.env.RECOVERY_BENCH_PROFILES.split(",").includes(p.name));
+const modes=(Bun.env.RECOVERY_BENCH_MODES??"sequential,parallel,bulk,range,hedged,bulk-parallel,range-parallel,range-prefetch").split(","),profiles=[{name:"local",delay:0,bandwidth:Infinity},{name:"25ms",delay:25,bandwidth:Infinity},{name:"100ms",delay:100,bandwidth:Infinity},{name:"25ms-5MiBps",delay:25,bandwidth:5*1024*1024}].filter(p=>!Bun.env.RECOVERY_BENCH_PROFILES||Bun.env.RECOVERY_BENCH_PROFILES.split(",").includes(p.name));
 const samples:Record<string,unknown>[]=[],foreground:Record<string,unknown>[]=[];
 let delay=0,bandwidth=Infinity,nextTransfer=0,bytes=0,active=0,peak=0,requests:Record<string,number>={};
 const proxy=f.relay(async(request,next)=>{
@@ -30,17 +30,17 @@ try{
       await f.stop(app.process);await f.seed(bucket,events.slice(checkpoint),checkpoint+1);
     }
     let low=1,group:Uint8Array[]=[],size=0,orders=0;
-    async function flush(){if(!group.length)return;const body=encodeBulkOrder(BigInt(low),group),{range}=decodeBulkOrder(body),high=low+group.length;await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(BigInt(low),BigInt(high)),Body:body,Metadata:{"bulkorder-range":`bytes=${range.start}-${range.end-1}`}}));orders++;low=high;group=[];size=0;}
+    async function flush(){if(!group.length)return;const body=encodeBulkOrder(BigInt(low),group),{range}=decodeBulkOrder(body),high=low+group.length;await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(BigInt(low),BigInt(high),range),Body:body,Metadata:{"bulkmanifest-range":`bytes=${range.start}-${range.end-1}`}}));orders++;low=high;group=[];size=0;}
     if(Bun.env.RECOVERY_BENCH_OVERLAP==="staggered"){
-      for(let first=1;first<=count;first+=16){const high=Math.min(count+1,first+24),body=encodeBulkOrder(BigInt(first),events.slice(first-1,high-1)),{range}=decodeBulkOrder(body);await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(BigInt(first),BigInt(high)),Body:body,Metadata:{"bulkorder-range":`bytes=${range.start}-${range.end-1}`}}));orders++;if(high===count+1)break;}
+      for(let first=1;first<=count;first+=16){const high=Math.min(count+1,first+24),body=encodeBulkOrder(BigInt(first),events.slice(first-1,high-1)),{range}=decodeBulkOrder(body);await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(BigInt(first),BigInt(high),range),Body:body,Metadata:{"bulkmanifest-range":`bytes=${range.start}-${range.end-1}`}}));orders++;if(high===count+1)break;}
     }else{for(const event of events){group.push(event);size+=event.length;if(size>=5*1024*1024)await flush();}await flush();}
-    if(Bun.env.RECOVERY_BENCH_OVERLAP&&Bun.env.RECOVERY_BENCH_OVERLAP!=="staggered"){const body=encodeBulkOrder(1n,events),{range}=decodeBulkOrder(body);await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(1n,BigInt(count+1)),Body:body,Metadata:{"bulkorder-range":`bytes=${range.start}-${range.end-1}`}}));orders++;}
+    if(Bun.env.RECOVERY_BENCH_OVERLAP&&Bun.env.RECOVERY_BENCH_OVERLAP!=="staggered"){const body=encodeBulkOrder(1n,events),{range}=decodeBulkOrder(body);await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(1n,BigInt(count+1),range),Body:body,Metadata:{"bulkmanifest-range":`bytes=${range.start}-${range.end-1}`}}));orders++;}
     const expected=await f.recover(bucket,"sequential");datasets.push({bucket,checkpoint,expected:expected.sha384,orders});
   }
   for(const profile of profiles){delay=profile.delay;bandwidth=profile.bandwidth;
     for(const dataset of datasets)for(let round=0;round<rounds;round++){
       const order=[...modes.slice(round%modes.length),...modes.slice(0,round%modes.length)];
-      for(const mode of order){reset();const variant=mode.match(/^(bulk-parallel|range-parallel)-(\d+)$/);const extra:Record<string,string>=variant?{BASINSYNC_RECOVERY_BULK_CONCURRENCY:variant[2]}:{};const result=await f.recover(dataset.bucket,variant?.[1]??mode,proxy,true,extra);assert.equal(result.sha384,dataset.expected);assert.equal(result.milestone,String(count));
+      for(const mode of order){reset();const variant=mode.match(/^(bulk-parallel|range-parallel|range-prefetch)-(\d+)$/);const extra:Record<string,string>=variant?{[variant[1]==="range-prefetch"?"BASINSYNC_RECOVERY_MANIFEST_CONCURRENCY":"BASINSYNC_RECOVERY_BULK_CONCURRENCY"]:variant[2]}:{};const result=await f.recover(dataset.bucket,variant?.[1]??mode,proxy,true,extra);assert.equal(result.sha384,dataset.expected);assert.equal(result.milestone,String(count));
         // A finished recovery may have cancelled speculative read-only requests at the proxy.
         await eventually(async()=>active,n=>n===0);
         samples.push({profile:profile.name,checkpoint:dataset.checkpoint,orders:dataset.orders,round,mode,...result,bytes,requests:{...requests},peak_requests:peak});

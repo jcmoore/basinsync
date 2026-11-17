@@ -5,6 +5,7 @@ prerequisites:
 
 [analogue]: <../../../../../glossary/analogue.md>
 [benchmark]: <benchmark/benchmark.md>
+[bulk-manifest]: <../../../../../glossary/bulk-manifest.md>
 [bulk-order]: <../../../../../glossary/bulk-order.md>
 [commit-marker]: <../../../../../glossary/commit-marker.md>
 [conditional-read]: <../../../../../glossary/conditional-read.md>
@@ -29,7 +30,8 @@ and stop at previously examined bands. Keep useful orders ending behind that
 search frontier. A min-upper-bound queue identifies intervals contained by later
 entries in each descending-lower-bound scan; retain this information without deleting objects.
 
-Fetch either the entire order or its footer plus the useful event range. Verify
+Fetch either the entire order or its *BulkManifest*[~][bulk-manifest] plus the useful event range.
+The key supplies the footer Range directly, avoiding HEAD. Verify
 the key/index bounds, offsets, framing, and each *event's*[~][differential-event] existing ingestion and
 predecessor checks. Only validated, contiguous application advances the materialized
 cursor; advertised candidate endpoints never do. A failed or invalid order falls
@@ -37,7 +39,7 @@ back to the *Timeline*[~][timeline]. Discovery must not hold up direct progress.
 Use *conditional reads*[~][conditional-read].
 
 `BASINSYNC_RECOVERY_MODE` defaults to `bulk-parallel`; alternatives are `sequential`,
-`parallel`, `bulk`, `range`, `hedged`, and `range-parallel`.
+`parallel`, `bulk`, `range`, `hedged`, `range-parallel`, and `range-prefetch`.
 Parallel mode prefetches individual events; Bulk mode overlaps
 LIST discovery with retrieval; range mode selects useful suffixes; hedged mode
 keeps one individual GET progressing beside a BulkOrder GET. Apply all results in
@@ -51,6 +53,12 @@ retain their slots. `BASINSYNC_RECOVERY_BULK_BUFFER_BYTES` defaults to 32 MiB,
 covering buffered archive payloads plus in-flight reservations using listed object
 sizes, including for Range reads. Individual fallback responses, transient buffers,
 and database memory are separate. Oversized orders fall back to individual reads.
+
+`range-prefetch` separates footer probes from data downloads: cache/probe up to
+`BASINSYNC_RECOVERY_MANIFEST_CONCURRENCY` manifests (default eight, each capped
+at 1 MiB), while retaining the two-slot data window. Probes advance discovery
+using advertised endpoints; only ingestion advances state. Its data-byte budget
+reserves the selected ranges rather than whole-object lengths.
 
 Compare exact recovered database images across all strategies, including overlapping
 and contained intervals, paginated listings, snapshot suffixes, corruption,

@@ -1,10 +1,14 @@
 [benchmark]: <benchmark.md>
 [bulk-order]: <../../../../../../glossary/bulk-order.md>
+[manifest-probes]: <manifest-probes.md>
 [milestone]: <../../../../../../glossary/milestone.md>
 [parallel]: <parallel.json>
 [parallel-overlap]: <parallel-overlap.json>
 
 # Parallel BulkOrder reads
+
+These measurements predate footer ranges in keys; see the
+*no-HEAD and separate-probe comparison*[~][manifest-probes].
 
 Repeat the *previous protocol*[~][benchmark]: 96 events (23.04 MiB), five adjacent
 *BulkOrders*[~][bulk-order], two rotated rounds per strategy, from genesis and

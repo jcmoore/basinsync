@@ -1,10 +1,14 @@
 [bulk-order]: <../../../../../../glossary/bulk-order.md>
+[manifest-probes]: <manifest-probes.md>
 [measurements]: <measurements.json>
 [milestone]: <../../../../../../glossary/milestone.md>
 [overlap]: <overlap.json>
 [parallel-reads]: <parallel-reads.md>
 
 # Recovery measurements
+
+These measurements predate footer ranges in keys; see the
+*no-HEAD and separate-probe comparison*[~][manifest-probes].
 
 Apple M2, 24 GiB RAM, macOS, release build, VersityGW 1.11.0 POSIX backend;
 warm filesystem. Generate 96 genuine events with 32 KiB marker messages and
