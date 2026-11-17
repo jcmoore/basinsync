@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {createServer} from "node:net";
 import {mkdtempSync,openSync,closeSync,readFileSync} from "node:fs";
 import {S3Client,CreateBucketCommand,HeadObjectCommand} from "@aws-sdk/client-s3";
-import {commit,reserveUserHeap,parseResponse,form,epilogueStatus,type UserHeapResponse} from "./client";
+import {commit,reserveHeap,parseResponse,form,epilogueStatus,type HeapResponse} from "./client";
 import {s3Fixture} from "./s3-fixture";
 
 const root=new URL("../",import.meta.url).pathname;
@@ -37,8 +37,8 @@ try{
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let copies=0,sourceReads=0;
     const p=proxy(async request=>{
       const u=new URL(request.url);
-      if(request.method==="GET"&&u.pathname.includes("/userheap/young/"))sourceReads++;
-      if(request.method==="PUT"&&u.pathname.includes("/userheap/old/")&&request.headers.has("x-amz-copy-source")){
+      if(request.method==="GET"&&u.pathname.includes("/userspace/heap/young/"))sourceReads++;
+      if(request.method==="PUT"&&u.pathname.includes("/userspace/heap/old/")&&request.headers.has("x-amz-copy-source")){
         copies++;assert.equal(request.headers.get("if-none-match"),"*");assert(request.headers.get("x-amz-copy-source-if-match"));entered.resolve();await release.promise;
         if(fault==="reply-lost"){
           const copied=await fetch(`${endpoint}${u.pathname}${u.search}`,{method:"PUT",headers:request.headers,body:await request.arrayBuffer()});assert(copied.ok);await copied.arrayBuffer();
@@ -49,7 +49,7 @@ try{
     });
     const server=await app(b,p,{BASINSYNC_CLEANUP_INTERVAL_MS:"1000"});
     const data=new Uint8Array(9*1024*1024+3).fill(42),node={auth:[0,0,bytes("copy-audit-token")] as [number,number,Uint8Array],length:data.length,edges:[]};
-    const reservation=await reserveUserHeap(server.url,"f",0n,[node]);assert.equal(reservation.status,200);const actions=(await parseResponse<UserHeapResponse>(reservation)).results![0].actions;
+    const reservation=await reserveHeap(server.url,"f",0n,[node]);assert.equal(reservation.status,200);const actions=(await parseResponse<HeapResponse>(reservation)).results![0].actions;
     const put=await fetch(actions.write!.url,{method:"PUT",headers:actions.write!.headers,body:data});assert(put.ok);
     assert.equal((await commit(server.url,"f",bytes("marker"),0n,undefined,[{auth:node.auth}])).status,201);
     await deadline(entered.promise);server.process.kill("SIGINT");await Bun.sleep(100);assert.equal(server.process.exitCode,null,"shutdown awaits the active COPY");

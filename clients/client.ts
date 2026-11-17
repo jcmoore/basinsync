@@ -13,13 +13,13 @@ export type ViewpointMismatch = ApiResponse<{ next: Position }>;
 export type ApiError = ApiResponse<{ error: string; message: string }>;
 export type Action = {url:string;headers:Record<string,string>};
 export type Edge = {auth:[height:number,version:number,token:Uint8Array]};
-export type UserHeapNode = Edge & {length:number;edges:Edge[];context?:Record<string,string>};
-export type UserHeapResponse = ApiResponse<{
+export type HeapNode = Edge & {length:number;edges:Edge[];context?:Record<string,string>};
+export type HeapResponse = ApiResponse<{
   errors:Record<number,{code:string;message:string}>|null;
   results:Record<number,{actions:{write:Action|null;preview:Action|null;read:Action}}>|null;
 }>;
-export async function reserveUserHeap(url:string,flow:string,viewpoint:bigint,nodes:UserHeapNode[]):Promise<Response>{
-  return fetch(`${url}/api/v0/userheap/reserve`,{method:"POST",headers:{"content-type":"application/json"},body:stringify({flow,viewpoint,nodes}),signal:AbortSignal.timeout(30_000)});
+export async function reserveHeap(url:string,flow:string,viewpoint:bigint,nodes:HeapNode[]):Promise<Response>{
+  return fetch(`${url}/api/v0/userspace/heap/reserve`,{method:"POST",headers:{"content-type":"application/json"},body:stringify({flow,viewpoint,nodes}),signal:AbortSignal.timeout(30_000)});
 }
 export async function parseResponse<T>(response: Response): Promise<T> {
   return parse<T>(await response.text());

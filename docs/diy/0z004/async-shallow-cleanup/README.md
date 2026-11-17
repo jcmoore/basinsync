@@ -1,12 +1,13 @@
 ---
 prerequisites:
-  - 0z003/shallow-userheap-management
+  - 0z003/shallow-heap-management
 ---
 
 [commit-marker]: <../../../glossary/commit-marker.md>
 [development]: <../../../development.md>
 [dusting]: <../../../glossary/dusting.md>
 [flow]: <../../../glossary/flow.md>
+[heap-reservation]: <../../../glossary/heap-reservation.md>
 [node]: <../../../glossary/node.md>
 [object-keys]: <../../../object-keys.md>
 [retainer]: <../../../glossary/retainer.md>
@@ -14,7 +15,6 @@ prerequisites:
 [sweeping-task]: <../../../glossary/sweeping-task.md>
 [timeline]: <../../../glossary/timeline.md>
 [turso]: <../../../glossary/turso.md>
-[userheap-reservation]: <../../../glossary/userheap-reservation.md>
 [viewpoint]: <../../../glossary/viewpoint.md>
 [virtual-file-system]: <../../../glossary/virtual-file-system.md>
 [young-generation]: <../../../glossary/young-generation.md>
@@ -25,16 +25,16 @@ Queue reclamation when committing a *Flow*[~][flow] *Viewpoint*[~][viewpoint],
 leaving object deletion outside the request path. No *CommitMarker*[~][commit-marker]
 edges exist yet, so every staged *node*[~][node] eventually becomes unretained.
 
-Add a random UUIDv4 *revision*[~][revision] to each new `graph_nodes` row;
+Add a random UUIDv4 *revision*[~][revision] to each new `userspace_nodes` row;
 existing allocations retain theirs. Include it in both generations'
 *object-key patterns*[~][object-keys]. Reusing a reclaimed id creates a fresh
 revision: delayed DELETEs and acknowledgments must target the old *revision*[~][revision] only.
 These keys disclose neither *Flow*[~][flow], *Viewpoint*[~][viewpoint], nor *Timeline*[~][timeline] position.
 
 ```sql
-ALTER TABLE graph_nodes ADD COLUMN revision TEXT NOT NULL;
-ALTER TABLE graph_nodes ADD COLUMN freed DATETIME NOT NULL DEFAULT '';
-CREATE INDEX graph_nodes_freed ON graph_nodes(freed, id);
+ALTER TABLE userspace_nodes ADD COLUMN revision TEXT NOT NULL;
+ALTER TABLE userspace_nodes ADD COLUMN freed DATETIME NOT NULL DEFAULT '';
+CREATE INDEX userspace_nodes_freed ON userspace_nodes(freed, id);
 CREATE TABLE sweeping_tasks (
   flow TEXT NOT NULL,
   viewpoint TEXT NOT NULL,
@@ -52,7 +52,7 @@ A separate worker reads consistent *VFS snapshots*[~][virtual-file-system] while
 For a bounded task batch, transactionally remove the tasks and their `_a_` staging
 *retainer*[~][retainer] edges. Mark a *node*[~][node] `freed` with the current time only
 when no *retainers*[~][retainer] remain. Bound edges processed too; retain unfinished tasks.
-Reject *reservations*[~][userheap-reservation] of freed *nodes*[~][node] until reclamation completes.
+Reject *reservations*[~][heap-reservation] of freed *nodes*[~][node] until reclamation completes.
 
 Journal these *Turso*[~][turso] mutations as captured frames in `ingestturso`
 through the ordered *Timeline*[~][timeline].
@@ -70,6 +70,6 @@ failed/lost replies, competing workers, foreground progress during DELETE,
 and id reuse with a delayed old-revision DELETE. Run the *development checks*[~][development].
 
 A later tutorial will implement a periodic *dusting*[~][dusting] job which will LIST
-*young-generation*[~][young-generation] objects and check for a viable `graph_nodes`
+*young-generation*[~][young-generation] objects and check for a viable `userspace_nodes`
 row with matching id **and revision**. Old write URLs may recreate orphan objects;
 eventual reclamation is acceptable. Defer recursive edge cleanup and old-generation deletion too.

@@ -14,7 +14,7 @@ fn main() -> Result<()> {
         arg == "--revisions"
             || arg == "--inspect"
             || arg == "--locate"
-            || arg == "--userheap"
+            || arg == "--heap"
             || arg == "--graph"
     }) {
         let state = basinsync::turso::State::from_image(std::fs::read(
@@ -34,22 +34,22 @@ fn main() -> Result<()> {
             return Ok(());
         }
         if args[1] == "--graph" {
-            serde_json::to_writer(io::stdout(), &state.user_heap_counts()?)?;
+            serde_json::to_writer(io::stdout(), &state.heap_counts()?)?;
             return Ok(());
         }
-        if args[1] == "--userheap" {
+        if args[1] == "--heap" {
             let id = args
                 .get(3)
                 .ok_or_else(|| anyhow::anyhow!("missing node id"))?;
             let node = state
-                .user_heap_node(id)?
-                .ok_or_else(|| anyhow::anyhow!("missing user_heap node"))?;
+                .heap_node(id)?
+                .ok_or_else(|| anyhow::anyhow!("missing heap node"))?;
             let owner = args
                 .get(4)
                 .ok_or_else(|| anyhow::anyhow!("missing retainer"))?;
             serde_json::to_writer(
                 io::stdout(),
-                &serde_json::json!({"id":id,"length":node.length,"context":node.context,"reserved":node.reserved,"etag":node.etag,"promoted":node.promoted,"marked":node.marked,"revision":node.revision,"freed":node.freed,"children":state.user_heap_children(id)?,"retained":state.user_heap_edge(id,owner)?}),
+                &serde_json::json!({"id":id,"length":node.length,"context":node.context,"reserved":node.reserved,"etag":node.etag,"promoted":node.promoted,"marked":node.marked,"revision":node.revision,"freed":node.freed,"children":state.heap_children(id)?,"retained":state.heap_edge(id,owner)?}),
             )?;
             return Ok(());
         }

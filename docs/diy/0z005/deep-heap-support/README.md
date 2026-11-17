@@ -9,6 +9,7 @@ prerequisites:
 [context]: <../../../glossary/context.md>
 [development]: <../../../development.md>
 [etag]: <../../../glossary/etag.md>
+[heap-protocol]: <../../../heap-protocol.md>
 [node]: <../../../glossary/node.md>
 [node-degree]: <../../../glossary/node-degree.md>
 [node-height]: <../../../glossary/node-height.md>
@@ -16,12 +17,11 @@ prerequisites:
 [retainer]: <../../../glossary/retainer.md>
 [revision]: <../../../glossary/revision.md>
 [timeline]: <../../../glossary/timeline.md>
-[userheap-protocol]: <../../../userheap-protocol.md>
 [young-generation]: <../../../glossary/young-generation.md>
 
-# Deep UserHeap support
+# Deep Heap support
 
-Lift the *reservation API's*[~][userheap-protocol] *zero-height*[~][node-height] and
+Lift the *reservation API's*[~][heap-protocol] *zero-height*[~][node-height] and
 empty-edge restrictions. Each edge supplies `{ auth: [height, version, token] }`;
 derive the child's *node*[~][node] id without persisting its *access token*[~][access-token].
 Require parent *height*[~][node-height] greater than every child *height*[~][node-height]. Version remains zero;
@@ -30,7 +30,7 @@ configurable (128), counting distinct children; edge order and duplicates do not
 
 For an existing parent, require identical content length, *context*[~][context], and child-id set,
 including when other *nodes*[~][node] already retain it. For a new parent,
-require every child to have a live `graph_nodes` allocation. Use its cached *etag*[~][etag];
+require every child to have a live `userspace_nodes` allocation. Use its cached *etag*[~][etag];
 otherwise perform a *conditional HEAD*[~][conditional-read] on its
 *young-generation*[~][young-generation] key, trying the *old generation*[~][old-generation]
 if absent. Verify content length and a nonempty *ETag*[~][etag]; report per-parent errors
@@ -45,7 +45,7 @@ transactions, marking children freed when their last *retainer*[~][retainer] dis
 Use the existing `(retainer, node)` index and indexed freed queue for recursive work.
 Match the parent's *revision*[~][revision] in every batch. Only after all outbound edges are durably
 gone may its exact *young-generation*[~][young-generation] object be deleted;
-remove `graph_nodes` only after confirmed deletion and no remaining edges in either direction.
+remove `userspace_nodes` only after confirmed deletion and no remaining edges in either direction.
 Persist changes through *Timeline*[~][timeline] ingestion frames.
 
 Test shared descendants, immutable child sets, height and *degree*[~][node-degree]

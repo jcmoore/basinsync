@@ -1,8 +1,11 @@
 [SKILL]: <skills/basinsync-tutorial-dag/SKILL.md>
 [envbuf]: <glossary/envbuf.md>
+[heap]: <glossary/heap.md>
+[kernelspace]: <glossary/kernelspace.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [margin]: <glossary/margin.md>
 [object-keys]: <object-keys.md>
+[userspace]: <glossary/userspace.md>
 
 # Prompt-to-documentation
 
@@ -21,8 +24,9 @@ concepts and interfaces. Keep benchmark reports and measurements in the correspo
 tutorial's `benchmark/` folder.
 
 Use `Basin` for the tenancy domain and `Datashed` for the data-state `Reservoir`.
-Use `UserHeap` for client-driven `Flow` nodes and `KernelHeap` for server-driven
-`Datashed` nodes. Call concatenated *EnvBufs*[~][envbuf] a feed and their enclosed
+Use *UserSpace*[~][userspace] for client-driven `Flow` state and *KernelSpace*[~][kernelspace]
+for server-driven `Datashed`/`Jet` state; *Heap*[~][heap] is their common node-storage concept.
+Call concatenated *EnvBufs*[~][envbuf] a feed and their enclosed
 bytes a message (`message_length`), distinguishing that count from S3 `Content-Length`.
 Call skippable format `110` envelopes *margins*[~][margin]; reserve padding for alignment filler inside envelopes.
 

@@ -4,6 +4,7 @@
 [epilogue-protocol]: <epilogue-protocol.md>
 [etag]: <glossary/etag.md>
 [flow]: <glossary/flow.md>
+[heap-reservation]: <glossary/heap-reservation.md>
 [json0]: <glossary/json0.md>
 [node]: <glossary/node.md>
 [node-height]: <glossary/node-height.md>
@@ -11,13 +12,13 @@
 [object-keys]: <object-keys.md>
 [old-generation]: <glossary/old-generation.md>
 [revision]: <glossary/revision.md>
-[userheap-reservation]: <glossary/userheap-reservation.md>
+[userspace]: <glossary/userspace.md>
 [viewpoint]: <glossary/viewpoint.md>
 [young-generation]: <glossary/young-generation.md>
 
-# UserHeap staging protocol
+# UserSpace Heap staging protocol
 
-`POST /api/v0/userheap/reserve` accepts *JSON0*[~][json0] for the
+`POST /api/v0/userspace/heap/reserve` stages *UserSpace*[~][userspace] nodes and accepts *JSON0*[~][json0] for the
 *Flow's*[~][flow] expected next *Viewpoint*[~][viewpoint]:
 
 ```ts
@@ -51,7 +52,7 @@ type Action = { url: string; headers: Record<string, string> };
 }
 ```
 
-Successful *reservations*[~][userheap-reservation] are durable before returning.
+Successful *reservations*[~][heap-reservation] are durable before returning.
 `write` is a *conditional PUT*[~][conditional-write] to the
 *young generation*[~][young-generation], signing `If-None-Match: *` and the
 specified `Content-Length` plus every `x-amz-meta-ctx-${key}` header from that

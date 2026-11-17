@@ -56,14 +56,14 @@ impl Command {
         }
         let mut ids = std::collections::BTreeSet::new();
         for node in self.erased.iter().chain(&self.detaching) {
-            crate::user_heap::Node {
+            crate::heap::Node {
                 context: Default::default(),
                 id: node.id.clone(),
                 length: 0,
                 edges: Default::default(),
             }
             .validate()?;
-            crate::user_heap::valid_revision(&node.revision)?;
+            crate::heap::valid_revision(&node.revision)?;
             time::OffsetDateTime::parse(
                 &node.freed,
                 &time::format_description::well_known::Rfc3339,
@@ -92,7 +92,7 @@ pub fn scan(snapshot: &crate::timeline::Snapshot, tasks: usize, nodes: usize) ->
             work.tasks.push(Task { flow: row.get(0)?, viewpoint: row.get(1)? }); Ok(())
         })?;
     conn.prepare(format!(
-        "SELECT id,revision,freed FROM graph_nodes WHERE freed>'' AND NOT EXISTS(SELECT 1 FROM graph_edges WHERE node=graph_nodes.id) AND NOT EXISTS(SELECT 1 FROM graph_edges WHERE retainer=graph_nodes.id) ORDER BY freed,id LIMIT {nodes}"
+        "SELECT id,revision,freed FROM userspace_nodes WHERE freed>'' AND NOT EXISTS(SELECT 1 FROM userspace_edges WHERE node=userspace_nodes.id) AND NOT EXISTS(SELECT 1 FROM userspace_edges WHERE retainer=userspace_nodes.id) ORDER BY freed,id LIMIT {nodes}"
     ))?
     .run_with_row_callback(|row| {
         work.freed.push(Freed {
@@ -102,7 +102,7 @@ pub fn scan(snapshot: &crate::timeline::Snapshot, tasks: usize, nodes: usize) ->
         });
         Ok(())
     })?;
-    conn.prepare(format!("SELECT id,revision,freed FROM graph_nodes WHERE freed>'' AND NOT EXISTS(SELECT 1 FROM graph_edges WHERE node=graph_nodes.id) AND EXISTS(SELECT 1 FROM graph_edges WHERE retainer=graph_nodes.id) ORDER BY freed,id LIMIT {nodes}"))?
+    conn.prepare(format!("SELECT id,revision,freed FROM userspace_nodes WHERE freed>'' AND NOT EXISTS(SELECT 1 FROM userspace_edges WHERE node=userspace_nodes.id) AND EXISTS(SELECT 1 FROM userspace_edges WHERE retainer=userspace_nodes.id) ORDER BY freed,id LIMIT {nodes}"))?
         .run_with_row_callback(|row| { work.detaching.push(Freed {id:row.get(0)?,revision:row.get(1)?,freed:row.get(2)?}); Ok(()) })?;
     conn.execute("COMMIT")?;
     Ok(work)
@@ -121,18 +121,15 @@ pub async fn erase(bucket: &s3::Bucket, nodes: Vec<Freed>, concurrency: usize) -
             };
             let bucket = bucket.clone();
             running.spawn(async move {
-                let key = crate::user_heap::key(crate::user_heap::YOUNG, &node.id, &node.revision);
+                let key = crate::heap::key(crate::heap::YOUNG, &node.id, &node.revision);
                 match bucket.delete_object(key).await {
                     Ok(r) if matches!(r.status_code(), 200..=299 | 404) => Some(node),
                     Ok(r) => {
-                        tracing::warn!(
-                            status = r.status_code(),
-                            "young user_heap deletion deferred"
-                        );
+                        tracing::warn!(status = r.status_code(), "young heap deletion deferred");
                         None
                     }
                     Err(error) => {
-                        tracing::warn!(%error, "young user_heap deletion deferred");
+                        tracing::warn!(%error, "young heap deletion deferred");
                         None
                     }
                 }

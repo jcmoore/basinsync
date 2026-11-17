@@ -1,5 +1,5 @@
 //! Postorder marking and restartable, revision-scoped promotion.
-use crate::{lexidecimal::Viewpoint, user_heap};
+use crate::{heap, lexidecimal::Viewpoint};
 use anyhow::{Context, Result, ensure};
 use num_bigint::BigUint;
 use std::{collections::BTreeSet, num::NonZeroUsize};
@@ -50,8 +50,8 @@ impl ConfirmedSign {
 }
 /// Roots are completion certificates because promotion, like marking, is postorder.
 fn promotion_ready(conn: &std::sync::Arc<Connection>, task: &Task) -> Result<bool> {
-    let owner = user_heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
-    let mut q=conn.prepare("SELECT 1 FROM graph_edges e LEFT JOIN graph_nodes n ON n.id=e.node WHERE e.retainer=?1 AND (n.id IS NULL OR n.promoted='') LIMIT 1")?;
+    let owner = heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
+    let mut q=conn.prepare("SELECT 1 FROM userspace_edges e LEFT JOIN userspace_nodes n ON n.id=e.node WHERE e.retainer=?1 AND (n.id IS NULL OR n.promoted='') LIMIT 1")?;
     q.bind_at(NonZeroUsize::new(1).unwrap(), Value::build_text(owner))?;
     let mut pending = false;
     q.run_with_row_callback(|_| {
@@ -104,7 +104,7 @@ pub async fn confirm_signs(
 }
 fn node(conn: &std::sync::Arc<Connection>, id: &str) -> Result<Option<(Node, bool)>> {
     let mut q = conn.prepare(
-        "SELECT revision,etag,content_length,marked FROM graph_nodes WHERE id=?1 AND freed=''",
+        "SELECT revision,etag,content_length,marked FROM userspace_nodes WHERE id=?1 AND freed=''",
     )?;
     q.bind_at(
         NonZeroUsize::new(1).unwrap(),
@@ -126,7 +126,7 @@ fn node(conn: &std::sync::Arc<Connection>, id: &str) -> Result<Option<(Node, boo
     Ok(result)
 }
 fn children(conn: &std::sync::Arc<Connection>, owner: &str) -> Result<Vec<String>> {
-    let mut q = conn.prepare("SELECT node FROM graph_edges WHERE retainer=?1 ORDER BY node")?;
+    let mut q = conn.prepare("SELECT node FROM userspace_edges WHERE retainer=?1 ORDER BY node")?;
     q.bind_at(
         NonZeroUsize::new(1).unwrap(),
         Value::build_text(owner.to_owned()),
@@ -171,7 +171,7 @@ pub fn scan(
     }
     let mut planned = BTreeSet::new();
     'tasks: for task in &command.tasks {
-        let owner = user_heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
+        let owner = heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
         let mut stack: Vec<(String, bool)> = children(&conn, &owner)?
             .into_iter()
             .rev()
@@ -200,7 +200,7 @@ pub fn scan(
         }
     }
     let mut promote = Vec::new();
-    conn.prepare(format!("SELECT id,revision,etag,content_length FROM graph_nodes WHERE promoted='' AND marked>'' AND freed='' AND NOT EXISTS(SELECT 1 FROM graph_edges e LEFT JOIN graph_nodes c ON c.id=e.node WHERE e.retainer=graph_nodes.id AND (c.id IS NULL OR c.promoted='')) ORDER BY promoted,marked,id LIMIT {node_limit}"))?.run_with_row_callback(|r|{promote.push(Node{id:r.get(0)?,revision:r.get(1)?,etag:r.get(2)?,length:r.get::<i64>(3)? as u64});Ok(())})?;
+    conn.prepare(format!("SELECT id,revision,etag,content_length FROM userspace_nodes WHERE promoted='' AND marked>'' AND freed='' AND NOT EXISTS(SELECT 1 FROM userspace_edges e LEFT JOIN userspace_nodes c ON c.id=e.node WHERE e.retainer=userspace_nodes.id AND (c.id IS NULL OR c.promoted='')) ORDER BY promoted,marked,id LIMIT {node_limit}"))?.run_with_row_callback(|r|{promote.push(Node{id:r.get(0)?,revision:r.get(1)?,etag:r.get(2)?,length:r.get::<i64>(3)? as u64});Ok(())})?;
     let mut ready = Vec::new();
     for task in &command.tasks {
         if promotion_ready(&conn, task)? {
@@ -225,18 +225,18 @@ fn matches(head: &s3::serde_types::HeadObjectResult, node: &Node) -> bool {
 }
 async fn old_exists(bucket: &s3::Bucket, node: &Node) -> Result<bool> {
     let (head, status) = crate::object_read::if_present(bucket)?
-        .head_object(user_heap::key(user_heap::OLD, &node.id, &node.revision))
+        .head_object(heap::key(heap::OLD, &node.id, &node.revision))
         .await?;
     match status {
         200 => {
             ensure!(
                 matches(&head, node),
-                "old user_heap object differs from allocation"
+                "old heap object differs from allocation"
             );
             Ok(true)
         }
         404 | 412 => Ok(false),
-        _ => anyhow::bail!("old user_heap HEAD returned HTTP {status}"),
+        _ => anyhow::bail!("old heap HEAD returned HTTP {status}"),
     }
 }
 async fn source_context(
@@ -246,13 +246,13 @@ async fn source_context(
     let mut reader = bucket.clone();
     reader.add_header("if-match", &node.etag);
     let (head, status) = reader
-        .head_object(user_heap::key(user_heap::YOUNG, &node.id, &node.revision))
+        .head_object(heap::key(heap::YOUNG, &node.id, &node.revision))
         .await?;
     ensure!(
         status == 200
             && head.e_tag.as_deref() == Some(&node.etag)
             && head.content_length == i64::try_from(node.length).ok(),
-        "young user_heap metadata differs from allocation"
+        "young heap metadata differs from allocation"
     );
     let context = head
         .metadata
@@ -306,23 +306,23 @@ pub async fn promote_one(bucket: &s3::Bucket, node: &Node) -> Result<()> {
     ensure!(!node.etag.is_empty(), "marked node has no verified ETag");
     if !old_exists(bucket, node).await? {
         let context = source_context(bucket, node).await?;
-        let source = user_heap::key(user_heap::YOUNG, &node.id, &node.revision);
-        let destination = user_heap::key(user_heap::OLD, &node.id, &node.revision);
+        let source = heap::key(heap::YOUNG, &node.id, &node.revision);
+        let destination = heap::key(heap::OLD, &node.id, &node.revision);
         if let Err(e) = conditional_copy(bucket, &source, &destination, &node.etag, &context).await
         {
-            tracing::debug!(%e,"user_heap copy completion uncertain");
+            tracing::debug!(%e,"heap copy completion uncertain");
         }
         ensure!(
             old_exists(bucket, node).await?,
-            "user_heap promotion has no verified destination"
+            "heap promotion has no verified destination"
         );
     }
     let response = bucket
-        .delete_object(user_heap::key(user_heap::YOUNG, &node.id, &node.revision))
+        .delete_object(heap::key(heap::YOUNG, &node.id, &node.revision))
         .await?;
     ensure!(
         matches!(response.status_code(), 200..=299 | 404),
-        "young user_heap DELETE failed"
+        "young heap DELETE failed"
     );
     Ok(())
 }
@@ -340,7 +340,7 @@ pub async fn promote(bucket: &s3::Bucket, nodes: Vec<Node>, concurrency: usize) 
                 match promote_one(&bucket, &node).await {
                     Ok(()) => Some(node),
                     Err(error) => {
-                        tracing::warn!(%error,"user_heap promotion deferred");
+                        tracing::warn!(%error,"heap promotion deferred");
                         None
                     }
                 }

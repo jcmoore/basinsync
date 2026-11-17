@@ -14,7 +14,7 @@ use tokio::sync::watch;
 /// Publish only after every marker through this immutable, durable snapshot is stored.
 pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
     let previous = epilogue::latest_checkpoint(bucket).await?;
-    // A full-file Datashed marker has no outgoing user_heap edges of its own.
+    // A full-file Datashed marker has no outgoing heap edges of its own.
     // Repair a sign after a crash before permitting a newer backup.
     if let Some(cp) = &previous {
         epilogue::confirm_promotion_sign(

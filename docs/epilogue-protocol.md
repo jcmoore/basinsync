@@ -5,6 +5,7 @@
 [datashed]: <glossary/datashed.md>
 [differential-event]: <glossary/differential-event.md>
 [envbuf]: <glossary/envbuf.md>
+[heap-protocol]: <heap-protocol.md>
 [json0]: <glossary/json0.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [milestone]: <glossary/milestone.md>
@@ -13,7 +14,6 @@
 [range-get]: <glossary/range-get.md>
 [reservoir]: <glossary/reservoir.md>
 [sha384]: <glossary/sha384.md>
-[userheap-protocol]: <userheap-protocol.md>
 [viewpoint]: <glossary/viewpoint.md>
 
 # Epilogue protocol
@@ -27,7 +27,7 @@
 `blob` (raw bytes). `details` contains `viewpoint: bigint` and
 `sha384: Uint8Array`, optional `context: Record<string, string>` (default `{}`),
 and a required `edges` array (`[]` for an empty graph), using the
-*reservation API's*[~][userheap-protocol] authenticated child descriptors.
+*reservation API's*[~][heap-protocol] authenticated child descriptors.
 Store *context*[~][context] entries as `x-amz-meta-ctx-${key}` object metadata.
 Verify each referenced *node*[~][node] before accepting its edge. Require the expected
 *viewpoint*[~][viewpoint] and matching *digest*[~][sha384] before accepting a

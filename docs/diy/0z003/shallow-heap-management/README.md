@@ -10,29 +10,31 @@ prerequisites:
 [datashed]: <../../../glossary/datashed.md>
 [development]: <../../../development.md>
 [flow]: <../../../glossary/flow.md>
-[kernelheap]: <../../../glossary/kernelheap.md>
+[heap-protocol]: <../../../heap-protocol.md>
+[heap-reservation]: <../../../glossary/heap-reservation.md>
+[jet]: <../../../glossary/jet.md>
+[kernelspace]: <../../../glossary/kernelspace.md>
 [node]: <../../../glossary/node.md>
 [node-height]: <../../../glossary/node-height.md>
 [old-generation]: <../../../glossary/old-generation.md>
 [retainer]: <../../../glossary/retainer.md>
 [timeline]: <../../../glossary/timeline.md>
 [turso]: <../../../glossary/turso.md>
-[userheap-protocol]: <../../../userheap-protocol.md>
-[userheap-reservation]: <../../../glossary/userheap-reservation.md>
+[userspace]: <../../../glossary/userspace.md>
 [viewpoint]: <../../../glossary/viewpoint.md>
 [young-generation]: <../../../glossary/young-generation.md>
 
-# Shallow UserHeap management
+# Shallow Heap management
 
 Prepare for *Viewpoints*[~][viewpoint] rooted at a *CommitMarker*[~][commit-marker]
-with a *DAG*[~][dag] of opaque *nodes*[~][node]. Introduce *UserHeap reservations*[~][userheap-reservation]
+with a *DAG*[~][dag] of opaque *nodes*[~][node]. Introduce *Heap reservations*[~][heap-reservation]
 so clients can upload before publication, while the *Datashed*[~][datashed]
-counts incoming edges for eventual collection.
+counts incoming edges for eventual collection in *UserSpace*[~][userspace].
 
-Implement the *staging endpoint*[~][userheap-protocol]. Require the *Flow's*[~][flow]
+Implement the *staging endpoint*[~][heap-protocol]. Require the *Flow's*[~][flow]
 singular expected next *Viewpoint*[~][viewpoint]. Accept only *height*[~][node-height]
-zero, version zero, and empty edge lists. Configure `BASINSYNC_USER_HEAP_MAX_HEIGHT`
-(128) and `BASINSYNC_USER_HEAP_MAX_TOKEN_BYTES` (64).
+zero, version zero, and empty edge lists. Configure `BASINSYNC_HEAP_MAX_HEIGHT`
+(128) and `BASINSYNC_HEAP_MAX_TOKEN_BYTES` (64).
 
 Each submitted *node*[~][node] may include `context: Record<string, string>`
 (default `{}`). Validate its *context*[~][context] and bind `x-amz-meta-ctx-` headers
@@ -43,7 +45,7 @@ require identical context, even before upload; mismatches return an indexed erro
 Expand `default.turso`:
 
 ```sql
-CREATE TABLE graph_nodes (
+CREATE TABLE userspace_nodes (
   id TEXT PRIMARY KEY NOT NULL,
   content_length INTEGER NOT NULL CHECK(content_length >= 0),
   context TEXT NOT NULL DEFAULT '{}',
@@ -51,13 +53,13 @@ CREATE TABLE graph_nodes (
   etag TEXT NOT NULL,
   promoted DATETIME NOT NULL
 );
-CREATE TABLE graph_edges (
+CREATE TABLE userspace_edges (
   node TEXT NOT NULL,
   retainer TEXT NOT NULL,
   PRIMARY KEY (node, retainer),
   CHECK (retainer < node)
 );
-CREATE INDEX graph_edges_retainer ON graph_edges(retainer, node);
+CREATE INDEX userspace_edges_retainer ON userspace_edges(retainer, node);
 ```
 
 For each valid *node*[~][node], insert its id, length, current reservation time,
@@ -82,5 +84,5 @@ retained by the *CommitMarker*[~][commit-marker],
 the *old generation*[~][old-generation], references to promoted *nodes*[~][node],
 and higher *nodes*[~][node] with targets in either generation.
 
-*KernelHeap*[~][kernelheap] support for server-driven *Datashed*[~][datashed]
-*Viewpoints*[~][viewpoint] comes later.
+*KernelSpace's*[~][kernelspace] `kernelspace_nodes` and `kernelspace_edges` for
+server-driven *Datashed*[~][datashed] and *Jet*[~][jet] graphs come later.

@@ -233,18 +233,14 @@ impl Stager {
         self.state.head = Some(prepared.digest.clone());
         Ok(prepared)
     }
-    pub fn inspect_user_heap(&mut self, request: &mut crate::user_heap::Request) -> Result<()> {
+    pub fn inspect_heap(&mut self, request: &mut crate::heap::Request) -> Result<()> {
         self.state.enable_vfs()?;
-        self.state
-            .writer
-            .as_ref()
-            .unwrap()
-            .inspect_user_heap(request)
+        self.state.writer.as_ref().unwrap().inspect_heap(request)
     }
     pub fn inspect_children(
         &mut self,
         edges: &std::collections::BTreeSet<String>,
-        proofs: &mut crate::user_heap::Proofs,
+        proofs: &mut crate::heap::Proofs,
     ) -> Result<()> {
         self.state.enable_vfs()?;
         self.state
@@ -256,8 +252,8 @@ impl Stager {
     pub fn check_children(
         &mut self,
         edges: &std::collections::BTreeSet<String>,
-        proofs: &crate::user_heap::Proofs,
-    ) -> Result<Option<crate::user_heap::NodeError>> {
+        proofs: &crate::heap::Proofs,
+    ) -> Result<Option<crate::heap::NodeError>> {
         self.state.enable_vfs()?;
         self.state
             .writer
@@ -290,12 +286,12 @@ impl Stager {
         self.state.head = Some(prepared.digest.clone());
         Ok(Some(prepared))
     }
-    pub fn prepare_user_heap(
+    pub fn prepare_heap(
         &mut self,
-        request: &crate::user_heap::Request,
-    ) -> Result<(Option<Prepared>, crate::user_heap::Outcome)> {
+        request: &crate::heap::Request,
+    ) -> Result<(Option<Prepared>, crate::heap::Outcome)> {
         self.state.enable_vfs()?;
-        let (captured, outcome) = self.state.writer.as_mut().unwrap().prepare_user_heap(
+        let (captured, outcome) = self.state.writer.as_mut().unwrap().prepare_heap(
             &self.state.milestone,
             self.state.head.as_deref(),
             request,

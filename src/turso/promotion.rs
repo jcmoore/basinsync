@@ -1,6 +1,6 @@
 use super::cleanup::{execute, strings};
 use super::*;
-use crate::{promotion::Command, user_heap};
+use crate::{heap, promotion::Command};
 
 pub(super) fn retain_markers(
     native: &Native,
@@ -11,14 +11,14 @@ pub(super) fn retain_markers(
     for command in commands {
         for (flow, marker) in &command.markers {
             let viewpoint = marker.validate()?;
-            let owner = user_heap::marker_retainer(flow, &viewpoint);
+            let owner = heap::marker_retainer(flow, &viewpoint);
             for id in &marker.edges {
                 let proof = marker
                     .verified
                     .get(id)
                     .ok_or_else(|| anyhow::anyhow!("unverified marker edge"))?;
                 let mut q = conn.prepare(
-                    "SELECT revision,content_length,etag,freed FROM graph_nodes WHERE id=?1",
+                    "SELECT revision,content_length,etag,freed FROM userspace_nodes WHERE id=?1",
                 )?;
                 q.bind_at(NonZeroUsize::new(1).unwrap(), Value::build_text(id.clone()))?;
                 let mut valid = false;
@@ -36,12 +36,12 @@ pub(super) fn retain_markers(
                 ensure!(valid, "marker child changed before transaction");
                 execute(
                     conn,
-                    "UPDATE graph_nodes SET etag=?2 WHERE id=?1 AND revision=?3",
+                    "UPDATE userspace_nodes SET etag=?2 WHERE id=?1 AND revision=?3",
                     &[id, &proof.etag, &proof.revision],
                 )?;
                 execute(
                     conn,
-                    "INSERT INTO graph_edges(node,retainer) VALUES(?1,?2) ON CONFLICT(node,retainer) DO NOTHING",
+                    "INSERT INTO userspace_edges(node,retainer) VALUES(?1,?2) ON CONFLICT(node,retainer) DO NOTHING",
                     &[id, &owner],
                 )?;
             }
@@ -104,7 +104,7 @@ impl State {
             }
         }
         for node in &command.promoted {
-            if !strings(&self.native.conn,"SELECT id FROM graph_nodes WHERE id=?1 AND revision=?2 AND etag=?3 AND marked>'' AND promoted='' AND freed=''",&[&node.id,&node.revision,&node.etag])?.is_empty(){return Ok(true);}
+            if !strings(&self.native.conn,"SELECT id FROM userspace_nodes WHERE id=?1 AND revision=?2 AND etag=?3 AND marked>'' AND promoted='' AND freed=''",&[&node.id,&node.revision,&node.etag])?.is_empty(){return Ok(true);}
         }
         Ok(false)
     }
@@ -116,16 +116,16 @@ impl State {
         for node in &command.marked {
             execute(
                 conn,
-                "UPDATE graph_nodes SET marked=?3 WHERE id=?1 AND revision=?2 AND freed='' AND marked='' AND etag<>'' AND NOT EXISTS(SELECT 1 FROM graph_edges e LEFT JOIN graph_nodes c ON c.id=e.node WHERE e.retainer=?1 AND (c.id IS NULL OR c.marked=''))",
+                "UPDATE userspace_nodes SET marked=?3 WHERE id=?1 AND revision=?2 AND freed='' AND marked='' AND etag<>'' AND NOT EXISTS(SELECT 1 FROM userspace_edges e LEFT JOIN userspace_nodes c ON c.id=e.node WHERE e.retainer=?1 AND (c.id IS NULL OR c.marked=''))",
                 &[&node.id, &node.revision, &command.at],
             )?;
         }
         for sign in &command.signed {
             let task = sign.task();
-            let owner = user_heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
+            let owner = heap::marker_retainer(&task.flow, &Viewpoint::parse(&task.viewpoint)?);
             execute(
                 conn,
-                "DELETE FROM marking_tasks WHERE flow=?1 AND viewpoint=?2 AND upstream=?4 AND EXISTS(SELECT 1 FROM flows WHERE id=?1 AND revision=?5) AND NOT EXISTS(SELECT 1 FROM graph_edges e LEFT JOIN graph_nodes n ON n.id=e.node WHERE e.retainer=?3 AND (n.id IS NULL OR n.promoted=''))",
+                "DELETE FROM marking_tasks WHERE flow=?1 AND viewpoint=?2 AND upstream=?4 AND EXISTS(SELECT 1 FROM flows WHERE id=?1 AND revision=?5) AND NOT EXISTS(SELECT 1 FROM userspace_edges e LEFT JOIN userspace_nodes n ON n.id=e.node WHERE e.retainer=?3 AND (n.id IS NULL OR n.promoted=''))",
                 &[
                     &task.flow,
                     &task.viewpoint,
@@ -138,7 +138,7 @@ impl State {
         for node in &command.promoted {
             execute(
                 conn,
-                "UPDATE graph_nodes SET promoted=?3 WHERE id=?1 AND revision=?2 AND marked>'' AND promoted='' AND freed='' AND etag=?4 AND NOT EXISTS(SELECT 1 FROM graph_edges e LEFT JOIN graph_nodes c ON c.id=e.node WHERE e.retainer=?1 AND (c.id IS NULL OR c.promoted=''))",
+                "UPDATE userspace_nodes SET promoted=?3 WHERE id=?1 AND revision=?2 AND marked>'' AND promoted='' AND freed='' AND etag=?4 AND NOT EXISTS(SELECT 1 FROM userspace_edges e LEFT JOIN userspace_nodes c ON c.id=e.node WHERE e.retainer=?1 AND (c.id IS NULL OR c.promoted=''))",
                 &[&node.id, &node.revision, &command.at, &node.etag],
             )?;
         }

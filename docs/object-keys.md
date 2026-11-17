@@ -6,6 +6,7 @@
 [empty-sentinel]: <glossary/empty-sentinel.md>
 [envbuf]: <glossary/envbuf.md>
 [flow]: <glossary/flow.md>
+[heap]: <glossary/heap.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [margin]: <glossary/margin.md>
 [milestone]: <glossary/milestone.md>
@@ -17,7 +18,7 @@
 [revision]: <glossary/revision.md>
 [sha384]: <glossary/sha384.md>
 [tombstone]: <glossary/tombstone.md>
-[userheap]: <glossary/userheap.md>
+[userspace]: <glossary/userspace.md>
 [viewpoint]: <glossary/viewpoint.md>
 [young-generation]: <glossary/young-generation.md>
 
@@ -35,8 +36,8 @@ All implemented S3 key patterns, relative to the configured bucket:
 | *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `epilogue/${lex(viewpoint)}` |
 | *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
 | *Flow*[~][flow] *PromotionSign*[~][promotion-sign] | `flows/${flow}/${flow_revision}/epilogue/${lex(viewpoint)}` |
-| *Young-generation*[~][young-generation] *node*[~][node] | `userheap/young/${node_id}/${node_revision}` |
-| *Old-generation*[~][old-generation] *node*[~][node] | `userheap/old/${node_id}/${node_revision}` |
+| *UserSpace*[~][userspace] *Heap*[~][heap] *young-generation*[~][young-generation] *node*[~][node] | `userspace/heap/young/${node_id}/${node_revision}` |
+| *UserSpace*[~][userspace] *Heap*[~][heap] *old-generation*[~][old-generation] *node*[~][node] | `userspace/heap/old/${node_id}/${node_revision}` |
 
 `lex` is signed *Lexidecimal*[~][lexidecimal]; `~` is arbitrary-precision bitwise
 complement. *Viewpoints*[~][viewpoint]
@@ -87,7 +88,7 @@ Sequence objects reserve zero bytes for *empty sentinels*[~][empty-sentinel].
 one raw message. These feeds default to a trailing `u64` *counter margin*[~][margin].
 *PromotionSigns*[~][promotion-sign] use a *margin*[~][margin] with a one-byte counter
 from 1 through 7. Their framing keeps valid empty messages distinct from
-*sentinels*[~][empty-sentinel]. *UserHeap*[~][userheap] objects stay opaque, including valid empty blobs.
+*sentinels*[~][empty-sentinel]. *Heap*[~][heap] objects stay opaque, including valid empty blobs.
 The empty reference is always zero bytes. Probe objects are created only if
 absent and verified on reuse. *Tombstone*[~][tombstone] probe lengths are decimal
 2, 4, …, 14; sixteen-byte candidates are refused. *Margin*[~][margin] probes each contain a single

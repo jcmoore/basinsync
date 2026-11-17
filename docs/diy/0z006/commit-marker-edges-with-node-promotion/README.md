@@ -1,7 +1,7 @@
 ---
 prerequisites:
   - 0z003/datashed-backup-recovery
-  - 0z005/deep-userheap-support
+  - 0z005/deep-heap-support
 ---
 
 [access-token]: <../../../glossary/access-token.md>
@@ -13,6 +13,7 @@ prerequisites:
 [epilogue-compaction]: <../../../glossary/epilogue-compaction.md>
 [epilogue-protocol]: <../../../epilogue-protocol.md>
 [etag]: <../../../glossary/etag.md>
+[heap-protocol]: <../../../heap-protocol.md>
 [lexidecimal]: <../../../glossary/lexidecimal.md>
 [margin]: <../../../glossary/margin.md>
 [marking-task]: <../../../glossary/marking-task.md>
@@ -26,7 +27,6 @@ prerequisites:
 [sweeping-task]: <../../../glossary/sweeping-task.md>
 [timeline]: <../../../glossary/timeline.md>
 [upstream]: <../../../glossary/upstream.md>
-[userheap-protocol]: <../../../userheap-protocol.md>
 [viewpoint]: <../../../glossary/viewpoint.md>
 [virtual-file-system]: <../../../glossary/virtual-file-system.md>
 [young-generation]: <../../../glossary/young-generation.md>
@@ -34,7 +34,7 @@ prerequisites:
 # CommitMarker edges with node promotion
 
 Extend *commit details*[~][epilogue-protocol] with a required `edges` array;
-use `[]` for an empty graph. Use the *reservation API's*[~][userheap-protocol]
+use `[]` for an empty graph. Use the *reservation API's*[~][heap-protocol]
 `{ auth: [height, version, token] }` shape, authentication, limits, and stored-target checks.
 Targets may exist in either the *young*[~][young-generation] or *old*[~][old-generation]
 generation. Never persist *access tokens*[~][access-token].
@@ -55,8 +55,8 @@ CREATE TABLE marking_tasks (
 );
 CREATE INDEX marking_tasks_prioritized
   ON marking_tasks(prioritized, flow, viewpoint);
-ALTER TABLE graph_nodes ADD COLUMN marked DATETIME NOT NULL DEFAULT '';
-CREATE INDEX graph_nodes_promotion ON graph_nodes(promoted, marked);
+ALTER TABLE userspace_nodes ADD COLUMN marked DATETIME NOT NULL DEFAULT '';
+CREATE INDEX userspace_nodes_promotion ON userspace_nodes(promoted, marked);
 ```
 
 Record the committing *upstream*[~][upstream] *Milestone*[~][milestone] in `upstream`,

@@ -2,11 +2,13 @@
 [object-keys]: <../object-keys.md>
 [reservoir]: <reservoir.md>
 [revision]: <revision.md>
+[userspace]: <userspace.md>
 [viewpoint]: <viewpoint.md>
 
 # Flow
 
-A string-identified *Reservoir*[~][reservoir] within a *Basin*[~][basin]. Its
+A client-driven, string-identified *Reservoir*[~][reservoir] in a *Basin's*[~][basin]
+*UserSpace*[~][userspace]. Its
 *Viewpoints*[~][viewpoint] begin at zero independently of other *Flows*.
 
 Use a lowercase portable ASCII id, following the *Flow-id rules*[~][object-keys].

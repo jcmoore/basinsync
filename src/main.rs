@@ -14,8 +14,9 @@ use basinsync::{
     cleanup,
     details::CommitDetails,
     event::{self, Marker},
+    heap,
     lexidecimal::Viewpoint,
-    timeline, user_heap,
+    timeline,
 };
 use s3::{Bucket, Region, creds::Credentials};
 use serde::{Deserialize, Serialize};
@@ -33,8 +34,8 @@ struct App {
     admission: Arc<Semaphore>,
     published: watch::Receiver<timeline::Prefix>,
     bucket: Box<Bucket>,
-    user_heap_limits: user_heap::Limits,
-    user_heap_heads: Arc<Semaphore>,
+    heap_limits: heap::Limits,
+    heap_heads: Arc<Semaphore>,
 }
 
 type Shared = Arc<App>;
@@ -140,14 +141,14 @@ impl App {
 }
 
 struct Commit {
-    proofs: user_heap::Proofs,
+    proofs: heap::Proofs,
     flow: String,
     marker: Marker,
     viewpoint: Viewpoint,
 }
 
 impl Commit {
-    async fn read(mut form: Multipart, limits: &user_heap::Limits) -> Result<Self, Failure> {
+    async fn read(mut form: Multipart, limits: &heap::Limits) -> Result<Self, Failure> {
         let (mut details, mut blob) = (None, None);
         while let Some(field) = form
             .next_field()
@@ -176,7 +177,7 @@ impl Commit {
         } = serde_json::from_slice(&details.ok_or_else(|| Failure::bad("missing details"))?)
             .map_err(|_| Failure::bad("invalid commit details"))?;
         basinsync::details::context_headers(&context).map_err(Failure::bad)?;
-        let edges = user_heap::authenticate_edges(edges, limits, None)
+        let edges = heap::authenticate_edges(edges, limits, None)
             .map_err(|e| Failure::new(StatusCode::UNPROCESSABLE_ENTITY, e.code, e.message))?;
         let flow = event::normalize_flow(&flow).map_err(Failure::bad)?;
         basinsync::epilogue::check_flow_key(&flow, &viewpoint).map_err(Failure::bad)?;
@@ -238,7 +239,7 @@ async fn commit(
             .acquire_owned()
             .await
             .map_err(|_| stopped())?;
-        let mut request = Commit::read(form, &app.user_heap_limits).await?;
+        let mut request = Commit::read(form, &app.heap_limits).await?;
         if !request.marker.edges.is_empty() {
             let (reply, received) = oneshot::channel();
             app.queue
@@ -249,12 +250,7 @@ async fn commit(
                 .await
                 .map_err(|_| stopped())?
                 .map_err(|_| stopped())?;
-            user_heap::verify_children(
-                &mut request.proofs,
-                &app.bucket,
-                app.user_heap_heads.clone(),
-            )
-            .await;
+            heap::verify_children(&mut request.proofs, &app.bucket, app.heap_heads.clone()).await;
         }
         let (reply, result) = oneshot::channel();
         let queued = tracing::enabled!(tracing::Level::DEBUG)
@@ -289,9 +285,9 @@ struct QueuedCommit {
     reply: oneshot::Sender<ApiReply<Position>>,
 }
 struct QueuedReservation {
-    request: user_heap::Request,
+    request: heap::Request,
     admission: OwnedSemaphorePermit,
-    reply: oneshot::Sender<ApiReply<user_heap::Outcome>>,
+    reply: oneshot::Sender<ApiReply<heap::Outcome>>,
 }
 impl QueuedCommit {
     fn size(&self) -> usize {
@@ -312,9 +308,9 @@ enum Message {
     },
     Commit(QueuedCommit),
     Reserve(QueuedReservation),
-    InspectUserHeap {
-        request: user_heap::Request,
-        reply: oneshot::Sender<Result<user_heap::Request>>,
+    InspectHeap {
+        request: heap::Request,
+        reply: oneshot::Sender<Result<heap::Request>>,
     },
     Cleanup {
         command: cleanup::Command,
@@ -340,7 +336,7 @@ impl Message {
             Self::Promote { reply, .. } => {
                 let _ = reply.send(Err(anyhow::anyhow!("publication stopped")));
             }
-            Self::InspectUserHeap { reply, .. } => {
+            Self::InspectHeap { reply, .. } => {
                 let _ = reply.send(Err(anyhow::anyhow!("publication stopped")));
             }
             Self::Cleanup { reply, .. } => {
@@ -388,7 +384,7 @@ async fn epilogue_status(
     app.respond(StatusCode::OK, result)
 }
 
-async fn user_heap_reserve(State(app): State<Shared>, body: axum::extract::Request) -> Response {
+async fn heap_reserve(State(app): State<Shared>, body: axum::extract::Request) -> Response {
     let result = async {
         let admission = app
             .admission
@@ -397,14 +393,10 @@ async fn user_heap_reserve(State(app): State<Shared>, body: axum::extract::Reque
             .await
             .map_err(|_| stopped())?;
         let body = Bytes::from_request(body, &app).await.map_err(|e| {
-            Failure::new(
-                e.status(),
-                "invalid_request",
-                "invalid user_heap request body",
-            )
+            Failure::new(e.status(), "invalid_request", "invalid heap request body")
         })?;
-        let mut request = user_heap::Request::parse(&body, &app.user_heap_limits)
-            .map_err(|_| Failure::bad("invalid user_heap request"))?;
+        let mut request = heap::Request::parse(&body, &app.heap_limits)
+            .map_err(|_| Failure::bad("invalid heap request"))?;
         if request
             .nodes
             .iter()
@@ -413,7 +405,7 @@ async fn user_heap_reserve(State(app): State<Shared>, body: axum::extract::Reque
         {
             let (reply, inspected) = oneshot::channel();
             app.queue
-                .send(Message::InspectUserHeap { request, reply })
+                .send(Message::InspectHeap { request, reply })
                 .await
                 .map_err(|_| stopped())?;
             request = inspected
@@ -421,7 +413,7 @@ async fn user_heap_reserve(State(app): State<Shared>, body: axum::extract::Reque
                 .map_err(|_| stopped())?
                 .map_err(|_| stopped())?;
             request
-                .verify_children(&app.bucket, app.user_heap_heads.clone())
+                .verify_children(&app.bucket, app.heap_heads.clone())
                 .await;
         }
         let (reply, result) = oneshot::channel();
@@ -444,7 +436,7 @@ async fn user_heap_reserve(State(app): State<Shared>, body: axum::extract::Reque
                     failure: Failure::new(
                         StatusCode::SERVICE_UNAVAILABLE,
                         "signing_failed",
-                        "unable to sign user_heap actions; reservation may already be durable",
+                        "unable to sign heap actions; reservation may already be durable",
                     ),
                     timelines: response.timelines,
                 }),
@@ -529,14 +521,14 @@ async fn main() -> Result<()> {
     );
     let capacity = (batch_max * PIPELINE_BATCHES).max(32);
     let (queue, receiver) = mpsc::channel(capacity);
-    let user_heap_limits = user_heap::Limits {
+    let heap_limits = heap::Limits {
         max_degree: env::var("BASINSYNC_NODE_MAX_DEGREE")
             .unwrap_or_else(|_| "128".into())
             .parse()?,
-        max_height: env::var("BASINSYNC_USER_HEAP_MAX_HEIGHT")
+        max_height: env::var("BASINSYNC_HEAP_MAX_HEIGHT")
             .unwrap_or_else(|_| "128".into())
             .parse()?,
-        max_token_bytes: env::var("BASINSYNC_USER_HEAP_MAX_TOKEN_BYTES")
+        max_token_bytes: env::var("BASINSYNC_HEAP_MAX_TOKEN_BYTES")
             .unwrap_or_else(|_| "64".into())
             .parse()?,
     };
@@ -603,13 +595,13 @@ async fn main() -> Result<()> {
         admission: Arc::new(Semaphore::new(capacity)),
         published: published_rx,
         bucket: signing_bucket,
-        user_heap_limits,
-        user_heap_heads: Arc::new(Semaphore::new(8)),
+        heap_limits,
+        heap_heads: Arc::new(Semaphore::new(8)),
     });
     let api = Router::new()
         .route("/epilogue", put(commit))
         .route("/epilogue/status", get(epilogue_status))
-        .route("/userheap/reserve", post(user_heap_reserve))
+        .route("/userspace/heap/reserve", post(heap_reserve))
         .fallback(|State(app): State<Shared>| async move {
             app.failure(Failure::new(
                 StatusCode::NOT_FOUND,

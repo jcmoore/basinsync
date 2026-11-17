@@ -312,21 +312,21 @@ impl Writer {
     pub fn snapshot(&self) -> Result<Option<Arc<super::cow::View>>> {
         self.store.as_ref().map(|s| s.pin()).transpose()
     }
-    pub(crate) fn inspect_user_heap(&self, request: &mut crate::user_heap::Request) -> Result<()> {
-        self.state.inspect_user_heap(request)
+    pub(crate) fn inspect_heap(&self, request: &mut crate::heap::Request) -> Result<()> {
+        self.state.inspect_heap(request)
     }
     pub(crate) fn inspect_children(
         &self,
         edges: &std::collections::BTreeSet<String>,
-        proofs: &mut crate::user_heap::Proofs,
+        proofs: &mut crate::heap::Proofs,
     ) -> Result<()> {
         self.state.inspect_children(edges, proofs)
     }
     pub(crate) fn check_children(
         &self,
         edges: &std::collections::BTreeSet<String>,
-        proofs: &crate::user_heap::Proofs,
-    ) -> Result<Option<crate::user_heap::NodeError>> {
+        proofs: &crate::heap::Proofs,
+    ) -> Result<Option<crate::heap::NodeError>> {
         self.state.check_children(edges, proofs)
     }
     pub(crate) fn prepare_promotion(
@@ -359,28 +359,24 @@ impl Writer {
     pub fn cursor(&self) -> &BigUint {
         &self.cursor
     }
-    pub(crate) fn prepare_user_heap(
+    pub(crate) fn prepare_heap(
         &mut self,
         base: &BigUint,
         parent: Option<&str>,
-        request: &crate::user_heap::Request,
-    ) -> Result<(
-        Option<(crate::user_heap::Command, Delta)>,
-        crate::user_heap::Outcome,
-    )> {
+        request: &crate::heap::Request,
+    ) -> Result<(Option<(crate::heap::Command, Delta)>, crate::heap::Outcome)> {
         ensure!(&self.cursor == base, "unpublished database transaction");
         let expected = self
             .latest(&request.flow)?
             .map_or_else(Viewpoint::zero, |v| v.next());
         ensure!(
             request.viewpoint == expected,
-            "user_heap reservation Viewpoint mismatch"
+            "heap reservation Viewpoint mismatch"
         );
-        let (command, outcome) = self.state.plan_user_heap(request)?;
+        let (command, outcome) = self.state.plan_heap(request)?;
         let captured = if let Some(command) = command {
             let milestone = base + 1u8;
-            self.state
-                .transact_user_heap(&milestone.to_string(), &command)?;
+            self.state.transact_heap(&milestone.to_string(), &command)?;
             Some((command, self.capture(base, parent, milestone)?))
         } else {
             None

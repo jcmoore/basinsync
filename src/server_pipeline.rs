@@ -10,8 +10,8 @@ enum Reply {
     Cleanup(oneshot::Sender<Result<()>>),
     Commit(CommitReply),
     Reserve {
-        channel: oneshot::Sender<ApiReply<user_heap::Outcome>>,
-        result: Result<user_heap::Outcome, Failure>,
+        channel: oneshot::Sender<ApiReply<heap::Outcome>>,
+        result: Result<heap::Outcome, Failure>,
         _admission: OwnedSemaphorePermit,
     },
 }
@@ -292,14 +292,14 @@ impl Preparation {
                         .await
                         .map_err(|_| anyhow::anyhow!("publication stopped"))?;
                 }
-                Message::InspectUserHeap { mut request, reply } => {
+                Message::InspectHeap { mut request, reply } => {
                     let mut stager = self.write_stager().await?;
                     let (stager, request) = tokio::task::spawn_blocking(move || {
-                        stager.inspect_user_heap(&mut request)?;
+                        stager.inspect_heap(&mut request)?;
                         Ok::<_, anyhow::Error>((stager, request))
                     })
                     .await
-                    .context("user_heap inspection panicked")??;
+                    .context("heap inspection panicked")??;
                     self.stager = Some(stager);
                     let _ = reply.send(Ok(request));
                 }
@@ -560,7 +560,7 @@ fn prepare_reservation(
             })),
         )
     } else {
-        let (prepared, outcome) = stager.prepare_user_heap(&reservation.request)?;
+        let (prepared, outcome) = stager.prepare_heap(&reservation.request)?;
         (prepared, Ok(outcome))
     };
     let prefix = stager.prefix();
