@@ -5,6 +5,10 @@
 
 # Key-located manifests and separate probes
 
+These measurements used a full footer range in each key. The current `/v0/<start>`
+hint retains the same no-HEAD request path using an open-ended GET that also
+returns the trailing margin.
+
 Repeat the 96-event, five-order test on the same Apple M2, release build and
 VersityGW backend, with two rotated rounds and exact recovered-image checks.
 All Range readers now use the key's HTTP range to fetch the *BulkManifest*[~][bulk-manifest]
@@ -45,3 +49,10 @@ link these become 7103/5061/5054 ms: whole-order reads transfer 33.09 MiB versus
 23.04 MiB. A speculative initial Timeline GET can overlap the first archive range,
 explaining some remaining duplicate traffic even in the ranged modes.
 See *overlapping-order samples*[~][manifest-overlap].
+
+The key hint eliminated one HEAD per order. In the five-order 100 ms Range ×2
+comparison, archive reads fell from five HEADs plus ten GETs to ten GETs;
+total recorded S3 requests fell from 30 to 25, with LIST and bootstrap unchanged.
+Elapsed time fell from 2053 to 1703 ms across the two runs of each protocol.
+These are operation counts, not measured provider charges. Whole-object Bulk reads
+already used one GET per order, so the hint did not remove requests from that path.

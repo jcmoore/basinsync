@@ -5,13 +5,13 @@ import {fixture,eventually} from "./analogue-fixture";
 import {key as indexedKey,fromKey,encodeBulkOrder,decodeBulkOrder} from "./bulkorder";
 import {key as timelineKey,fromKey as timelineFromKey} from "./timeline";
 import {rangesAt} from "./events";
-import {concat} from "./envbuf";
+import {at,concat,wrap,MARGIN} from "./envbuf";
 import {commit} from "./client";
 
 const f=await fixture();
 try{
   const events=await f.generate(64,4096),bucket=await f.bucket();await f.seed(bucket,events);
-  function key(low:bigint,high:bigint){const body=encodeBulkOrder(low,events.slice(Number(low-1n),Number(high-1n)));return indexedKey(low,high,decodeBulkOrder(body).range);}
+  function key(low:bigint,high:bigint){const body=encodeBulkOrder(low,events.slice(Number(low-1n),Number(high-1n)));return indexedKey(low,high,decodeBulkOrder(body).range.start);}
   // Independent Rust/TS writers and readers, including short bigint payloads.
   for(const lowest of [1n,42n,65535n,1n<<256n]){
     const selected=events.slice(0,4),ts=encodeBulkOrder(lowest,selected);
@@ -38,6 +38,18 @@ try{
     if(mode==="range"||mode==="range-parallel"||mode==="range-prefetch")assert(!calls.some(c=>c.method==="HEAD"&&c.url.pathname.includes("/analogue/")),"key locates the manifest without HEAD");
     const singles=calls.filter(c=>c.method==="GET"&&c.url.pathname.includes("/timeline/")).length;
     if(mode==="bulk"||mode==="range")assert(singles<events.length/2,`reduced Timeline GETs: ${singles}`);
+  }
+  // Different FlexBuffers layouts share a key when their event bytes agree.
+  {
+    const b=await f.bucket();await f.seed(b,events);
+    const original=encodeBulkOrder(1n,events),a=decodeBulkOrder(original),footer=at(original,a.range.start);
+    const alternative=concat([...a.events,wrap(concat([new Uint8Array(8),footer.content])),wrap(new Uint8Array(8),MARGIN)]),decoded=decodeBulkOrder(alternative),name=indexedKey(1n,65n,decoded.range.start);
+    assert.notEqual(decoded.range.end,a.range.end);assert.equal(name,indexedKey(1n,65n,a.range.start));
+    await f.s3.send(new PutObjectCommand({Bucket:b,Key:name,Body:alternative,IfNoneMatch:"*",Metadata:{"bulkmanifest-range":`bytes=${decoded.range.start}-${decoded.range.end-1}`}}));
+    await assert.rejects(()=>f.s3.send(new PutObjectCommand({Bucket:b,Key:indexedKey(1n,65n,a.range.start),Body:original,IfNoneMatch:"*"})),(error:any)=>error.$metadata?.httpStatusCode===412);
+    for(const mode of ["bulk-parallel","range","range-prefetch"])assert.equal((await f.recover(b,mode)).sha384,baseline.sha384);
+    let puts=0;const observed=f.relay(async(request,next)=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/analogue/"))puts++;return next();});
+    const resumed=await f.server(b,{BASINSYNC_BULK_MAX_AGE_MS:"10"},observed);await f.stop(resumed.process);assert.equal(puts,0,"resume adopts an equivalent manifest with a different encoded length");
   }
   // A stronger but corrupt candidate must not install a false prefix or poison fallback.
   const corrupt=encodeBulkOrder(1n,events),offset=decodeBulkOrder(corrupt).index.offsets[11]+rangesAt(events[11])[0].offset;corrupt[offset]^=1;
@@ -121,7 +133,7 @@ try{
         if(!path.includes("/analogue/"))return next();
         if(request.method==="HEAD"){heads++;return next();}
         if(request.method!=="GET")return next();
-        const name=path.slice(path.indexOf("analogue/")),bounds=fromKey(name),range=`bytes=${bounds.range.start}-${bounds.range.end-1}`;
+        const name=path.slice(path.indexOf("analogue/")),bounds=fromKey(name),range=`bytes=${bounds.start}-`;
         if(request.headers.get("range")===range){const response=await next();seen.add(name);if(seen.size===4)setTimeout(()=>release.resolve(),100);return response;}
         activeData++;peakData=Math.max(peakData,activeData);
         try{
@@ -155,7 +167,7 @@ try{
     for(let n=1;n<8;n++)assert.equal((await commit(app.url,"live",new Uint8Array([n]),BigInt(n))).status,201);
     release.resolve();await f.stop(app.process);assert(sources>0,"overflow catches up from durable Timeline");
     const orders=(await f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"analogue/"}))).Contents!;assert.equal(orders.length,8);
-    for(const object of orders){const response=await f.s3.send(new GetObjectCommand({Bucket:b,Key:object.Key!}));const bytes=await response.Body!.transformToByteArray();const {index,events,range}=decodeBulkOrder(bytes);assert.equal(events.length,1);assert.equal(response.Metadata!["bulkmanifest-range"],`bytes=${range.start}-${range.end-1}`);assert.deepEqual(fromKey(object.Key!).range,range);const original=await f.s3.send(new GetObjectCommand({Bucket:b,Key:timelineKey(index.lowest)}));assert.deepEqual(events[0],await original.Body!.transformToByteArray());}
+    for(const object of orders){const response=await f.s3.send(new GetObjectCommand({Bucket:b,Key:object.Key!}));const bytes=await response.Body!.transformToByteArray();const {index,events,range}=decodeBulkOrder(bytes);assert.equal(events.length,1);assert.equal(response.Metadata!["bulkmanifest-range"],`bytes=${range.start}-${range.end-1}`);assert.equal(fromKey(object.Key!).start,range.start);const original=await f.s3.send(new GetObjectCommand({Bucket:b,Key:timelineKey(index.lowest)}));assert.deepEqual(events[0],await original.Body!.transformToByteArray());}
     let puts=0;const observed=f.relay(async(request,next)=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/analogue/"))puts++;return next();});
     const resumed=await f.server(b,{BASINSYNC_BULK_MAX_AGE_MS:"10",BASINSYNC_BULK_TARGET_BYTES:"1"},observed);await f.stop(resumed.process);assert.equal(puts,0,"resume existing contiguous archive coverage");
   }

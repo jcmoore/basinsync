@@ -34,7 +34,7 @@ from the durable *Timeline*[~][timeline]; resume beyond contiguous existing orde
 Accumulate in memory. Upload after reaching at least 5 MiB of whole events or
 30 seconds from the first buffered event; flush a partial order during shutdown.
 Append the *BulkManifest*[~][bulk-manifest] and its own *counter margin*[~][margin],
-include its HTTP byte range in the key and metadata, and use one *conditional PUT*[~][conditional-write].
+record the exclusive event end in the key and the footer range in metadata, and use one *conditional PUT*[~][conditional-write].
 Concurrent workers may create overlapping intervals; adopt an existing identical
 event sequence at the same key, allowing differing trailing event margins.
 Worker failures retry independently of client acknowledgments.

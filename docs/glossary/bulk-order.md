@@ -10,4 +10,4 @@
 An *EnvBuf feed*[~][envbuf] in an *Analogue*[~][analogue]: complete, contiguous
 *DifferentialEvents*[~][differential-event], followed by a *BulkManifest*[~][bulk-manifest]
 footer and a *counter margin*[~][margin]. Its *object key*[~][object-keys] carries
-the event interval and footer's HTTP byte range.
+the event interval and exclusive end of the event bytes.

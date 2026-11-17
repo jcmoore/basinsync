@@ -1,7 +1,7 @@
 import {expect,test} from "bun:test";
 import {encodeBulkOrder,decodeBulkOrder,key,fromKey} from "./bulkorder";
 import {encodeTuples,entryDigest} from "./events";
-import {wrap,MARGIN} from "./envbuf";
+import {at,concat,wrap,MARGIN} from "./envbuf";
 import {encode} from "./flexbuffer";
 
 const event=encodeTuples([[Symbol.species,"sync.memoremix.com","sts/0/databasin/ingestturso",{turso:{}}]]);
@@ -11,7 +11,7 @@ test("dense BulkOrder index retains nested event boundaries and arbitrary-precis
     expect(index).toEqual({lowest,offsets:Array.from({length:count+1},(_,i)=>i*event.length)});
     expect(range.start).toBe(count*event.length);expect(events.length).toBe(count);
     for(const extracted of events){expect(extracted.buffer).toBe(bytes.buffer);expect(entryDigest(extracted)).toBe(entryDigest(event));}
-    expect(fromKey(key(lowest,lowest+BigInt(count),range))).toEqual({lowest,highest:lowest+BigInt(count),range});
+    expect(fromKey(key(lowest,lowest+BigInt(count),range.start))).toEqual({lowest,highest:lowest+BigInt(count),start:range.start});
   }
 });
 test("BulkOrder rejects malformed bounds, framing, and dense indexes",()=>{
@@ -22,4 +22,11 @@ test("BulkOrder rejects malformed bounds, framing, and dense indexes",()=>{
     const bytes=new Uint8Array([...event,...wrap(encode([Symbol.species,"sync.memoremix.com","sts/0/databasin/bulkmanifest",{lowest:1n,offsets}])),...wrap(new Uint8Array(8),MARGIN)]);
     expect(()=>decodeBulkOrder(bytes)).toThrow();
   }
+});
+
+test("v0 key is independent of the BulkManifest representation and length",()=>{
+  const original=encodeBulkOrder(1n,[event,event]),a=decodeBulkOrder(original),footer=at(original,a.range.start);
+  const alternative=concat([...a.events,wrap(concat([new Uint8Array(8),footer.content])),wrap(new Uint8Array(8),MARGIN)]),b=decodeBulkOrder(alternative);
+  expect(b.events).toEqual(a.events);expect(b.range.start).toBe(a.range.start);expect(b.range.end).not.toBe(a.range.end);
+  expect(key(1n,3n,a.range.start)).toBe(key(1n,3n,b.range.start));expect(fromKey(key(1n,3n,b.range.start))).toEqual({lowest:1n,highest:3n,start:a.range.start});
 });

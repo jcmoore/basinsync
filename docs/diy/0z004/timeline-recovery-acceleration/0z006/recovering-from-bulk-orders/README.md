@@ -12,6 +12,7 @@ prerequisites:
 [datashed-backup]: <../../../../../datashed-backup.md>
 [differential-event]: <../../../../../glossary/differential-event.md>
 [lexidecimal]: <../../../../../glossary/lexidecimal.md>
+[margin]: <../../../../../glossary/margin.md>
 [milestone]: <../../../../../glossary/milestone.md>
 [timeline]: <../../../../../glossary/timeline.md>
 
@@ -31,7 +32,8 @@ search frontier. A min-upper-bound queue identifies intervals contained by later
 entries in each descending-lower-bound scan; retain this information without deleting objects.
 
 Fetch either the entire order or its *BulkManifest*[~][bulk-manifest] plus the useful event range.
-The key supplies the footer Range directly, avoiding HEAD. Verify
+The key supplies the exclusive event end; fetch `bytes=<start>-` and parse its
+first envelope as the footer, skipping trailing *margins*[~][margin] without HEAD. Verify
 the key/index bounds, offsets, framing, and each *event's*[~][differential-event] existing ingestion and
 predecessor checks. Only validated, contiguous application advances the materialized
 cursor; advertised candidate endpoints never do. A failed or invalid order falls
@@ -55,7 +57,7 @@ sizes, including for Range reads. Individual fallback responses, transient buffe
 and database memory are separate. Oversized orders fall back to individual reads.
 
 `range-prefetch` separates footer probes from data downloads: cache/probe up to
-`BASINSYNC_RECOVERY_MANIFEST_CONCURRENCY` manifests (default eight, each capped
+`BASINSYNC_RECOVERY_MANIFEST_CONCURRENCY` manifests (default eight, each fetched tail capped
 at 1 MiB), while retaining the two-slot data window. Probes advance discovery
 using advertised endpoints; only ingestion advances state. Its data-byte budget
 reserves the selected ranges rather than whole-object lengths.

@@ -138,7 +138,7 @@ fn keys_seek_descending_bounds_and_coverage_detects_contained_intervals() -> Res
             highest: b.into(),
         })
         .collect::<Vec<_>>();
-    orders.sort_by_key(|o| o.key(16..32).unwrap());
+    orders.sort_by_key(|o| o.key(16).unwrap());
     assert_eq!(
         orders
             .iter()
@@ -153,10 +153,10 @@ fn keys_seek_descending_bounds_and_coverage_detects_contained_intervals() -> Res
     );
     let mut coverage = Coverage::default();
     for order in &orders {
-        let key = order.key(16..32)?;
+        let key = order.key(16)?;
         assert_eq!(Order::from_key(&key)?, *order);
-        assert_eq!(analogue::manifest_range(&key)?, 16..32);
-        assert!(key.ends_with("/bytes=16-31"));
+        assert_eq!(analogue::manifest_start(&key)?, 16);
+        assert!(key.ends_with("/v0/16"));
         coverage.observe(&Candidate {
             key,
             order: order.clone(),
@@ -164,11 +164,11 @@ fn keys_seek_descending_bounds_and_coverage_detects_contained_intervals() -> Res
         })?;
     }
     assert_eq!(coverage.covered.len(), 3);
-    assert!(orders[0].key(16..32)? > analogue::seek(&2u8.into()));
+    assert!(orders[0].key(16)? > analogue::seek(&2u8.into()));
     assert!(
         orders
             .iter()
-            .all(|o| o.key(16..32).unwrap() > analogue::seek(&3u8.into()))
+            .all(|o| o.key(16).unwrap() > analogue::seek(&3u8.into()))
     );
     for bad in [
         "analogue/0yfff/0yffe",
@@ -179,11 +179,12 @@ fn keys_seek_descending_bounds_and_coverage_detects_contained_intervals() -> Res
         assert!(Order::from_key(bad).is_err());
     }
     for suffix in [
-        "bytes=016-31",
-        "bytes=16-32",
-        "bytes=32-15",
-        "bytes=-1-31",
-        "bytes=0-18446744073709551615",
+        "v0/016",
+        "v0/17",
+        "v0/0",
+        "v0/-16",
+        "v1/16",
+        "v0/18446744073709551616",
     ] {
         assert!(Order::from_key(&format!("analogue/0yffe/0yffd/{suffix}")).is_err());
     }

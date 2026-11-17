@@ -21,21 +21,16 @@ pub struct Order {
     pub highest: BigUint,
 }
 impl Order {
-    pub fn key(&self, range: Range<usize>) -> Result<String> {
+    pub fn key(&self, start: usize) -> Result<String> {
         ensure!(
             self.lowest > 0u8.into() && self.highest > self.lowest,
             "invalid BulkOrder interval"
         );
-        ensure!(
-            range.start < range.end && range.start.is_multiple_of(8) && range.end.is_multiple_of(8),
-            "invalid BulkManifest range"
-        );
+        ensure!(start >= 16 && start.is_multiple_of(8), "invalid event end");
         let key = format!(
-            "{PREFIX}{}/{}/bytes={}-{}",
+            "{PREFIX}{}/{}/v0/{start}",
             lexidecimal::encode(&!BigInt::from(self.lowest.clone())),
-            lexidecimal::encode(&!BigInt::from(self.highest.clone())),
-            range.start,
-            range.end - 1
+            lexidecimal::encode(&!BigInt::from(self.highest.clone()))
         );
         ensure!(key.len() <= 1024, "BulkOrder exceeds S3 key limit");
         Ok(key)
@@ -46,9 +41,12 @@ impl Order {
             .context("invalid Analogue prefix")?
             .split('/')
             .collect::<Vec<_>>();
-        ensure!(parts.len() == 3, "invalid BulkOrder key");
+        ensure!(
+            parts.len() == 4 && parts[2] == "v0",
+            "invalid BulkOrder key"
+        );
         let (low, high) = (parts[0], parts[1]);
-        let range = manifest_range(key)?;
+        let start = manifest_start(key)?;
         let order = Self {
             lowest: (!lexidecimal::decode(low)?)
                 .to_biguint()
@@ -57,7 +55,7 @@ impl Order {
                 .to_biguint()
                 .context("invalid upper bound")?,
         };
-        ensure!(order.key(range)? == key, "noncanonical BulkOrder key");
+        ensure!(order.key(start)? == key, "noncanonical BulkOrder key");
         Ok(order)
     }
     pub fn covers(&self, milestone: &BigUint) -> bool {
@@ -65,28 +63,15 @@ impl Order {
     }
 }
 
-/// Copy the final key component directly into an HTTP Range header.
-pub fn manifest_range(key: &str) -> Result<Range<usize>> {
-    let suffix = key.rsplit('/').next().context("missing manifest range")?;
-    let (start, end) = suffix
-        .strip_prefix("bytes=")
-        .context("missing manifest range")?
-        .split_once('-')
-        .context("invalid manifest range")?;
-    let range = start.parse::<usize>()?
-        ..end
-            .parse::<usize>()?
-            .checked_add(1)
-            .context("manifest range overflow")?;
+/// v0 records only the exclusive end of the concatenated event bytes.
+pub fn manifest_start(key: &str) -> Result<usize> {
+    let (_, suffix) = key.rsplit_once("/v0/").context("missing v0 event end")?;
+    let start = suffix.parse::<usize>()?;
     ensure!(
-        range.start < range.end && range.start.is_multiple_of(8) && range.end.is_multiple_of(8),
-        "invalid BulkManifest range"
+        start >= 16 && start.is_multiple_of(8) && start.to_string() == suffix,
+        "invalid event end"
     );
-    ensure!(
-        format!("bytes={}-{}", range.start, range.end - 1) == suffix,
-        "noncanonical manifest range"
-    );
-    Ok(range)
+    Ok(start)
 }
 
 pub fn seek(milestone: &BigUint) -> String {
@@ -289,7 +274,7 @@ pub async fn publish(
     bytes: &[u8],
     range: Range<usize>,
 ) -> Result<()> {
-    let key = order.key(range.clone())?;
+    let key = order.key(range.start)?;
     let mut headers = crate::epilogue::conditional_headers();
     headers.insert(
         RANGE_HEADER,
@@ -315,7 +300,7 @@ pub async fn publish(
             "existing BulkOrder shares the empty validator"
         );
         ensure!(
-            footer(existing.as_slice())?.1 == range,
+            footer(existing.as_slice())?.1.start == range.start,
             "BulkManifest range/key mismatch"
         );
         verify_same_events(existing.as_slice(), bytes, order)?;
@@ -399,7 +384,7 @@ async fn resume(bucket: &Bucket, target: &BigUint) -> Result<BigUint> {
                 ensure!(response.status_code() == 200, "BulkOrder resume GET failed");
                 decode(response.as_slice(), &order)?;
                 ensure!(
-                    footer(response.as_slice())?.1 == manifest_range(&key)?,
+                    footer(response.as_slice())?.1.start == manifest_start(&key)?,
                     "BulkManifest range/key mismatch"
                 );
                 Ok::<_, anyhow::Error>(())

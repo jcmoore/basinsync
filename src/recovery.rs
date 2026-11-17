@@ -290,20 +290,33 @@ async fn ranged_get(
 const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 
 async fn get_manifest(bucket: &Bucket, candidate: &Candidate) -> Result<analogue::Index> {
-    let range = analogue::manifest_range(&candidate.key)?;
+    let start = analogue::manifest_start(&candidate.key)?;
+    let length = usize::try_from(candidate.size)?
+        .checked_sub(start)
+        .context("BulkManifest outside object")?;
     ensure!(
-        range.end as u64 <= candidate.size,
-        "BulkManifest lies outside its object"
+        length > 0 && length <= MAX_MANIFEST_BYTES,
+        "BulkManifest tail exceeds limit"
     );
-    let footer = ranged_get(bucket, &candidate.key, range.clone(), MAX_MANIFEST_BYTES).await?;
-    let frame = envbuf::at(&footer, 0)?;
+    let mut reader = crate::object_read::if_present(bucket)?;
+    reader.add_header("range", &format!("bytes={start}-"));
+    let response = reader.get_object(&candidate.key).await?;
     ensure!(
-        frame.end == footer.len() && frame.format == envbuf::FLEXBUFFERS,
+        response.status_code() == 206 && response.as_slice().len() == length,
+        "BulkManifest tail GET failed"
+    );
+    let footer = response.as_slice();
+    let frame = envbuf::at(footer, 0)?;
+    ensure!(
+        frame.format == envbuf::FLEXBUFFERS
+            && envbuf::all(&footer[frame.end..])?
+                .iter()
+                .all(|frame| frame.format == envbuf::MARGIN),
         "invalid BulkManifest envelope"
     );
     let index = analogue::Index::decode(frame.content)?;
     ensure!(
-        index.order() == candidate.order && index.offsets.last() == Some(&range.start),
+        index.order() == candidate.order && index.offsets.last() == Some(&start),
         "BulkManifest key/index mismatch"
     );
     Ok(index)
@@ -349,7 +362,7 @@ async fn get_order(
         let bytes = response.to_vec();
         let index = analogue::decode(&bytes, &candidate.order)?;
         ensure!(
-            analogue::footer(&bytes)?.1 == analogue::manifest_range(&candidate.key)?,
+            analogue::footer(&bytes)?.1.start == analogue::manifest_start(&candidate.key)?,
             "BulkManifest range/key mismatch"
         );
         (bytes, index, 0)
@@ -524,7 +537,7 @@ pub async fn replay(
                     let Some(candidate) = candidates.values().filter(|candidate| {
                         candidate.order.covers(&low) && !probes.contains_key(&candidate.key)
                             && !manifests.contains_key(&candidate.key) && !active.contains_key(&candidate.key)
-                            && analogue::manifest_range(&candidate.key).is_ok_and(|range| range.len() <= MAX_MANIFEST_BYTES && range.end as u64 <= candidate.size)
+                            && analogue::manifest_start(&candidate.key).is_ok_and(|start| candidate.size.checked_sub(start as u64).is_some_and(|length| length > 0 && length <= MAX_MANIFEST_BYTES as u64))
                     }).max_by_key(|candidate| &candidate.order.highest).cloned() else { break; };
                     let high = candidate.order.highest.clone().min(&tail + 1u8);
                     if high > *position.borrow() { position.send_replace(high.clone()); }

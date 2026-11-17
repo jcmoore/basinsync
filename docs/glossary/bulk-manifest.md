@@ -2,6 +2,7 @@
 [differential-event]: <differential-event.md>
 [envbuf]: <envbuf.md>
 [flexbuffers]: <flexbuffers.md>
+[margin]: <margin.md>
 [milestone]: <milestone.md>
 [object-keys]: <../object-keys.md>
 
@@ -26,7 +27,8 @@ the footer's start. Derive the exclusive upper bound as
 and offsets with an ordinary signed-integer vector, keeping `VT_VECTOR_UINT`
 reserved for extensions.
 
-The *object key's*[~][object-keys] final component is its HTTP `bytes=start-end`
-range, with an inclusive end. S3 metadata `x-amz-meta-bulkmanifest-range` repeats
-that range. LIST therefore locates the footer without HEAD; neighboring indexed
-offsets select complete event ranges.
+The *object key's*[~][object-keys] `/v0/<start>` suffix records the decimal
+exclusive end of the event bytes, also the footer's start. Fetch `bytes=<start>-`,
+parse its first envelope, and skip trailing *margins*[~][margin]. This keeps the key independent
+of the footer's encoding and length when the event bytes are identical. S3 metadata `x-amz-meta-bulkmanifest-range`
+records the complete footer range, but recovery needs no HEAD to obtain it.
