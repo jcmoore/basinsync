@@ -276,31 +276,34 @@ pub fn digest(bytes: &[u8]) -> String {
 
 pub const RANGE_MANIFEST: &str = "sts/0/databasin/rangemanifest";
 
-/// Locate the complete manifest envelope without traversing preceding commands.
+/// Locate the object-absolute manifest range without traversing preceding commands.
 pub fn manifest_range(bytes: &[u8]) -> Result<Option<std::ops::Range<usize>>> {
     if !bytes.starts_with(b"enV") {
         return Ok(None);
     }
-    let mut end = bytes.len();
+    let feed = crate::envbuf::nested_message(bytes)?;
+    let mut end = feed.len();
     while end > 0 {
-        let frame = crate::envbuf::before(bytes, end)?;
+        let frame = crate::envbuf::before(feed, end)?;
         if frame.format != crate::envbuf::MARGIN {
             ensure!(
                 frame.format == crate::envbuf::FLEXBUFFERS
                     && tuple(frame.content)?.index(2)?.get_str()? == RANGE_MANIFEST,
                 "last readable envelope must be rangemanifest"
             );
-            return Ok(Some(frame.start..frame.end));
+            return Ok(Some(frame.start + 8..frame.end + 8));
         }
         end = frame.start;
     }
     anyhow::bail!("missing range manifest envelope")
 }
 
-/// Retry margin follows the manifest and is excluded from predecessor bindings.
+/// Bind the inner feed through its manifest, excluding outer framing and retry margin.
 pub fn entry_digest(bytes: &[u8]) -> Result<String> {
-    let end = manifest_range(bytes)?.map_or(bytes.len(), |range| range.end);
-    Ok(digest(&bytes[..end]))
+    Ok(match manifest_range(bytes)? {
+        Some(range) => digest(&bytes[8..range.end]),
+        None => digest(bytes),
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -318,8 +321,8 @@ struct RangeManifest {
     envelopes: BTreeMap<String, Option<CommandPrefix>>,
 }
 
-/// Commitflow bytes are finalized before the database transaction: subsequent
-/// ingestion and manifest envelopes can only append, leaving these offsets fixed.
+/// Reserve the outer header before finalizing Commitflow bytes and blob ranges.
+/// Ingestion, manifest, and outer footer append without shifting those ranges.
 pub struct FlowChunks {
     bytes: Vec<u8>,
     ranges: Vec<BlobRange>,
@@ -328,7 +331,7 @@ pub struct FlowChunks {
 impl FlowChunks {
     pub fn new(commands: &[FlowCommand]) -> Result<Self> {
         let mut chunks = Self {
-            bytes: vec![],
+            bytes: vec![0; 8],
             ranges: vec![],
             envelopes: BTreeMap::new(),
         };
@@ -354,7 +357,7 @@ impl FlowChunks {
         let content = flexbuffers::to_vec((species.clone(), NAMESPACE, path, body))?;
         let end = crate::envbuf::append(&mut self.bytes, &content, crate::envbuf::FLEXBUFFERS)?;
         self.envelopes.insert(
-            crate::lexidecimal::encode(&end.into()),
+            crate::lexidecimal::encode(&(end - 8).into()),
             Some((species, NAMESPACE.into(), path.into())),
         );
         Ok(())
@@ -369,7 +372,7 @@ impl FlowChunks {
             self.envelopes.pop_last();
         }
         self.envelopes
-            .insert(crate::lexidecimal::encode(&end.into()), None);
+            .insert(crate::lexidecimal::encode(&(end - 8).into()), None);
         Ok(())
     }
     pub fn finish(self, delta: crate::turso::wal::Delta) -> Result<Vec<u8>> {
@@ -393,7 +396,7 @@ impl FlowChunks {
         ))?;
         crate::envbuf::append(&mut self.bytes, &content, crate::envbuf::FLEXBUFFERS)?;
         crate::envbuf::append_counter_margin(&mut self.bytes, 0)?;
-        Ok(self.bytes)
+        crate::envbuf::finish_nested(self.bytes)
     }
 }
 
@@ -458,6 +461,7 @@ pub fn encode_wal(commands: Vec<FlowCommand>, delta: crate::turso::wal::Delta) -
 }
 
 fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
+    let bytes = crate::envbuf::nested_message(bytes)?;
     let frames = crate::envbuf::all(bytes)?;
     let envelopes: Vec<_> = frames
         .iter()
@@ -541,7 +545,7 @@ fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
             );
         } else {
             ensure!(path == COMMIT_FLOW, "unknown command envelope");
-            ranges.extend(ranges_in(envelope.content, envelope.content_start)?);
+            ranges.extend(ranges_in(envelope.content, envelope.content_start + 8)?);
             commands.push(FlowCommand::deserialize(command.index(3)?)?);
         }
     }
@@ -586,6 +590,22 @@ fn historical_ranges(bytes: &[u8]) -> Result<Vec<BlobRange>> {
 #[cfg(test)]
 mod envelope_tests {
     use super::*;
+    fn frames(bytes: &[u8]) -> Result<Vec<crate::envbuf::Envelope<'_>>> {
+        let mut frames = crate::envbuf::all(crate::envbuf::nested_message(bytes)?)?;
+        for frame in &mut frames {
+            frame.start += 8;
+            frame.content_start += 8;
+            frame.end += 8;
+        }
+        Ok(frames)
+    }
+    fn append_margin(bytes: &mut Vec<u8>, message: &[u8]) -> Result<()> {
+        let mut reserved = vec![0; 8];
+        reserved.extend_from_slice(crate::envbuf::nested_message(bytes)?);
+        crate::envbuf::append(&mut reserved, message, crate::envbuf::MARGIN)?;
+        *bytes = crate::envbuf::finish_nested(reserved)?;
+        Ok(())
+    }
     #[test]
     fn margin_is_skipped_without_affecting_marker_ranges_or_recovery() -> Result<()> {
         let commands = commands();
@@ -617,7 +637,7 @@ mod envelope_tests {
         assert!(
             !chunks
                 .envelopes
-                .contains_key(&crate::lexidecimal::encode(&first_margin_end.into()))
+                .contains_key(&crate::lexidecimal::encode(&(first_margin_end - 8).into()))
         );
         // Missing, split, mistyped, and shifted run entries must fail closed.
         let (margin_key, _) = chunks
@@ -632,7 +652,10 @@ mod envelope_tests {
                     index.remove(margin_key);
                 }
                 1 => {
-                    index.insert(crate::lexidecimal::encode(&first_margin_end.into()), None);
+                    index.insert(
+                        crate::lexidecimal::encode(&(first_margin_end - 8).into()),
+                        None,
+                    );
                 }
                 2 => {
                     index.insert(
@@ -647,7 +670,7 @@ mod envelope_tests {
                 _ => {
                     index.remove(margin_key);
                     index.insert(
-                        crate::lexidecimal::encode(&(first_margin_end + 1).into()),
+                        crate::lexidecimal::encode(&(first_margin_end - 8 + 1).into()),
                         None,
                     );
                 }
@@ -661,11 +684,14 @@ mod envelope_tests {
             assert!(decode_entry(&bad).is_err(), "fault {fault}");
         }
         let mut padded = chunks.finish_manifest()?;
-        let manifest = crate::envbuf::readable(&padded)?.pop().unwrap();
+        let manifest = frames(&padded)?
+            .into_iter()
+            .rfind(|f| f.format != crate::envbuf::MARGIN)
+            .unwrap();
         let expected_manifest = manifest.start..manifest.end;
         assert_eq!(manifest_range(&padded)?, Some(expected_manifest.clone()));
-        crate::envbuf::append(&mut padded, &[], crate::envbuf::MARGIN)?;
-        crate::envbuf::append(&mut padded, &[1, 2, 3], crate::envbuf::MARGIN)?;
+        append_margin(&mut padded, &[])?;
+        append_margin(&mut padded, &[1, 2, 3])?;
         assert_eq!(manifest_range(&padded)?, Some(expected_manifest));
         assert_eq!(blob_ranges(&padded)?, locations);
         let mut recovered = crate::timeline::Datashed::default();
@@ -675,8 +701,8 @@ mod envelope_tests {
         bad[first_margin_end - 1] ^= 1;
         assert!(decode_entry(&bad).is_err());
         // Raw content is readable and cannot silently disappear from a command feed.
-        padded[3] = 4;
-        padded[first_margin_end - 4] = 4;
+        padded[11] = 3;
+        padded[first_margin_end - 4] = 3;
         assert!(decode_entry(&padded).is_err());
         Ok(())
     }
@@ -713,7 +739,7 @@ mod envelope_tests {
         assert!(matches!(decode_entry(&old)?, Entry::Wal { .. }));
         assert_eq!(manifest_range(&old)?, None);
         let bytes = chunks.finish(delta)?;
-        let frames = crate::envbuf::all(&bytes)?;
+        let frames = frames(&bytes)?;
         assert_eq!(frames.len(), commands.len() + 3);
         let last = &frames[frames.len() - 2];
         assert_eq!(frames.last().unwrap().format, crate::envbuf::MARGIN);
@@ -728,11 +754,11 @@ mod envelope_tests {
         assert!(
             frames
                 .iter()
-                .all(|frame| (frame.end - frame.start).is_multiple_of(16))
+                .all(|frame| (frame.end - frame.start).is_multiple_of(8))
         );
         assert_eq!(
-            crate::envbuf::before(&bytes, bytes.len())?,
-            *frames.last().unwrap()
+            crate::envbuf::before(&bytes, bytes.len())?.format,
+            crate::envbuf::NESTED
         );
         assert_eq!(blob_ranges(&bytes)?, locations.clone());
         for location in locations {
@@ -758,7 +784,7 @@ mod envelope_tests {
         let mut writer = crate::turso::wal::Writer::open(&crate::turso::State::genesis()?.image)?;
         let delta = writer.prepare(&0u8.into(), None, &commands)?;
         let bytes = encode_wal(commands, delta)?;
-        let frames = crate::envbuf::all(&bytes)?;
+        let frames = frames(&bytes)?;
         let manifest = &frames[frames.len() - 2];
         assert!(decode_entry(&bytes[..manifest.start]).is_err());
         assert!(manifest_range(&bytes[..manifest.start]).is_err());

@@ -1,7 +1,7 @@
 import {createHash} from "node:crypto";
 import assert from "node:assert/strict";
 import { encode, toReference, type Reference } from "./flexbuffer";
-import { all, readable, wrap, concat, MARGIN } from "./envbuf";
+import { all, readable, before, wrap, concat, nestedMessage, NESTED, MARGIN } from "./envbuf";
 import { encode as lex } from "./lexidecimal";
 
 export type Marker={viewpoint:string;sha384:string;blob:Uint8Array;edges:string[];context:Record<string,string>};
@@ -27,20 +27,20 @@ export function encodeTuples(commands:(unknown[]|{margin:Uint8Array})[]):Uint8Ar
     if(margin){if(lastMargin!==null)delete envelopes[lastMargin];envelopes[key]=null;lastMargin=key;}
     else{envelopes[key]=tuple.slice(0,3);lastMargin=null;}
   }
-  chunks.push(wrap(encode([Symbol.species,namespace,manifestPath,{envelopes}])),wrap(new Uint8Array(8),MARGIN));return concat(chunks);
+  chunks.push(wrap(encode([Symbol.species,namespace,manifestPath,{envelopes}])),wrap(new Uint8Array(8),MARGIN));return wrap(concat(chunks),NESTED);
 }
 export function encodeWalEvent(commands:Record<string,Marker>[],delta:WalDelta):Uint8Array {
   return encodeTuples([...commands.map(markers=>[Symbol.species,namespace,command,{markers}]),[Symbol.species,namespace,ingest,{turso:{"default.turso":delta}}]]);
 }
 export function eventTuples(bytes:Uint8Array):unknown[][] {
-  if(bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56)return readable(bytes).map(e=>toReference(new Uint8Array(e.content).buffer).toObject() as unknown[]).slice(0,-1);
+  if(bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56)return readable(nestedMessage(bytes)).map(e=>toReference(new Uint8Array(e.content).buffer).toObject() as unknown[]).slice(0,-1);
   return toReference(new Uint8Array(bytes).buffer).toObject() as unknown[][];
 }
 function tuples(bytes:Uint8Array):{tuple:Reference;base:number}[] {
   let commands:{tuple:Reference;base:number}[];
   const enveloped=bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56;
   if(enveloped){
-    const physical=all(bytes),frames=physical.filter(e=>e.format!==MARGIN);assert(frames.length>=2);
+    const physical=all(nestedMessage(bytes)),frames=physical.filter(e=>e.format!==MARGIN);assert(frames.length>=2);
     const refs=frames.map(e=>{assert.equal(e.format,5);return toReference(new Uint8Array(e.content).buffer);});
     const manifest=refs.pop()!;assert.equal(manifest.get(0).symbolValue(),Symbol.species);assert.equal(manifest.get(1).stringValue(),namespace);assert.equal(manifest.get(2).stringValue(),manifestPath);
     const index=manifest.get(3).get("envelopes").toObject() as Record<string,unknown>;
@@ -50,7 +50,7 @@ function tuples(bytes:Uint8Array):{tuple:Reference;base:number}[] {
     }
     assert.equal(Object.keys(index).length,expected);
     for(let n=0;n<refs.length;n++)assert.deepEqual(index[lex(BigInt(frames[n].end))],[Symbol.species,namespace,refs[n].get(2).stringValue()]);
-    commands=refs.map((tuple,n)=>({tuple,base:frames[n].contentStart}));
+    commands=refs.map((tuple,n)=>({tuple,base:8+frames[n].contentStart}));
   }else{
     const root=toReference(new Uint8Array(bytes).buffer);assert(root.isVector()&&root.length()>0);
     commands=Array.from({length:root.length()},(_,n)=>({tuple:root.get(n),base:0}));
@@ -79,11 +79,21 @@ export function markerAt(bytes:Uint8Array,flow:string,viewpoint?:string):Marker 
 export function deltasAt(bytes:Uint8Array):Deltas {const commands=tuples(bytes),last=commands.at(-1)!.tuple;return (last.get(2).stringValue()===ingest?last.get(3):last.get(3).get("deltas")).toObject() as Deltas;}
 export function legacyDeltasAt(bytes:Uint8Array):Deltas<TursoDelta>{const deltas=deltasAt(bytes);for(const delta of Object.values(deltas.turso))assert("pages" in delta.physical);return deltas as Deltas<TursoDelta>;}
 
-export function entryDigest(bytes:Uint8Array):string {
-  let end=bytes.length;
-  if(bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56){
-    const frame=readable(bytes).at(-1)!;
-    assert.equal(toReference(new Uint8Array(frame.content).buffer).get(2).stringValue(),manifestPath);end=frame.end;
+export function commandFrames(bytes:Uint8Array) {
+  return all(nestedMessage(bytes)).map(e=>({...e,start:e.start+8,contentStart:e.contentStart+8,end:e.end+8}));
+}
+
+export function manifestRange(bytes:Uint8Array):{start:number;end:number}|null {
+  if(!(bytes[0]===0x65&&bytes[1]===0x6e&&bytes[2]===0x56))return null;
+  const feed=nestedMessage(bytes);let end=feed.length;
+  while(end>0){
+    const frame=before(feed,end);
+    if(frame.format!==MARGIN){assert.equal(frame.format,5);assert.equal(toReference(new Uint8Array(frame.content).buffer).get(2).stringValue(),manifestPath);return {start:frame.start+8,end:frame.end+8};}
+    end=frame.start;
   }
-  return createHash("sha384").update(bytes.subarray(0,end)).digest("hex");
+  throw new Error("missing range manifest");
+}
+export function entryDigest(bytes:Uint8Array):string {
+  const range=manifestRange(bytes);
+  return createHash("sha384").update(range?bytes.subarray(8,range.end):bytes).digest("hex");
 }

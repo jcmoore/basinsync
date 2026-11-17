@@ -220,15 +220,25 @@ pub async fn put_feed(
     bytes: &[u8],
     mut headers: HeaderMap,
 ) -> Result<ResponseData> {
-    let tail = crate::envbuf::before(bytes, bytes.len())?;
+    let outer = crate::envbuf::at(bytes, 0)?;
+    let (feed, base) = if outer.format == crate::envbuf::NESTED {
+        (crate::envbuf::nested_message(bytes)?, outer.content_start)
+    } else {
+        (bytes, 0)
+    };
+    let tail = crate::envbuf::before(feed, feed.len())?;
     let mut bytes = Cow::Borrowed(bytes);
-    let (original_length, mut counter) =
+    let (margin_range, mut counter) =
         if tail.format == crate::envbuf::MARGIN && tail.content.len() == 8 {
-            (tail.start, u64::from_le_bytes(tail.content.try_into()?))
+            (
+                base + tail.start..base + tail.end,
+                u64::from_le_bytes(tail.content.try_into()?),
+            )
         } else {
+            ensure!(base == 0, "nested event lacks its counter margin");
             let original_length = bytes.len();
             crate::envbuf::append_counter_margin(bytes.to_mut(), 0)?;
-            (original_length, 0)
+            (original_length..bytes.len(), 0)
         };
     loop {
         let response = send(bucket, key, &bytes, headers.clone()).await?;
@@ -236,9 +246,11 @@ pub async fn put_feed(
             return Ok(response);
         }
         let margin = retry_margin(&mut counter)?;
-        let bytes = bytes.to_mut();
-        bytes.truncate(original_length);
-        bytes.extend_from_slice(&margin);
+        ensure!(
+            margin.len() == margin_range.len(),
+            "counter margin size changed"
+        );
+        bytes.to_mut()[margin_range.clone()].copy_from_slice(&margin);
         headers.remove(header::IF_NONE_MATCH);
         headers.insert(header::IF_MATCH, reference(bucket)?.parse()?);
     }
@@ -254,16 +266,21 @@ pub async fn put_file(
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
     let mut file = tokio::fs::File::open(path).await?;
     let length = file.metadata().await?.len();
-    ensure!(length >= 48, "feed file lacks its trailing counter margin");
-    file.seek(std::io::SeekFrom::End(-32)).await?;
-    let mut tail = [0u8; 32];
+    let margin_length = crate::envbuf::encoded_length(8)?;
+    ensure!(
+        length >= 16 + margin_length,
+        "feed file lacks its trailing counter margin"
+    );
+    file.seek(std::io::SeekFrom::End(-i64::try_from(margin_length)?))
+        .await?;
+    let mut tail = vec![0u8; usize::try_from(margin_length)?];
     file.read_exact(&mut tail).await?;
     let tail = crate::envbuf::at(&tail, 0)?;
     ensure!(
         tail.format == crate::envbuf::MARGIN && tail.content.len() == 8,
         "feed file lacks its trailing counter margin"
     );
-    let original_length = length - 32;
+    let original_length = length - margin_length;
     let mut counter = u64::from_le_bytes(tail.content.try_into()?);
     drop(file);
     loop {
@@ -326,7 +343,7 @@ mod tests {
         let bytes = retry_margin(&mut counter)?;
         let envelope = crate::envbuf::at(&bytes, 0)?;
         assert_eq!(envelope.format, crate::envbuf::MARGIN);
-        assert_eq!(envelope.end, 32);
+        assert_eq!(envelope.end, 24);
         assert_eq!(envelope.content, &u64::MAX.to_le_bytes());
         assert!(retry_margin(&mut counter).is_err());
         Ok(())

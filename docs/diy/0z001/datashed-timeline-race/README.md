@@ -49,7 +49,8 @@ and refresh.
    *Milestone*[~][milestone] before refreshing; absence confirms the materialized
    state is current.
 
-Start each *DifferentialEvent*[~][differential-event] feed with one
+Wrap each *DifferentialEvent's*[~][differential-event] command feed in one nested
+*EnvBuf*[~][envbuf] (`100`) so complete events can concatenate. Start its message with one
 *EnvBuf-wrapped*[~][envbuf] *FlexBuffers*[~][flexbuffers]
 *commitflow tuple*[~][datashed-timeline]:
 
@@ -63,17 +64,20 @@ Start each *DifferentialEvent*[~][differential-event] feed with one
 
 Preserve *context*[~][context] for later *CommitMarker*[~][commit-marker] replication.
 
-Use format `101` and pad each complete envelope to a multiple of sixteen bytes
+Use format `101` for commands and pad each complete envelope to a multiple of eight bytes
 to preserve stable, *FlexBuffers-friendly*[~][flexbuffers] alignment.
 Compose append-only chunks, locating
 each *marker's*[~][commit-marker] raw `blob` bytes in its finalized chunk.
 Append a final *range manifest*[~][range-manifest] indexing preceding
-*envelopes*[~][envbuf]. Set `x-amz-meta-manifest-range: bytes=start-end` on the S3
+*envelopes*[~][envbuf] with offsets relative to the inner command feed.
+Reserve the outer header before assembling chunks; translate blob offsets to the
+containing object. Set `x-amz-meta-manifest-range: bytes=start-end` on the S3
 object to the complete manifest *envelope's*[~][envbuf] inclusive decimal byte range,
 excluding the default trailing *counter margin*[~][margin], so clients can fetch it directly.
+Keep that margin inside the outer message, then finalize its header and footer.
 Later appended commands must preserve earlier blob offsets.
-A *Timeline*[~][timeline] predecessor's *SHA-384*[~][sha384] covers the feed through
-its *range manifest*[~][range-manifest], excluding trailing *margins*[~][margin]. A retry can
+A *Timeline*[~][timeline] predecessor's *SHA-384*[~][sha384] covers the inner command feed through
+its *range manifest*[~][range-manifest], excluding outer framing and trailing *margins*[~][margin]. A retry can
 therefore update its trailing *margin*[~][margin] without changing already-prepared successor bindings.
 
 Track each *Flow*[~][flow] and *downstream*[~][downstream]

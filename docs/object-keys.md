@@ -81,7 +81,8 @@ Reserve `_r_` for future *retainers*[~][retainer].
 ## Object bodies
 
 Sequence objects reserve zero bytes for *empty sentinels*[~][empty-sentinel].
-*DifferentialEvents*[~][differential-event] are *EnvBuf feeds*[~][envbuf];
+*DifferentialEvents*[~][differential-event] each wrap a command feed in one nested
+*EnvBuf*[~][envbuf] (`100`), including its trailing *counter margin*[~][margin];
 *CommitMarkers*[~][commit-marker], including database backups, wrap their blob in
 one raw message. These feeds default to a trailing `u64` *counter margin*[~][margin].
 *PromotionSigns*[~][promotion-sign] use a *margin*[~][margin] with a one-byte counter
@@ -90,4 +91,4 @@ from 1 through 7. Their framing keeps valid empty messages distinct from
 The empty reference is always zero bytes. Probe objects are created only if
 absent and verified on reuse. *Tombstone*[~][tombstone] probe lengths are decimal
 2, 4, …, 14; sixteen-byte candidates are refused. *Margin*[~][margin] probes each contain a single
-32-byte *EnvBuf*[~][envbuf], with a one-byte message containing `counter` from 1 through 7.
+24-byte *EnvBuf*[~][envbuf], with a one-byte message containing `counter` from 1 through 7.

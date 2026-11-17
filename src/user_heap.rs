@@ -523,7 +523,7 @@ mod tests {
         assert_eq!(outcome.results.len(), 1);
         let (command, delta) = captured.unwrap();
         let bytes = event::encode_wal(vec![], delta)?;
-        let envelopes = crate::envbuf::all(&bytes)?;
+        let envelopes = crate::envbuf::all(crate::envbuf::nested_message(&bytes)?)?;
         assert_eq!(envelopes.len(), 3);
         assert_eq!(envelopes.last().unwrap().content, &0u64.to_le_bytes());
         assert!(event::blob_ranges(&bytes)?.is_empty());

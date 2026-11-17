@@ -53,6 +53,58 @@ fn unpublished_state_is_not_readable_and_bootstrap_is_verified() -> Result<()> {
 }
 
 #[test]
+fn concatenated_events_keep_boundaries_alignment_ranges_and_recovery() -> Result<()> {
+    let mut stager = Datashed::default().into_stager();
+    let mut events = Vec::new();
+    for n in 0..3 {
+        events.push(
+            stager
+                .prepare(vec![command("f", &n.to_string())])?
+                .bytes()
+                .to_vec(),
+        );
+    }
+    let mut feed = vec![];
+    basinsync::envbuf::append(&mut feed, &[1], basinsync::envbuf::MARGIN)?;
+    for bytes in &events {
+        feed.extend_from_slice(bytes);
+    }
+    let mut recovered = Datashed::default();
+    let frames = basinsync::envbuf::all(&feed)?;
+    assert_eq!(frames.len(), 4);
+    let mut end = feed.len();
+    for frame in frames.iter().rev() {
+        assert_eq!(*frame, basinsync::envbuf::before(&feed, end)?);
+        end = frame.start;
+    }
+    assert_eq!(end, 0);
+    for (n, frame) in frames.iter().skip(1).enumerate() {
+        assert_eq!(frame.format, basinsync::envbuf::NESTED);
+        let bytes = &feed[frame.start..frame.end];
+        let borrowed = basinsync::envbuf::nested_message(bytes)?;
+        assert_eq!(borrowed.as_ptr(), frame.content.as_ptr());
+        for inner in basinsync::envbuf::all(borrowed)? {
+            assert_eq!((frame.content_start + inner.content_start) % 8, 0);
+        }
+        assert_eq!(
+            event::entry_digest(bytes)?,
+            event::entry_digest(&events[n])?
+        );
+        for range in event::blob_ranges(bytes)? {
+            let start = frame.start + usize::try_from(range.offset)?;
+            let blob = &feed[start..start + usize::try_from(range.length)?];
+            assert_eq!(blob, &[0, 255, 128]);
+        }
+        recovered.apply_entry((n + 1).into(), bytes)?;
+    }
+    assert_eq!(recovered.prefix(), stager.prefix());
+    assert_eq!(recovered.latest("f")?.unwrap().decimal(), "2");
+    assert!(event::decode_entry(&feed).is_err());
+    assert!(event::decode_entry(basinsync::envbuf::nested_message(&events[0])?).is_err());
+    Ok(())
+}
+
+#[test]
 fn retry_margin_preserves_prepared_successors_and_locations() -> Result<()> {
     let mut stager = Datashed::default().into_stager();
     let first = stager.prepare(vec![command("f", "0")])?;
@@ -62,12 +114,14 @@ fn retry_margin_preserves_prepared_successors_and_locations() -> Result<()> {
     let manifest = event::manifest_range(first.bytes())?;
     let mut retried = first.bytes().to_vec();
     for counter in [0u64, 1, 256, u64::MAX] {
-        retried.truncate(manifest.as_ref().unwrap().end);
+        let mut margin = vec![];
         basinsync::envbuf::append(
-            &mut retried,
+            &mut margin,
             &counter.to_le_bytes(),
             basinsync::envbuf::MARGIN,
         )?;
+        let start = manifest.as_ref().unwrap().end;
+        retried[start..start + margin.len()].copy_from_slice(&margin);
         assert_eq!(retried.len(), first.bytes().len());
         assert_eq!(event::entry_digest(&retried)?, digest);
         assert_ne!(event::digest(&retried), digest);

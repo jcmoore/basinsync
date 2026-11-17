@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 export type Envelope={start:number;contentStart:number;end:number;format:number;content:Uint8Array};
+export const NESTED=4;
 export const MARGIN=6;
 export const PLATFORM_EXTENSION=7;
 function readAlignment(descriptor:number):number {
   return 2**(descriptor&31);
 }
 function frameLength(contentLength:number,alignment:number):number {return Math.ceil((contentLength+16)/alignment)*alignment;}
-export function wrap(content:Uint8Array,format=5,alignmentPower=4):Uint8Array {
+export function wrap(content:Uint8Array,format=5,alignmentPower=3):Uint8Array {
   assert(content.length<=0xffffffff && [0,4,5,MARGIN].includes(format));
   assert(Number.isInteger(alignmentPower)&&alignmentPower>=0&&alignmentPower<=31,"invalid EnvBuf alignment power");
   const footer=frameLength(content.length,2**alignmentPower)-8,bytes=new Uint8Array(footer+8),view=new DataView(bytes.buffer);
@@ -35,4 +36,8 @@ export function concat(chunks:Uint8Array[]):Uint8Array {const result=new Uint8Ar
 
 export function message(bytes:Uint8Array):Uint8Array {
   const frames=readable(bytes);assert(frames.length===1&&frames[0].format===0&&frames[0].start===0,"expected one raw EnvBuf message");return new Uint8Array(frames[0].content);
+}
+
+export function nestedMessage(bytes:Uint8Array):Uint8Array {
+  const frame=at(bytes,0);assert(frame.format===NESTED&&frame.end===bytes.length,"expected one nested EnvBuf");return frame.content;
 }

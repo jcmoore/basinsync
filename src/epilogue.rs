@@ -76,7 +76,7 @@ async fn promotion_sign_matches(bucket: &Bucket, key: &str, upstream: &BigUint) 
             }
             ensure!(
                 head.content_length
-                    .is_some_and(|length| length >= 16 && length % 16 == 0),
+                    .is_some_and(|length| length >= 16 && length % 8 == 0),
                 "invalid PromotionSign envelope length"
             );
             ensure!(
@@ -331,7 +331,7 @@ pub async fn matches_marker(
             .and_then(|n| u64::try_from(n).ok())
             .is_some_and(|length| {
                 crate::envbuf::encoded_length(location.length)
-                    .is_ok_and(|minimum| length >= minimum && length % 16 == 0)
+                    .is_ok_and(|minimum| length >= minimum && length % 8 == 0)
             })
         && head
             .metadata

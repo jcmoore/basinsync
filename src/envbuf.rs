@@ -1,10 +1,11 @@
-//! Bidirectionally traversable EnvBuf frames, with a sixteen-byte total-size default.
+//! Bidirectionally traversable EnvBuf frames, with an eight-byte alignment default.
 use anyhow::{Context, Result, ensure};
 
 pub const FLEXBUFFERS: u8 = 5;
+pub const NESTED: u8 = 4;
 pub const MARGIN: u8 = 6;
 pub const PLATFORM_EXTENSION: u8 = 7;
-const ALIGNMENT_POWER: u8 = 4;
+const ALIGNMENT_POWER: u8 = 3;
 const FRAME: usize = 8;
 
 fn alignment(descriptor: u8) -> Result<usize> {
@@ -153,6 +154,38 @@ pub fn append_counter_margin(bytes: &mut Vec<u8>, counter: u64) -> Result<usize>
     append(bytes, &counter.to_le_bytes(), MARGIN)
 }
 
+/// Finalize a nested feed constructed after an eight-byte header reservation.
+pub fn finish_nested(mut bytes: Vec<u8>) -> Result<Vec<u8>> {
+    ensure!(
+        bytes.get(..FRAME) == Some(&[0; FRAME]),
+        "missing nested header reservation"
+    );
+    let length = bytes.len() - FRAME;
+    let word = u32::try_from(length)
+        .context("nested EnvBuf exceeds u32 message length")?
+        .to_le_bytes();
+    let descriptor = (NESTED << 5) | ALIGNMENT_POWER;
+    let end = frame_length(length, 1 << ALIGNMENT_POWER)?;
+    bytes[..3].copy_from_slice(b"enV");
+    bytes[3] = descriptor;
+    bytes[4..8].copy_from_slice(&word);
+    bytes.resize(end - FRAME, 0xee);
+    bytes.extend_from_slice(&word);
+    bytes.push(descriptor);
+    bytes.extend_from_slice(b"vNE");
+    Ok(bytes)
+}
+
+/// Borrow one complete nested message, with no concatenated siblings or suffix.
+pub fn nested_message(bytes: &[u8]) -> Result<&[u8]> {
+    let envelope = at(bytes, 0)?;
+    ensure!(
+        envelope.format == NESTED && envelope.end == bytes.len(),
+        "expected one nested EnvBuf"
+    );
+    Ok(envelope.content)
+}
+
 pub fn wrap(message: &[u8]) -> Result<Vec<u8>> {
     let mut bytes = vec![];
     append(&mut bytes, message, 0)?;
@@ -224,7 +257,7 @@ mod tests {
             let original = vec![42; length];
             let bytes = wrap(&original)?;
             assert_eq!(message(&bytes)?, original);
-            assert_eq!(bytes.len() as u64, encoded_length(length as u64)? + 32);
+            assert_eq!(bytes.len() as u64, encoded_length(length as u64)? + 24);
             let mut raw = tempfile::NamedTempFile::new()?;
             raw.write_all(&original)?;
             let file = wrap_file(raw.path())?;
@@ -270,9 +303,9 @@ mod tests {
             bytes,
             [
                 b"enV".as_slice(),
-                &[0xa4, 1, 0, 0, 0, 1],
-                &[0xee; 15],
-                &[1, 0, 0, 0, 0xa4],
+                &[0xa3, 1, 0, 0, 0, 1],
+                &[0xee; 7],
+                &[1, 0, 0, 0, 0xa3],
                 b"vNE"
             ]
             .concat()
@@ -281,7 +314,7 @@ mod tests {
         append(&mut bytes, b"second command", FLEXBUFFERS)?;
         assert_eq!(at(&bytes, boundary)?, before(&bytes, bytes.len())?);
         assert_eq!(before(&bytes, boundary)?.content, [1]);
-        for offset in [0, 3, 4, 9, 24, 28, 31] {
+        for offset in [0, 3, 4, 9, 16, 20, 23] {
             let mut bad = bytes.clone();
             bad[offset] ^= 1;
             assert!(all(&bad).is_err(), "offset {offset}");
@@ -294,20 +327,20 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn total_frame_size_is_a_multiple_of_sixteen() -> Result<()> {
+    fn total_frame_size_is_a_multiple_of_eight() -> Result<()> {
         let mut bytes = vec![];
         for length in 0..=1024 {
             let start = bytes.len();
             let content = vec![0x42; length];
             let end = append(&mut bytes, &content, [0, 4, 5, MARGIN][length % 4])?;
-            assert_eq!(end - start, 16 + length.next_multiple_of(16));
-            assert_eq!(start % 16, 0);
-            assert_eq!(end % 16, 0);
+            assert_eq!(end - start, 16 + length.next_multiple_of(8));
+            assert_eq!(start % 8, 0);
+            assert_eq!(end % 8, 0);
             let frame = at(&bytes, start)?;
             assert_eq!(frame, before(&bytes, end)?);
             assert_eq!(frame.content, content);
         }
-        assert!(append(&mut vec![0; 8], &[], FLEXBUFFERS).is_err());
+        assert!(append(&mut vec![0; 4], &[], FLEXBUFFERS).is_err());
         Ok(())
     }
     #[test]
@@ -358,7 +391,7 @@ mod tests {
         #[test]
         fn roundtrip_chunks(chunks in prop::collection::vec(prop::collection::vec(any::<u8>(),0..2048),0..30)) {
             let mut bytes=vec![];
-            for chunk in &chunks { append(&mut bytes,chunk,FLEXBUFFERS).unwrap(); prop_assert_eq!(bytes.len()%16,0); }
+            for chunk in &chunks { append(&mut bytes,chunk,FLEXBUFFERS).unwrap(); prop_assert_eq!(bytes.len()%8,0); }
             let frames=all(&bytes).unwrap();
             prop_assert_eq!(frames.iter().map(|e|e.content.to_vec()).collect::<Vec<_>>(),chunks.clone());
             let mut end=bytes.len();

@@ -23,9 +23,12 @@ supporting `u64` message lengths; that support is pending. Other codes are reser
 Readers skip `110` messages while validating their framing;
 `000` messages remain readable.
 The low five bits encode the alignment as `1 << alignment_power`, defaulting
-to sixteen bytes (`00100`). Pad between message and footer with `0xee` so
+to eight bytes (`00011`). Pad between message and footer with `0xee` so
 the complete envelope, including header and footer, is a multiple of that alignment:
 `ceil((message_length + 16) / alignment) * alignment`. The message begins eight bytes after
 the header starts.
 Message length excludes padding and framing. The default descriptor for
-*FlexBuffers*[~][flexbuffers] is `0xa4`.
+*FlexBuffers*[~][flexbuffers] is `0xa3`; nested feeds use `0x83`. Eight-byte
+headers preserve this alignment when nesting. Validate inner boundaries relative
+to their containing message. Each message, including an entire nested feed,
+must fit the current `u32` length field.

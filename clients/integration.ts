@@ -10,7 +10,7 @@ import { commit, form, epilogueStatus as fullStatus, latestBlob, sha384, sha384B
 import { parse, stringify } from "./json0";
 import { key, fromKey } from "./timeline";
 import { key as epilogueKey, encode as lex, decode as unlex } from "./lexidecimal";
-import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, entryDigest, type WalDelta, type Marker } from "./events";
+import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, entryDigest, commandFrames, type WalDelta, type Marker } from "./events";
 import { ingestWal } from "./wal";
 import { all as envelopes, before as previousEnvelope, message as envelopeMessage, wrap as wrapEnvelope } from "./envbuf";
 import { stress } from "./stress";
@@ -144,7 +144,7 @@ async function get(bucket: string, milestone: bigint) {
 }
 async function assertManifestRange(bucket:string,milestone:bigint,stored?:Uint8Array){
   stored??=await get(bucket,milestone);
-  const frame=envelopes(stored).filter(e=>e.format!==6).at(-1)!;
+  const frame=commandFrames(stored).filter(e=>e.format!==6).at(-1)!;
   const head=await s3.send(new HeadObjectCommand({Bucket:bucket,Key:key(milestone)}));
   const range=head.Metadata?.["manifest-range"];
   assert.equal(range,`bytes=${frame.start}-${frame.end-1}`);
@@ -266,7 +266,7 @@ try {
       if(response.ok&&collide){const headers=new Headers(response.headers);headers.set("etag",emptyETag);return new Response(await response.arrayBuffer(),{status:response.status,headers});}
       return response;
     },async request=>{const path=new URL(request.url).pathname;if(request.method==="PUT"&&path.includes("/sentinel/")){assert.equal(request.headers.get("if-none-match"),"*");writes.push(path);
-      const pad=path.match(/\/sentinel\/margin\/(\d+)$/);if(pad){const frames=envelopes(new Uint8Array(await request.clone().arrayBuffer()));assert.equal(frames.length,1);assert.equal(frames[0]!.end,32);assert.equal(frames[0]!.format,6);assert.deepEqual(frames[0]!.content,new Uint8Array([Number(pad[1])]));}
+      const pad=path.match(/\/sentinel\/margin\/(\d+)$/);if(pad){const frames=envelopes(new Uint8Array(await request.clone().arrayBuffer()));assert.equal(frames.length,1);assert.equal(frames[0]!.end,24);assert.equal(frames[0]!.format,6);assert.deepEqual(frames[0]!.content,new Uint8Array([Number(pad[1])]));}
     }});
     if(mode!=="selected"){
       const process=serverProcess(b,proxy.url,"127.0.0.1:0");assert.equal(await timeout(process.exited),1);
@@ -279,7 +279,7 @@ try {
     assert.deepEqual(writes.filter(p=>p.includes("/tombstone/")).map(p=>p.split("/").at(-1)),["2","4","6"]);
     assert.deepEqual(writes.filter(p=>p.includes("/margin/")).map(p=>p.split("/").at(-1)),Array.from({length:7},(_,i)=>String(i+1)));
     await status(await commit(app.url,"probed",a,0n),201);
-    const sign=await signKey(b,"probed",0n);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),head=>head.ContentLength===32);
+    const sign=await signKey(b,"probed",0n);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),head=>head.ContentLength===24);
     const signFrames=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key:sign}))).Body!.transformToByteArray());assert.equal(signFrames.length,1);assert.equal(signFrames[0]!.format,6);assert.deepEqual(signFrames[0]!.content,new Uint8Array([7]));
     await eventually(()=>datashedBackup(b),Boolean);await stop(app.process);
     const cp=await datashedBackup(b);assert(cp);const vp=~unlex(cp.key.slice(9));
@@ -319,9 +319,11 @@ try {
       const original=originals.get(Key);
       if(original&&request.headers.get("if-match")===emptyETag){
         retries++;assert.equal(request.headers.get("if-none-match"),null);
-        const previous=envelopes(original.body).at(-1)!,margin=envelopes(body).at(-1)!;
+        const frames=(b:Uint8Array)=>(b[3]>>5)===4?commandFrames(b):envelopes(b);
+        const previous=frames(original.body).at(-1)!,margin=frames(body).at(-1)!;
         assert.equal(previous.format,6);assert.equal(margin.format,6);assert.equal(body.length,original.body.length);
         assert.deepEqual(body.subarray(0,previous.start),original.body.subarray(0,previous.start));assert.equal(margin.start,previous.start);
+        assert.deepEqual(body.subarray(margin.end),original.body.subarray(previous.end),"retry preserves the outer footer");
         const counter=(counts.get(Key)??0)+1;counts.set(Key,counter);
         if(previous.content.length===1){assert.equal(margin.content.length,1);assert.equal(margin.content[0],previous.content[0]+counter);assert(margin.content[0]<=7);}
         else{assert.equal(previous.content.length,8);assert.deepEqual(previous.content,new Uint8Array(8));assert.equal(margin.content.length,8);assert.equal(new DataView(margin.content.buffer,margin.content.byteOffset,8).getBigUint64(0,true),BigInt(counter));}
@@ -379,7 +381,7 @@ try {
     const markerKey=await flowKey(b,"sentinel",0n),sign=await signKey(b,"sentinel",0n);
     await sentinel(markerKey);await sentinel(sign);await stop(app.process);
     app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10",BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
-    await eventually(()=>datashedBackup(b),Boolean);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),r=>r.ContentLength===32);
+    await eventually(()=>datashedBackup(b),Boolean);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),r=>r.ContentLength===24);
     const markerObject=await s3.send(new GetObjectCommand({Bucket:b,Key:markerKey}));
     const markerBytes=await markerObject.Body!.transformToByteArray();assert.equal(envelopeMessage(markerBytes).length,0);assert(markerBytes.length>0);assert.notEqual(markerObject.ETag,emptyETag);
     for(const signKey of [sign,`epilogue/${lex(0n)}`]){
@@ -1045,12 +1047,17 @@ try {
     for(const response of await Promise.all(requests))await status(response,201);
     const stored=await get(b,1n),ranges=rangesAt(stored),range=ranges.find(r=>r.flow==="public"&&r.marker.viewpoint==="1")!;
     await assertManifestRange(b,1n,stored);
-    let end=stored.length,query:any[],skipped=0;
+    const outerFooter=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=${stored.length-8}-${stored.length-1}`}));
+    const outerBytes=await outerFooter.Body!.transformToByteArray();assert.equal(outerBytes.length,8);assert.equal(outerBytes[4]>>5,4);
+    const messageLength=new DataView(outerBytes.buffer,outerBytes.byteOffset,8).getUint32(0,true);
+    const outerAlignment=2**(outerBytes[4]&31),outerSpan=Math.ceil((messageLength+16)/outerAlignment)*outerAlignment;
+    assert.equal(outerAlignment,8);
+    let end=stored.length-outerSpan+8+messageLength,query:any[],skipped=0;
     for(;;){
       const footer=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=${end-8}-${end-1}`}));
       const tailBytes=await footer.Body!.transformToByteArray();assert.equal(tailBytes.length,8);
       const contentLength=new DataView(tailBytes.buffer,tailBytes.byteOffset,tailBytes.byteLength).getUint32(0,true);
-      const alignment=2**(tailBytes[4]&31);assert.equal(alignment,16);
+      const alignment=2**(tailBytes[4]&31);assert.equal(alignment,8);
       const span=Math.ceil((contentLength+16)/alignment)*alignment;
       if(tailBytes[4]>>5===6){end-=span;skipped++;continue;}
       const last=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=${end-span}-${end-1}`}));
@@ -1058,8 +1065,8 @@ try {
       query=toObject(new Uint8Array(manifest.content)) as any[];break;
     }
     assert.equal(skipped,1);assert.equal(query[2],"sts/0/databasin/rangemanifest");
-    const frames=envelopes(stored);for(const frame of frames){assert.equal(frame.start%16,0);assert.equal(frame.end%16,0);}
-    assert.deepEqual(Object.keys(query[3].envelopes),frames.slice(0,-2).map(e=>lex(BigInt(e.end))));
+    const frames=commandFrames(stored);for(const frame of frames){assert.equal(frame.start%8,0);assert.equal(frame.end%8,0);}
+    assert.deepEqual(Object.keys(query[3].envelopes),frames.slice(0,-2).map(e=>lex(BigInt(e.end-8))));
     const current=(await fullStatus(app.url,"public")).latest!;
     assert.equal(current.viewpoint,1n);assert.equal(current.length,target.length);
     assert.equal(current.headers?.Range,`bytes=${range.offset}-${range.offset+range.length-1}`);
@@ -1262,7 +1269,7 @@ try {
     for(const action of [actions.preview,actions.read]){assert.equal(action.headers["If-Match"],"*");const r=await fetch(action.url,{headers:action.headers});assert([404,412].includes(r.status));await r.arrayBuffer();}
     const first=await get(b,1n),tuples=eventTuples(first);
     assert.equal(tuples.length,1);assert.equal(tuples[0][2],"sts/0/databasin/ingestturso");
-    assert.equal(envelopes(first).length,3);assert.deepEqual(envelopes(first).at(-1)!.content,new Uint8Array(8));assert.deepEqual(rangesAt(first),[]);
+    assert.equal(envelopes(first).length,1);assert.equal(commandFrames(first).length,3);assert.deepEqual(commandFrames(first).at(-1)!.content,new Uint8Array(8));assert.deepEqual(rangesAt(first),[]);
     const delta=deltasAt(first).turso["default.turso"] as WalDelta;
     let image=ingestWal(delta.logical.base!,delta.physical.segments);
     const original=await inspectUserHeap(image,secret);assert.equal(original.length,7);assert.equal(original.etag,"");assert.equal(original.promoted,"");assert(original.retained);assert(Number.isFinite(Date.parse(original.reserved)));

@@ -733,8 +733,9 @@ fn command_reads_and_hook_agree_for_repeated_flow_batches() -> Result<()> {
             consolidated(&snapshot(&writer.state.native, &schema)?)?
         );
         let bytes = encode(&commands, &delta, Some(&hook))?;
-        let manifest = crate::envbuf::readable(&bytes)?.pop().unwrap();
-        let ingestion = crate::envbuf::before(&bytes, manifest.start)?;
+        let command_feed = crate::envbuf::nested_message(&bytes)?;
+        let manifest = crate::envbuf::readable(command_feed)?.pop().unwrap();
+        let ingestion = crate::envbuf::before(command_feed, manifest.start)?;
         let feed = flexbuffers::Reader::get_root(ingestion.content)?
             .get_vector()?
             .index(3)?
