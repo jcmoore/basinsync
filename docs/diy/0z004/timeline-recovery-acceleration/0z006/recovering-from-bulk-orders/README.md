@@ -29,7 +29,7 @@ Load the latest *CommitMarker*[~][commit-marker] through the existing
 
 Fetch the next *Timeline*[~][timeline] *event*[~][differential-event] immediately while a separate worker
 LISTs eligible *BulkOrders*[~][bulk-order]. For next position `c`, seek after
-`analogue/${lex(~c)}/`; retain intervals satisfying `lowest <= c < highest`.
+`kernelspace/datashed/analogue/${lex(~c)}/`; retain intervals satisfying `lowest <= c < highest`.
 Prefer the greatest exclusive upper bound, retaining weaker candidates as fallbacks.
 Let discovery search ahead of ingestion; LIST newly eligible lower-bound bands
 and stop at previously examined bands. Keep useful orders ending behind that

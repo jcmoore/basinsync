@@ -9,11 +9,11 @@ export const bulkmanifestPath="sts/0/databasin/bulkmanifest";
 export type BulkIndex={lowest:bigint;ends:number[];coordinate:bigint};
 export function boundary(index:BulkIndex,n:number):number{return n===0?0:index.ends[n-1];}
 export function key(lowest:bigint,highest:bigint,start:number,coordinate:bigint):string {
-  assert(lowest>0n&&highest>lowest&&coordinate>=0n);assert(Number.isSafeInteger(start)&&start>=16&&start%8===0);const key=`analogue/${lex(~lowest)}/${lex(~highest)}/v0/${start}/${coordinate}`;assert(key.length<=1024);return key;
+  assert(lowest>0n&&highest>lowest&&coordinate>=0n);assert(Number.isSafeInteger(start)&&start>=16&&start%8===0);const key=`kernelspace/datashed/analogue/${lex(~lowest)}/${lex(~highest)}/v0/${start}/${coordinate}`;assert(key.length<=1024);return key;
 }
 export function fromKey(keyText:string):{lowest:bigint;highest:bigint;start:number;coordinate:bigint} {
-  const parts=keyText.split("/");assert(parts.length===6&&parts[0]==="analogue"&&parts[3]==="v0");
-  const coordinate=BigInt(parts[5]),start=Number(parts[4]),lowest=~unlex(parts[1]),highest=~unlex(parts[2]);assert.equal(key(lowest,highest,start,coordinate),keyText);return {lowest,highest,start,coordinate};
+  const prefix="kernelspace/datashed/analogue/";assert(keyText.startsWith(prefix));const parts=keyText.slice(prefix.length).split("/");assert(parts.length===5&&parts[2]==="v0");
+  const coordinate=BigInt(parts[4]),start=Number(parts[3]),lowest=~unlex(parts[0]),highest=~unlex(parts[1]);assert.equal(key(lowest,highest,start,coordinate),keyText);return {lowest,highest,start,coordinate};
 }
 export function encodeBulkOrder(lowest:bigint,events:Uint8Array[]):Uint8Array {
   assert(lowest>0n&&events.length>0);const ends:number[]=[];

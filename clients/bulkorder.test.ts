@@ -16,7 +16,7 @@ test("dense BulkOrder index retains nested event boundaries and arbitrary-precis
 });
 test("BulkOrder rejects malformed bounds, framing, and dense indexes",()=>{
   expect(()=>encodeBulkOrder(0n,[event])).toThrow();expect(()=>encodeBulkOrder(1n,[])).toThrow();
-  for(const text of ["analogue/0yfff/0yffe","analogue/0yffe/0yffe","analogue/0z001/0z002","analogue/0yffe/0yffd/x"])expect(()=>fromKey(text)).toThrow();
+  for(const text of ["kernelspace/datashed/analogue/0yfff/0yffe","kernelspace/datashed/analogue/0yffe/0yffe","kernelspace/datashed/analogue/0z001/0z002","kernelspace/datashed/analogue/0yffe/0yffd/x"])expect(()=>fromKey(text)).toThrow();
   const valid=encodeBulkOrder(1n,[event]),bad=new Uint8Array(valid);bad[coordinateLength(event)-1]^=1;expect(()=>decodeBulkOrder(bad)).toThrow();
   for(const ends of [[],[0],[1],[coordinateLength(event)+8],[-1],[1.5],[coordinateLength(event),coordinateLength(event)]]){
     const bytes=new Uint8Array([...trimRetryMargins(event),...wrap(encode([Symbol.species,"sync.memoremix.com","sts/0/databasin/bulkmanifest",{lowest:1n,coordinate:0n,ends}])),...wrap(new Uint8Array(8),MARGIN)]);
@@ -41,7 +41,7 @@ test("byte coordinates retain bigint precision and exclude length-changing margi
   expect(entryDigest(extra)).toBe(entryDigest(first));expect(encodeBulkOrder(42n,[extra,second])).toEqual(bytes);expect(eventCoordinate(extra)).toBe(coordinate);expect(coordinateLength(extra)).toBe(coordinateLength(first));
   expect(decodeBulkOrder(encodeBulkOrder(42n,[extra,second])).index.ends).toEqual([coordinateLength(first),coordinateLength(first)+coordinateLength(second)]);
   expect(()=>encodeBulkOrder(42n,[second,first])).toThrow();
-  for(const bad of ["-1","01","0x10"])expect(()=>fromKey(`analogue/0yffd5/0yffd3/v0/16/${bad}`)).toThrow();
+  for(const bad of ["-1","01","0x10"])expect(()=>fromKey(`kernelspace/datashed/analogue/0yffd5/0yffd3/v0/16/${bad}`)).toThrow();
 });
 
 test("trimming preserves internal margins, messages, alignment, and digest",()=>{

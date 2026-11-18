@@ -8,7 +8,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-pub const REFERENCE_KEY: &str = "sentinel/empty";
+pub const REFERENCE_KEY: &str = "kernelspace/sentinel/empty";
 #[derive(Clone)]
 struct References {
     empty: String,
@@ -78,7 +78,14 @@ pub async fn initialize(bucket: &Bucket) -> Result<String> {
     let mut chosen = None;
     for length in (2..16).step_by(2) {
         let bytes = [0xde, 0xad].repeat(length / 2);
-        if probe(bucket, &format!("sentinel/tombstone/{length}"), &bytes).await? != empty {
+        if probe(
+            bucket,
+            &format!("kernelspace/sentinel/tombstone/{length}"),
+            &bytes,
+        )
+        .await?
+            != empty
+        {
             chosen = Some(bytes);
             break;
         }
@@ -89,7 +96,14 @@ pub async fn initialize(bucket: &Bucket) -> Result<String> {
     for counter in 1u8..=7 {
         let mut bytes = vec![];
         crate::envbuf::append(&mut bytes, &[counter], crate::envbuf::MARGIN)?;
-        if probe(bucket, &format!("sentinel/margin/{counter}"), &bytes).await? != empty {
+        if probe(
+            bucket,
+            &format!("kernelspace/sentinel/margin/{counter}"),
+            &bytes,
+        )
+        .await?
+            != empty
+        {
             chosen = Some(bytes);
             break;
         }

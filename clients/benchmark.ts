@@ -98,7 +98,7 @@ try {
         if(variant==="capture-s3") {
           let count=0, token:string|undefined;
           do {
-            const page=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"timeline/",ContinuationToken:token}));
+            const page=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/timeline/",ContinuationToken:token}));
             count+=(page.Contents??[]).length;token=page.NextContinuationToken;
           } while(token);
           assert.equal(count,commits+warmup+1,"every conditional PUT stored one event");

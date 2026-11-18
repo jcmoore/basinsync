@@ -9,8 +9,8 @@ use turso_core::Connection;
 pub mod promotion;
 
 pub const ID: &str = "kernel.turso";
-pub const YOUNG: &str = "kernelspace/heap/young/";
-pub const OLD: &str = "kernelspace/heap/old/";
+pub const YOUNG: &str = "kernelspace/datashed/heap/young/";
+pub const OLD: &str = "kernelspace/datashed/heap/old/";
 pub const SCHEMA: &str = "CREATE TABLE datashed (id INTEGER PRIMARY KEY CHECK(id=1), milestone TEXT NOT NULL); INSERT INTO datashed VALUES(1,'0'); CREATE TABLE kernel_state (id INTEGER PRIMARY KEY CHECK(id=1), next_viewpoint TEXT NOT NULL, activity TEXT NOT NULL); INSERT INTO kernel_state VALUES(1,'0','0'); CREATE TABLE kernelspace_nodes (id TEXT PRIMARY KEY NOT NULL, content_length INTEGER NOT NULL CHECK(content_length>=0), reserved DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, etag TEXT NOT NULL DEFAULT '', promoted DATETIME NOT NULL DEFAULT '', revision TEXT NOT NULL, freed DATETIME NOT NULL DEFAULT '', marked DATETIME NOT NULL DEFAULT '', context TEXT NOT NULL DEFAULT '{}', sha384 TEXT NOT NULL); CREATE INDEX kernelspace_nodes_freed ON kernelspace_nodes(freed,id); CREATE INDEX kernelspace_nodes_promotion ON kernelspace_nodes(promoted,marked); CREATE TABLE kernelspace_edges (node TEXT NOT NULL, retainer TEXT NOT NULL, PRIMARY KEY(node,retainer), CHECK(retainer<node)); CREATE INDEX kernelspace_edges_retainer ON kernelspace_edges(retainer,node); CREATE TABLE marking_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, upstream TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX marking_tasks_prioritized ON marking_tasks(prioritized,flow,viewpoint); CREATE TABLE kernel_commits (viewpoint TEXT PRIMARY KEY NOT NULL, upstream TEXT NOT NULL, blob BLOB NOT NULL);";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -6,10 +6,10 @@ use num_bigint::BigUint;
 use s3::Bucket;
 use std::collections::HashMap;
 
-pub const DATASHED_PREFIX: &str = "epilogue/";
+pub const DATASHED_PREFIX: &str = "kernelspace/datashed/epilogue/";
 
 pub fn flow_prefix(flow: &str, revision: &uuid::Uuid) -> String {
-    format!("flows/{flow}/{revision}/epilogue/")
+    format!("userspace/flows/{flow}/{revision}/epilogue/")
 }
 pub fn flow_key(flow: &str, revision: &uuid::Uuid, viewpoint: &Viewpoint) -> Result<String> {
     event::valid_flow(flow)?;

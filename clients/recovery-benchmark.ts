@@ -12,7 +12,7 @@ const archivedCount=Number(Bun.env.RECOVERY_BENCH_ARCHIVED_EVENTS??count);
 const samples:Record<string,unknown>[]=[],foreground:Record<string,unknown>[]=[];
 let delay=0,bandwidth=Infinity,nextTransfer=0,bytes=0,active=0,peak=0,requests:Record<string,number>={};
 const proxy=f.relay(async(request,next)=>{
-  active++;peak=Math.max(peak,active);const url=new URL(request.url),kind=url.searchParams.has("list-type")?`LIST ${url.searchParams.get("prefix")??""}`:`${request.method} ${url.pathname.includes("/timeline/")?"timeline":url.pathname.includes("/analogue/")?"analogue":"other"}`;
+  active++;peak=Math.max(peak,active);const url=new URL(request.url),kind=url.searchParams.has("list-type")?`LIST ${url.searchParams.get("prefix")??""}`:`${request.method} ${url.pathname.includes("/kernelspace/datashed/timeline/")?"timeline":url.pathname.includes("/kernelspace/datashed/analogue/")?"analogue":"other"}`;
   requests[kind]=(requests[kind]??0)+1;
   try{const response=await next(),body=new Uint8Array(await response.arrayBuffer());bytes+=body.length;
     const now=performance.now(),transfer=Number.isFinite(bandwidth)?body.length/bandwidth*1000:0;nextTransfer=Math.max(now,nextTransfer)+transfer;const wait=delay+nextTransfer-now;if(wait>0)await Bun.sleep(wait);

@@ -90,14 +90,18 @@ impl Viewpoint {
     }
 
     pub fn key(&self) -> Result<String> {
-        let key = format!("epilogue/{}", encode(&!BigInt::from(self.0.clone())));
+        let key = format!(
+            "{}{}",
+            crate::epilogue::DATASHED_PREFIX,
+            encode(&!BigInt::from(self.0.clone()))
+        );
         ensure!(key.len() <= 1024, "viewpoint exceeds S3's key size limit");
         Ok(key)
     }
 
     pub fn from_key(key: &str) -> Result<Self> {
         let encoded = key
-            .strip_prefix("epilogue/")
+            .strip_prefix(crate::epilogue::DATASHED_PREFIX)
             .context("invalid Epilogue prefix")?;
         let signed = decode(encoded)?;
         if signed.sign() != Sign::Minus {
@@ -141,7 +145,11 @@ mod tests {
         for bad in ["", "-1", "+1", "01", "1.0", " 1", "١"] {
             assert!(Viewpoint::parse(bad).is_err());
         }
-        for bad in ["epilogue/0z000", "epilogue/0yfff/extra", "other/0yfff"] {
+        for bad in [
+            "kernelspace/datashed/epilogue/0z000",
+            "kernelspace/datashed/epilogue/0yfff/extra",
+            "other/0yfff",
+        ] {
             assert!(Viewpoint::from_key(bad).is_err());
         }
     }

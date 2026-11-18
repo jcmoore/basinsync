@@ -33,17 +33,17 @@ All implemented S3 key patterns, relative to the configured bucket:
 
 | Object | Key |
 | --- | --- |
-| Empty-validator reference | `sentinel/empty` |
-| *Tombstone*[~][tombstone] probes | `sentinel/tombstone/${length}` |
-| *Margin*[~][margin] probes | `sentinel/margin/${counter}` |
-| *Datashed*[~][datashed] *DifferentialEvent*[~][differential-event] | `timeline/${lex(~milestone)}` |
-| *Datashed*[~][datashed] *Analogue*[~][analogue] *BulkOrder*[~][bulk-order] | `analogue/${lex(~lowest)}/${lex(~highest)}/v0/${bulkmanifest_start}/${coordinate}` |
-| *Datashed*[~][datashed] backup *CommitMarker*[~][commit-marker] | `epilogue/${lex(~viewpoint)}` |
-| *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `epilogue/${lex(viewpoint)}` |
-| *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
-| *Flow*[~][flow] *PromotionSign*[~][promotion-sign] | `flows/${flow}/${flow_revision}/epilogue/${lex(viewpoint)}` |
-| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *young-generation*[~][young-generation] *node*[~][node] | `kernelspace/heap/young/${node_id}/${node_revision}` |
-| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *old-generation*[~][old-generation] *node*[~][node] | `kernelspace/heap/old/${node_id}/${node_revision}` |
+| Empty-validator reference | `kernelspace/sentinel/empty` |
+| *Tombstone*[~][tombstone] probes | `kernelspace/sentinel/tombstone/${length}` |
+| *Margin*[~][margin] probes | `kernelspace/sentinel/margin/${counter}` |
+| *Datashed*[~][datashed] *DifferentialEvent*[~][differential-event] | `kernelspace/datashed/timeline/${lex(~milestone)}` |
+| *Datashed*[~][datashed] *Analogue*[~][analogue] *BulkOrder*[~][bulk-order] | `kernelspace/datashed/analogue/${lex(~lowest)}/${lex(~highest)}/v0/${bulkmanifest_start}/${coordinate}` |
+| *Datashed*[~][datashed] backup *CommitMarker*[~][commit-marker] | `kernelspace/datashed/epilogue/${lex(~viewpoint)}` |
+| *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `kernelspace/datashed/epilogue/${lex(viewpoint)}` |
+| *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `userspace/flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
+| *Flow*[~][flow] *PromotionSign*[~][promotion-sign] | `userspace/flows/${flow}/${flow_revision}/epilogue/${lex(viewpoint)}` |
+| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *young-generation*[~][young-generation] *node*[~][node] | `kernelspace/datashed/heap/young/${node_id}/${node_revision}` |
+| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *old-generation*[~][old-generation] *node*[~][node] | `kernelspace/datashed/heap/old/${node_id}/${node_revision}` |
 | *UserSpace*[~][userspace] *Heap*[~][heap] *young-generation*[~][young-generation] *node*[~][node] | `userspace/heap/young/${node_id}/${node_revision}` |
 | *UserSpace*[~][userspace] *Heap*[~][heap] *old-generation*[~][old-generation] *node*[~][node] | `userspace/heap/old/${node_id}/${node_revision}` |
 

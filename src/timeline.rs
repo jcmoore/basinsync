@@ -7,7 +7,7 @@ use num_bigint::{BigInt, BigUint};
 use s3::Bucket;
 use std::{collections::BTreeMap, future::Future};
 
-pub const PREFIX: &str = "timeline/";
+pub const PREFIX: &str = "kernelspace/datashed/timeline/";
 
 pub fn key(milestone: &BigUint) -> Result<String> {
     ensure!(
@@ -1066,7 +1066,10 @@ mod tests {
             (256, "0yfdeff"),
         ] {
             let milestone = BigUint::from(n);
-            assert_eq!(key(&milestone)?, format!("timeline/{encoded}"));
+            assert_eq!(
+                key(&milestone)?,
+                format!("kernelspace/datashed/timeline/{encoded}")
+            );
             assert_eq!(from_key(&key(&milestone)?)?, milestone);
         }
         for bits in [4usize, 8, 64, 68, 256, 1024] {
@@ -1080,12 +1083,12 @@ mod tests {
         assert!(key(&0u8.into()).is_err());
         assert!(key(&(BigUint::from(1u8) << 4096usize)).is_err());
         for bad in [
-            "timeline/0yfff",
-            "timeline/0z001",
-            "timeline/0w1z",
-            "timeline/0yFFE",
-            "timeline/0yffe/extra",
-            "epilogue/0yffe",
+            "kernelspace/datashed/timeline/0yfff",
+            "kernelspace/datashed/timeline/0z001",
+            "kernelspace/datashed/timeline/0w1z",
+            "kernelspace/datashed/timeline/0yFFE",
+            "kernelspace/datashed/timeline/0yffe/extra",
+            "kernelspace/datashed/epilogue/0yffe",
         ] {
             assert!(from_key(bad).is_err(), "{bad}");
         }

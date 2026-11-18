@@ -69,9 +69,13 @@ CREATE TABLE kernel_commits (
 ```
 
 `next_viewpoint` and `activity` are decimal; `viewpoint` and `upstream` use
-positive *Lexidecimal*[~][lexidecimal]. The former table tracks the next *Datashed*[~][datashed]
-*Viewpoint*[~][viewpoint] and last non-backup activity; the latter retains
-*CommitMarker*[~][commit-marker] messages and their committing *Milestones*[~][milestone].
+positive *Lexidecimal*[~][lexidecimal]. `kernel_state` tracks the next *Datashed*[~][datashed] *Viewpoint*[~][viewpoint]
+and the last non-backup mutation's *Milestone*[~][milestone] (`activity`), so
+backup bookkeeping cannot continually trigger new backups. `kernel_commits`
+retains the small *CommitMarker*[~][commit-marker] root messages and their
+committing *Milestones*[~][milestone] for interrupted publication, promotion,
+and covered-prefix checks without rereading the *Timeline*[~][timeline].
+Database images remain in *Heap nodes*[~][node].
 
 The backup worker pins both images at durable *Milestone*[~][milestone] `M`,
 replicates covered *Flow*[~][flow] *markers*[~][commit-marker] as before, and exports the images outside the

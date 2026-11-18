@@ -12,7 +12,7 @@ try {
   const expected=await f.recover(plain,"sequential");assert.equal(expected.coordinate,String(events.reduce((n,e)=>n+coordinateLength(e),0)));
   async function archived(high:number){const bucket=await f.bucket();await f.seed(bucket,events);const body=encodeBulkOrder(1n,events.slice(0,high)),{index,range}=decodeBulkOrder(body);await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(1n,BigInt(high+1),range.start,index.coordinate),Body:body}));return bucket;}
   {
-    const bucket=await archived(48),proxy=f.relay(async(request,next)=>{const path=new URL(request.url).pathname;if(request.method==="GET")await Bun.sleep(path.includes("/analogue/")?40:3);return next();});
+    const bucket=await archived(48),proxy=f.relay(async(request,next)=>{const path=new URL(request.url).pathname;if(request.method==="GET")await Bun.sleep(path.includes("/kernelspace/datashed/analogue/")?40:3);return next();});
     const result=await f.recover(bucket,"bidirectional",proxy);assert.equal(result.sha384,expected.sha384);assert(result.stats.cache_hits>0);assert(result.stats.coordinate_range_gets>0);assert.equal(result.stats.manifest_gets,0);assert(result.stats.peak_bulk_downloads<=2);
   }
   // The same events can have different physical retry tails without shifting coordinates.
@@ -37,12 +37,12 @@ try {
     const bucket=await archived(64),gate=Promise.withResolvers<void>(),ranges:string[]=[];
     const total=events.reduce((n,e)=>n+e.length,0);
     const proxy=f.relay(async(request,next)=>{const url=new URL(request.url);
-      if(url.searchParams.get("prefix")==="analogue/")await gate.promise;
-      if(request.method==="GET"&&url.pathname.includes("/timeline/")){
-        const m=fromKey(url.pathname.slice(url.pathname.indexOf("timeline/")));await Bun.sleep(3);
+      if(url.searchParams.get("prefix")==="kernelspace/datashed/analogue/")await gate.promise;
+      if(request.method==="GET"&&url.pathname.includes("/kernelspace/datashed/timeline/")){
+        const m=fromKey(url.pathname.slice(url.pathname.indexOf("kernelspace/datashed/timeline/")));await Bun.sleep(3);
         if(m===60n)setTimeout(()=>gate.resolve(),20);
       }
-      if(request.method==="GET"&&url.pathname.includes("/analogue/"))ranges.push(request.headers.get("range")!);
+      if(request.method==="GET"&&url.pathname.includes("/kernelspace/datashed/analogue/"))ranges.push(request.headers.get("range")!);
       return next();
     });
     try{const result=await f.recover(bucket,"bidirectional",proxy);assert.equal(result.sha384,expected.sha384);assert(result.stats.cache_hits>=4);assert(ranges.some(r=>/^bytes=\d+-\d+$/.test(r)&&Number(r.split("-")[1])<total-1));assert(!ranges.some(r=>r.endsWith("-")),"trimmed events let coordinates translate without manifest GETs");}finally{gate.resolve();}
@@ -50,20 +50,20 @@ try {
   // Neither a permanently held archive GET nor a one-byte disk budget may stall scanning/recovery.
   {
     const bucket=await archived(64);let held=0;const gate=Promise.withResolvers<void>();
-    const proxy=f.relay(async(request,next)=>{const path=new URL(request.url).pathname;if(request.method==="GET"&&path.includes("/analogue/")){held++;await gate.promise;}if(path.includes("/timeline/"))await Bun.sleep(2);return next();});
+    const proxy=f.relay(async(request,next)=>{const path=new URL(request.url).pathname;if(request.method==="GET"&&path.includes("/kernelspace/datashed/analogue/")){held++;await gate.promise;}if(path.includes("/kernelspace/datashed/timeline/"))await Bun.sleep(2);return next();});
     let timer:ReturnType<typeof setTimeout>;
     try {const result=await Promise.race([f.recover(bucket,"bidirectional",proxy,false,{BASINSYNC_RECOVERY_DISK_BYTES:"1"}),new Promise<never>((_,no)=>{timer=setTimeout(()=>no(new Error("held archive stalled Timeline recovery")),5000);})]);assert.equal(result.sha384,expected.sha384);assert(held>0);assert(result.stats.descending_gets>=60);assert.equal(result.stats.cache_hits,0);}finally{clearTimeout(timer!);gate.resolve();}
   }
   {
     const cap=Math.max(...events.map(e=>e.length))*3;
-    const proxy=f.relay(async(request,next)=>{const path=new URL(request.url).pathname;if(request.method==="GET"&&path.includes("/timeline/")){const m=fromKey(path.slice(path.indexOf("timeline/")));await Bun.sleep(m<8n?30:1);}return next();});
+    const proxy=f.relay(async(request,next)=>{const path=new URL(request.url).pathname;if(request.method==="GET"&&path.includes("/kernelspace/datashed/timeline/")){const m=fromKey(path.slice(path.indexOf("kernelspace/datashed/timeline/")));await Bun.sleep(m<8n?30:1);}return next();});
     const result=await f.recover(plain,"bidirectional",proxy,false,{BASINSYNC_RECOVERY_DISK_BYTES:String(cap),BASINSYNC_RECOVERY_DISK_SEGMENT_BYTES:"1"});assert.equal(result.sha384,expected.sha384);assert(result.stats.cache_evictions>0);assert(result.stats.peak_disk_bytes<=cap);
     const none=await f.recover(plain,"bidirectional",undefined,false,{BASINSYNC_RECOVERY_DISK_DIRECTORY:`${f.artifacts}/does-not-exist`});assert.equal(none.sha384,expected.sha384);assert.equal(none.stats.peak_disk_bytes,0);
   }
   // Damage cached event 64 while an early archive request is pending. Refetch rather than ingest it.
   {
     const bucket=await archived(48),directory=`${f.artifacts}/cache`;mkdirSync(directory);
-    const proxy=f.relay(async(request,next)=>{const path=new URL(request.url).pathname;if(request.method==="GET")await Bun.sleep(path.includes("/analogue/")?900:3);return next();});
+    const proxy=f.relay(async(request,next)=>{const path=new URL(request.url).pathname;if(request.method==="GET")await Bun.sleep(path.includes("/kernelspace/datashed/analogue/")?900:3);return next();});
     const pending=f.recover(bucket,"bidirectional",proxy,false,{BASINSYNC_RECOVERY_DISK_DIRECTORY:directory});
     const path=await eventually(async()=>{const folder=readdirSync(directory)[0];if(!folder)return null;const segment=readdirSync(`${directory}/${folder}`)[0];if(!segment)return null;const path=`${directory}/${folder}/${segment}`;return statSync(path).size>=events.at(-1)!.length?path:null;},p=>p!==null);
     const fd=openSync(path!,"r+");try{writeSync(fd,new Uint8Array([0]),0,1,0);}finally{closeSync(fd);}

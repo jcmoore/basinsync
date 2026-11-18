@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::{ops::Range, time::Duration};
 use tokio::sync::{mpsc, watch};
 
-pub const PREFIX: &str = "analogue/";
+pub const PREFIX: &str = "kernelspace/datashed/analogue/";
 pub const COMMAND: &str = "sts/0/databasin/bulkmanifest";
 pub const RANGE_HEADER: &str = "x-amz-meta-bulkmanifest-range";
 

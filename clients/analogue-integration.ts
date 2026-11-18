@@ -25,7 +25,7 @@ try{
   const calls:{method:string;url:URL}[]=[];
   const traced=f.relay(async(request,next)=>{
     const url=new URL(request.url);calls.push({method:request.method,url});const response=await next();
-    if(url.searchParams.get("prefix")==="analogue/"){
+    if(url.searchParams.get("prefix")==="kernelspace/datashed/analogue/"){
       const text=await response.text(),contents=[...text.matchAll(/<Contents>.*?<\/Contents>/gs)];
       if(contents.length>1){let first=true;const paged=text.replace(/<Contents>.*?<\/Contents>/gs,match=>{if(first){first=false;return match;}return "";}).replace(/<IsTruncated>.*?<\/IsTruncated>/,"<IsTruncated>true</IsTruncated>").replace(/<KeyCount>.*?<\/KeyCount>/,"<KeyCount>1</KeyCount>");const headers=new Headers(response.headers);headers.delete("content-length");return new Response(paged,{status:response.status,headers});}
       return new Response(text,{status:response.status,headers:response.headers});
@@ -34,9 +34,9 @@ try{
   });
   for(const mode of ["default","parallel","bulk","range","hedged","bulk-parallel","range-parallel","range-prefetch","bidirectional"]){
     calls.length=0;const restored=await f.recover(bucket,mode,traced);assert.equal(restored.sha384,baseline.sha384);assert.equal(restored.coordinate,baseline.coordinate);assert.equal(restored.crc32c,baseline.crc32c);assert.deepEqual(restored.flows,baseline.flows);
-    if(mode!=="parallel")assert(calls.some(c=>c.method==="GET"&&c.url.pathname.includes("/analogue/")),`${mode} used BulkOrders`);
-    if(mode==="range"||mode==="range-parallel"||mode==="range-prefetch")assert(!calls.some(c=>c.method==="HEAD"&&c.url.pathname.includes("/analogue/")),"key locates the manifest without HEAD");
-    const singles=calls.filter(c=>c.method==="GET"&&c.url.pathname.includes("/timeline/")).length;
+    if(mode!=="parallel")assert(calls.some(c=>c.method==="GET"&&c.url.pathname.includes("/kernelspace/datashed/analogue/")),`${mode} used BulkOrders`);
+    if(mode==="range"||mode==="range-parallel"||mode==="range-prefetch")assert(!calls.some(c=>c.method==="HEAD"&&c.url.pathname.includes("/kernelspace/datashed/analogue/")),"key locates the manifest without HEAD");
+    const singles=calls.filter(c=>c.method==="GET"&&c.url.pathname.includes("/kernelspace/datashed/timeline/")).length;
     if(mode==="bulk"||mode==="range")assert(singles<events.length/2,`reduced Timeline GETs: ${singles}`);
   }
   // Different FlexBuffers layouts share a key when their event bytes agree.
@@ -48,7 +48,7 @@ try{
     await f.s3.send(new PutObjectCommand({Bucket:b,Key:name,Body:alternative,IfNoneMatch:"*",Metadata:{"bulkmanifest-range":`bytes=${decoded.range.start}-${decoded.range.end-1}`}}));
     await assert.rejects(()=>f.s3.send(new PutObjectCommand({Bucket:b,Key:indexedKey(1n,65n,a.range.start,a.index.coordinate),Body:original,IfNoneMatch:"*"})),(error:any)=>error.$metadata?.httpStatusCode===412);
     for(const mode of ["bulk-parallel","range","range-prefetch"])assert.equal((await f.recover(b,mode)).sha384,baseline.sha384);
-    let puts=0;const observed=f.relay(async(request,next)=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/analogue/"))puts++;return next();});
+    let puts=0;const observed=f.relay(async(request,next)=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/datashed/analogue/"))puts++;return next();});
     const resumed=await f.server(b,{BASINSYNC_BULK_MAX_AGE_MS:"10"},observed);await f.stop(resumed.process);assert.equal(puts,0,"resume adopts an equivalent manifest with a different encoded length");
   }
   // A stronger but corrupt candidate must not install a false prefix or poison fallback.
@@ -59,11 +59,11 @@ try{
   const malformed=encodeBulkOrder(1n,events);malformed[malformed.length-1]^=1;
   await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(1n,66n),Body:malformed}));
   assert.equal((await f.recover(bucket,"bulk")).sha384,baseline.sha384);
-  const denied=f.relay(async(request,next)=>new URL(request.url).pathname.includes("/analogue/")?new Response(null,{status:503}):next());
+  const denied=f.relay(async(request,next)=>new URL(request.url).pathname.includes("/kernelspace/datashed/analogue/")?new Response(null,{status:503}):next());
   assert.equal((await f.recover(bucket,"bulk",denied)).sha384,baseline.sha384);
   // Discovery can be arbitrarily slow without preventing direct Timeline progress.
   const gate=Promise.withResolvers<void>();let blocked=false;
-  const slow=f.relay(async(request,next)=>{if(new URL(request.url).searchParams.get("prefix")==="analogue/"){blocked=true;await gate.promise;}return next();});
+  const slow=f.relay(async(request,next)=>{if(new URL(request.url).searchParams.get("prefix")==="kernelspace/datashed/analogue/"){blocked=true;await gate.promise;}return next();});
   const fast=await f.recover(bucket,"bulk",slow);assert.equal(fast.sha384,baseline.sha384);assert(blocked);gate.resolve();
   {
     const anchored=await f.bucket();await f.seed(anchored,events.slice(0,16));
@@ -74,8 +74,8 @@ try{
     const observed=f.relay(async(request,next)=>{if(request.method==="GET")reads.push({path:new URL(request.url).pathname,range:request.headers.get("range")});return next();});
     assert.equal((await f.recover(anchored,"range",observed)).sha384,baseline.sha384);
     const twoEnded=await f.recover(anchored,"bidirectional",observed);assert.equal(twoEnded.sha384,baseline.sha384);assert.equal(twoEnded.coordinate,baseline.coordinate);assert.equal(twoEnded.crc32c,baseline.crc32c);
-    assert(reads.some(r=>r.path.includes("/analogue/")&&r.range&&Number(r.range.split("-")[0].slice(6))>=boundary(decoded.index,16)&&Number(r.range.split("-")[0].slice(6))<decoded.range.start),"fetch a useful suffix without its checkpointed prefix");
-    assert(!reads.some(r=>r.path.includes("/timeline/")&&timelineFromKey(r.path.slice(r.path.indexOf("timeline/")))<=16n),"never re-read the snapshot prefix");
+    assert(reads.some(r=>r.path.includes("/kernelspace/datashed/analogue/")&&r.range&&Number(r.range.split("-")[0].slice(6))>=boundary(decoded.index,16)&&Number(r.range.split("-")[0].slice(6))<decoded.range.start),"fetch a useful suffix without its checkpointed prefix");
+    assert(!reads.some(r=>r.path.includes("/kernelspace/datashed/timeline/")&&timelineFromKey(r.path.slice(r.path.indexOf("kernelspace/datashed/timeline/")))<=16n),"never re-read the snapshot prefix");
     const capped=await f.recover(anchored,"range",undefined,false,{BASINSYNC_RECOVERY_MAX_BYTES:String(decoded.range.start-boundary(decoded.index,16))});assert.equal(capped.sha384,baseline.sha384);assert(capped.stats.bulk_gets>0,"a Range suffix can fit even when the full object exceeds the per-response cap");
     await f.s3.send(new DeleteObjectCommand({Bucket:anchored,Key:key(1n,65n)}));
     for(const [low,high] of [[1,25],[25,41],[41,57],[57,65]]){
@@ -83,7 +83,7 @@ try{
       await f.s3.send(new PutObjectCommand({Bucket:anchored,Key:key(BigInt(low),BigInt(high)),Body:body,Metadata:{"bulkmanifest-range":`bytes=${range.start}-${range.end-1}`}}));
     }
     let individual=0;
-    const delayed=f.relay(async(request,next)=>{const url=new URL(request.url);if(url.searchParams.get("prefix")==="analogue/")await Bun.sleep(40);if(request.method==="GET"&&url.pathname.includes("/timeline/")){individual++;await Bun.sleep(20);}return next();});
+    const delayed=f.relay(async(request,next)=>{const url=new URL(request.url);if(url.searchParams.get("prefix")==="kernelspace/datashed/analogue/")await Bun.sleep(40);if(request.method==="GET"&&url.pathname.includes("/kernelspace/datashed/timeline/")){individual++;await Bun.sleep(20);}return next();});
     assert.equal((await f.recover(anchored,"bulk",delayed)).sha384,baseline.sha384);
     assert(individual<12,`a speculative discovery frontier must retain orders ending behind it: ${individual} individual GETs`);
   }
@@ -101,11 +101,11 @@ try{
       const observed=f.relay(async(request,next)=>{
         const path=decodeURIComponent(new URL(request.url).pathname);
         if(request.method!=="GET")return next();
-        if(path.includes("/timeline/")){await Bun.sleep(40);return next();}
-        if(!path.includes("/analogue/"))return next();
+        if(path.includes("/kernelspace/datashed/timeline/")){await Bun.sleep(40);return next();}
+        if(!path.includes("/kernelspace/datashed/analogue/"))return next();
         active++;peak=Math.max(peak,active);
         try{
-          const name=path.slice(path.indexOf("analogue/"));
+          const name=path.slice(path.indexOf("kernelspace/datashed/analogue/"));
           if(name===key(1n,17n)){
             held=true;const response=await next();
             await eventually(async()=>second,yes=>yes,3000);await release.promise;held=false;
@@ -129,10 +129,10 @@ try{
       const seen=new Set<string>(),release=Promise.withResolvers<void>();let firstHeld=false,premature=false,activeData=0,peakData=0,heads=0;
       const ahead=f.relay(async(request,next)=>{
         const path=decodeURIComponent(new URL(request.url).pathname);
-        if(!path.includes("/analogue/"))return next();
+        if(!path.includes("/kernelspace/datashed/analogue/"))return next();
         if(request.method==="HEAD"){heads++;return next();}
         if(request.method!=="GET")return next();
-        const name=path.slice(path.indexOf("analogue/")),bounds=fromKey(name),range=`bytes=${bounds.start}-`;
+        const name=path.slice(path.indexOf("kernelspace/datashed/analogue/")),bounds=fromKey(name),range=`bytes=${bounds.start}-`;
         if(request.headers.get("range")===range){const response=await next();seen.add(name);if(seen.size===4)setTimeout(()=>release.resolve(),100);return response;}
         activeData++;peakData=Math.max(peakData,activeData);
         try{
@@ -157,41 +157,41 @@ try{
     const b=await f.bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let held=false,sources=0;
     const proxy=f.relay(async(request,next)=>{
       const path=decodeURIComponent(new URL(request.url).pathname);
-      if(request.method==="GET"&&path.includes("/timeline/"))sources++;
-      if(request.method==="PUT"&&path.includes("/analogue/")&&!held){held=true;entered.resolve();await release.promise;}
+      if(request.method==="GET"&&path.includes("/kernelspace/datashed/timeline/"))sources++;
+      if(request.method==="PUT"&&path.includes("/kernelspace/datashed/analogue/")&&!held){held=true;entered.resolve();await release.promise;}
       return next();
     });
     const app=await f.server(b,{BASINSYNC_BULK_MAX_AGE_MS:"60000",BASINSYNC_BULK_TARGET_BYTES:"1"},proxy);
     assert.equal((await commit(app.url,"live",new Uint8Array([0]),0n)).status,201);await entered.promise;
     for(let n=1;n<8;n++)assert.equal((await commit(app.url,"live",new Uint8Array([n]),BigInt(n))).status,201);
     release.resolve();await f.stop(app.process);assert(sources>0,"overflow catches up from durable Timeline");
-    const orders=(await f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"analogue/"}))).Contents!;assert.equal(orders.length,8);
+    const orders=(await f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/datashed/analogue/"}))).Contents!;assert.equal(orders.length,8);
     for(const object of orders){const response=await f.s3.send(new GetObjectCommand({Bucket:b,Key:object.Key!}));const bytes=await response.Body!.transformToByteArray();const {index,events,range}=decodeBulkOrder(bytes);assert.equal(events.length,1);assert.equal(response.Metadata!["bulkmanifest-range"],`bytes=${range.start}-${range.end-1}`);assert.equal(fromKey(object.Key!).start,range.start);const original=await f.s3.send(new GetObjectCommand({Bucket:b,Key:timelineKey(index.lowest)}));assert.deepEqual(events[0],trimRetryMargins(await original.Body!.transformToByteArray()));}
-    let puts=0;const observed=f.relay(async(request,next)=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/analogue/"))puts++;return next();});
+    let puts=0;const observed=f.relay(async(request,next)=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/datashed/analogue/"))puts++;return next();});
     const resumed=await f.server(b,{BASINSYNC_BULK_MAX_AGE_MS:"10",BASINSYNC_BULK_TARGET_BYTES:"1"},observed);await f.stop(resumed.process);assert.equal(puts,0,"resume existing contiguous archive coverage");
   }
   // Byte threshold, age threshold, final drain, failed uploads, and competing workers.
   {
     const b=await f.bucket(),app=await f.server(b,{BASINSYNC_BULK_MAX_AGE_MS:"60000",BASINSYNC_BULK_TARGET_BYTES:"5242880"});
     for(let n=0;n<64;n++)assert.equal((await commit(app.url,"large",new Uint8Array(98304).fill(n),BigInt(n))).status,201);
-    await eventually(()=>f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"analogue/"})),r=>(r.KeyCount??0)>0);
-    await f.stop(app.process);const orders=(await f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"analogue/"}))).Contents!;
+    await eventually(()=>f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/datashed/analogue/"})),r=>(r.KeyCount??0)>0);
+    await f.stop(app.process);const orders=(await f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/datashed/analogue/"}))).Contents!;
     const sorted=orders.map(o=>({...fromKey(o.Key!),key:o.Key!})).sort((a,b)=>a.lowest<b.lowest?-1:1);let next=1n;
     for(const order of sorted){assert.equal(order.lowest,next);const response=await f.s3.send(new GetObjectCommand({Bucket:b,Key:order.key}));const decoded=decodeBulkOrder(await response.Body!.transformToByteArray());if(order.highest!==65n)assert(decoded.range.start>=5*1024*1024);next=order.highest;}
     assert.equal(next,65n);assert(sorted.length>=2);
     const restored=await f.recover(b,"bulk");assert.equal(restored.flows.large,"63");
   }
   {
-    const b=await f.bucket();let fail=true;const proxy=f.relay(async(request,next)=>request.method==="PUT"&&new URL(request.url).pathname.includes("/analogue/")&&fail?new Response(null,{status:500}):next());
+    const b=await f.bucket();let fail=true;const proxy=f.relay(async(request,next)=>request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/datashed/analogue/")&&fail?new Response(null,{status:500}):next());
     const app=await f.server(b,{BASINSYNC_BULK_MAX_AGE_MS:"20"},proxy);assert.equal((await commit(app.url,"age",new Uint8Array([1]),0n)).status,201);
     await eventually(async()=>readFileSync(app.log,"utf8"),log=>log.includes("BulkOrder upload will retry"));fail=false;
-    await eventually(()=>f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"analogue/"})),r=>r.KeyCount===1);
+    await eventually(()=>f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/datashed/analogue/"})),r=>r.KeyCount===1);
     await f.stop(app.process);
     const source=(await f.s3.send(new GetObjectCommand({Bucket:b,Key:timelineKey(1n)})));const event=await source.Body!.transformToByteArray();
     // New workers can overlap; one conditional winner supplies the same event identities.
     const other=await f.bucket();await f.s3.send(new PutObjectCommand({Bucket:other,Key:timelineKey(1n),Body:event}));
     const apps=await Promise.all([f.server(other,{BASINSYNC_BULK_MAX_AGE_MS:"10"}),f.server(other,{BASINSYNC_BULK_MAX_AGE_MS:"10"})]);await Promise.all(apps.map(app=>f.stop(app.process)));
-    assert.equal((await f.s3.send(new ListObjectsV2Command({Bucket:other,Prefix:"analogue/"}))).KeyCount,1);
+    assert.equal((await f.s3.send(new ListObjectsV2Command({Bucket:other,Prefix:"kernelspace/datashed/analogue/"}))).KeyCount,1);
   }
   console.log(`put of success: byte/age/shutdown flushing, nonblocking bounded handoff, retry, restart, immutable races, and exact archived bytes. Artifacts: ${f.artifacts}`);
 }finally{await f.close();}
