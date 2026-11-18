@@ -731,6 +731,11 @@ impl Worker {
                 self.backup_interval,
                 kernel_queue,
                 backup_shutdown,
+                basinsync::kernel::promotion::Limits {
+                    tasks: self.cleanup.tasks,
+                    nodes: self.cleanup.marking,
+                    concurrency: self.cleanup.concurrency,
+                },
             )))
         } else {
             drop(kernel_queue);

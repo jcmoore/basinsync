@@ -29,6 +29,7 @@ cancellation does not roll back S3.
 
 Shutdown must close admission, stop background producers, drain queued
 publications, and await tracked tasks. Keep the internal request handler available
-until backup producers finish their final reservations and commits. `BASINSYNC_SHUTDOWN_TIMEOUT_MS` defaults to `30000`; exhausting
+until backup producers finish their final reservations, commits, and promotion
+updates. `BASINSYNC_SHUTDOWN_TIMEOUT_MS` defaults to `30000`; exhausting
 it exits unsuccessfully and leaves in-flight outcomes for recovery. Test these
 boundaries with gated I/O, disconnects, source failures, and shutdown signals.

@@ -81,7 +81,7 @@ async fn replicate_flows(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
     Ok(())
 }
 
-async fn internal(
+pub(crate) async fn internal(
     queue: &tokio::sync::mpsc::Sender<crate::kernel::Request>,
     operation: crate::kernel::Operation,
 ) -> Result<Viewpoint> {
@@ -99,13 +99,13 @@ async fn publish_roots(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
     let view = view.clone();
     let commits = tokio::task::spawn_blocking(move || crate::kernel::committed(&view)).await??;
     let latest = epilogue::latest_checkpoint(bucket).await?;
-    for command in commits {
+    for (command, blob) in commits {
         let viewpoint = Viewpoint::parse(&command.viewpoint)?;
         if latest.as_ref().is_some_and(|cp| cp.viewpoint >= viewpoint) {
             continue;
         }
-        let cp = command.graph.checkpoint(viewpoint)?;
-        let bytes = crate::envbuf::wrap(&command.graph.encode()?)?;
+        let cp = command.graph.checkpoint(viewpoint, &blob)?;
+        let bytes = crate::envbuf::wrap(&blob)?;
         let key = cp.viewpoint.key()?;
         let result = crate::sequence::put_feed(bucket, &key, &bytes, cp.headers()?).await;
         match result {
@@ -116,8 +116,7 @@ async fn publish_roots(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
                     .await?;
                 ensure!(
                     existing.status_code() == 200
-                        && crate::envbuf::message(existing.as_slice())?
-                            == command.graph.encode()?,
+                        && crate::envbuf::message(existing.as_slice())? == blob,
                     "conflicting Datashed graph marker: {result:?}"
                 );
                 cp.verify_headers(&existing.headers())?;
@@ -201,6 +200,7 @@ pub async fn run(
     interval: Duration,
     queue: tokio::sync::mpsc::Sender<crate::kernel::Request>,
     mut shutdown: watch::Receiver<bool>,
+    promotion: crate::kernel::promotion::Limits,
 ) {
     let mut completed: BigUint = 0u8.into();
     loop {
@@ -235,6 +235,12 @@ pub async fn run(
                     tracing::warn!(%error, "Datashed backup will retry");
                 }
             }
+        }
+        if targets.borrow().is_some()
+            && let Err(error) =
+                crate::kernel::promotion::cycle(&bucket, &targets, &queue, promotion).await
+        {
+            tracing::warn!(%error,"KernelSpace marking will retry");
         }
         // The shutdown coordinator keeps the internal handler available through this flush.
         if closing {

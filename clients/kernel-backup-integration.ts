@@ -13,7 +13,8 @@ type Graph={version:string;milestone:string;coordinate:string;crc32c:string;pare
 const f=await fixture("kernel-backup");
 async function object(bucket:string,key:string){const r=await f.s3.send(new GetObjectCommand({Bucket:bucket,Key:key}));return {body:await r.Body!.transformToByteArray(),metadata:r.Metadata!};}
 async function latest(bucket:string){const l=await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/"}));const key=l.Contents?.find(o=>o.Size!>=16&&o.Key!.startsWith("epilogue/0y"))?.Key;if(!key)return null;const r=await object(bucket,key);return {...r,key,graph:toObject(message(r.body)) as Graph};}
-function nodeKey(n:Node){return `kernelspace/heap/young/${n.id}/${n.revision}`;}
+function nodeKey(n:Node,generation="young"){return `kernelspace/heap/${generation}/${n.id}/${n.revision}`;}
+async function nodeObject(bucket:string,n:Node){for(const generation of ["old","young"]){const key=nodeKey(n,generation);try{return {...await object(bucket,key),key};}catch(error){if((error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode!==404)throw error;}}throw Error("missing database node");}
 try {
   // Export and PUTs run outside preparation; foreground writes pass a paused backup.
   const bucket=await f.bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let held=false;
@@ -43,14 +44,14 @@ try {
     if(eventTuples(r.body).some(t=>t[2]==="sts/0/databasin/commitkernel"))committed=true;
   }
   assert(reserved&&committed);
-  for(const [id,node] of Object.entries(root.graph.databases)){const r=await object(bucket,nodeKey(node));assert.equal(r.body.length,node.length);assert.equal(sha384(r.body),node.sha384);assert.deepEqual(r.body,atSnapshot[id]);}
+  for(const [id,node] of Object.entries(root.graph.databases)){const r=await nodeObject(bucket,node);assert.equal(r.body.length,node.length);assert.equal(sha384(r.body),node.sha384);assert.deepEqual(r.body,atSnapshot[id]);}
   const before=await f.recover(bucket,"sequential");
-  const damaged=root.graph.databases["kernel.turso"],stored=await object(bucket,nodeKey(damaged)),bad=stored.body.slice();bad[100]^=1;
-  await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:nodeKey(damaged),Body:bad,Metadata:stored.metadata}));
+  const damaged=root.graph.databases["kernel.turso"],stored=await nodeObject(bucket,damaged),bad=stored.body.slice();bad[100]^=1;
+  await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:stored.key,Body:bad,Metadata:stored.metadata}));
   await assert.rejects(()=>f.recover(bucket,"sequential"),"corrupt companion image must fail the whole recovery");
-  await f.s3.send(new DeleteObjectCommand({Bucket:bucket,Key:nodeKey(damaged)}));
+  await f.s3.send(new DeleteObjectCommand({Bucket:bucket,Key:stored.key}));
   await assert.rejects(()=>f.recover(bucket,"sequential"),"missing companion image must fail the whole recovery");
-  await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:nodeKey(damaged),Body:stored.body,Metadata:stored.metadata}));
+  await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:stored.key,Body:stored.body,Metadata:stored.metadata}));
   // Evict only the covered prefix, preserving the backup's own reservation/commit suffix.
   for(const key of keys)if(fromKey(key)<=BigInt(root.graph.milestone))await f.s3.send(new DeleteObjectCommand({Bucket:bucket,Key:key}));
   const after=await f.recover(bucket,"bulk-parallel");assert.equal(after.sha384,before.sha384);assert.equal(after.kernel_sha384,before.kernel_sha384);assert(before.kernel_sha384);assert.equal(after.crc32c,before.crc32c);assert.equal(after.coordinate,before.coordinate);
@@ -67,7 +68,7 @@ try {
   const pending=await f.recover(interrupted,"sequential");assert(BigInt(pending.milestone)>=3n);
   reject=false;const restarted=await f.server(interrupted,{BASINSYNC_BACKUP_INTERVAL_MS:"30"},broken);
   const repaired=await eventually(()=>latest(interrupted),Boolean);assert(repaired);
-  await Bun.sleep(150);assert.equal((await f.s3.send(new ListObjectsV2Command({Bucket:interrupted,Prefix:"kernelspace/heap/young/"}))).Contents!.length,2,"bookkeeping must not recursively create backups");
+  await Bun.sleep(150);assert.equal((await f.s3.send(new ListObjectsV2Command({Bucket:interrupted,Prefix:"kernelspace/heap/"}))).Contents!.length,2,"bookkeeping must not recursively create backups");
   await f.stop(restarted.process);
   // Shutdown keeps the internal handler alive while a pinned image PUT is blocked.
   const draining=await f.bucket(),uploadEntered=Promise.withResolvers<void>(),uploadRelease=Promise.withResolvers<void>();let paused=false;
@@ -86,7 +87,7 @@ try {
   assert.equal((await f.recover(racing,"sequential")).flows.race,"0");
   // Ambiguous root replies are resolved by reading the immutable root back.
   const ambiguous=await f.bucket();let lost=0;
-  const lose=f.relay(async(request,next)=>{const response=await next();if(request.method==="PUT"&&new URL(request.url).pathname.startsWith(`/${ambiguous}/epilogue/`)&&response.ok){lost++;await response.arrayBuffer();return new Response("lost reply",{status:503});}return response;});
+  const lose=f.relay(async(request,next)=>{const response=await next();if(request.method==="PUT"&&new URL(request.url).pathname.startsWith(`/${ambiguous}/epilogue/0y`)&&response.ok){lost++;await response.arrayBuffer();return new Response("lost reply",{status:503});}return response;});
   const uncertain=await f.server(ambiguous,{BASINSYNC_BACKUP_INTERVAL_MS:"30"},lose);
   assert.equal((await commit(uncertain.url,"uncertain",new Uint8Array([9]),0n)).status,201);await eventually(()=>latest(ambiguous),Boolean);await f.stop(uncertain.process);assert.equal(lost,1);
   assert.equal((await f.recover(ambiguous,"sequential")).flows.uncertain,"0");

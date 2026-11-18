@@ -17,9 +17,12 @@ prerequisites:
 [heap]: <../../../glossary/heap.md>
 [kernelspace]: <../../../glossary/kernelspace.md>
 [lexidecimal]: <../../../glossary/lexidecimal.md>
+[marking-task]: <../../../glossary/marking-task.md>
 [milestone]: <../../../glossary/milestone.md>
 [node]: <../../../glossary/node.md>
+[node-promotion]: <../../../glossary/node-promotion.md>
 [object-keys]: <../../../object-keys.md>
+[old-generation]: <../../../glossary/old-generation.md>
 [promotion-sign]: <../../../glossary/promotion-sign.md>
 [retainer]: <../../../glossary/retainer.md>
 [revision]: <../../../glossary/revision.md>
@@ -91,8 +94,41 @@ identifies both images and prefix `M`. Restore that pair and replay from `M + 1`
 including its own reservations and `commitkernel`. Backup bookkeeping must not
 trigger another backup while otherwise idle.
 
-Test paired-image checksums, logical/physical replay, failed uploads, interrupted
-root publication, prefix eviction, concurrent writers, and foreground progress
-with a blocked backup. Run the *development checks*[~][development].
-*KernelSpace*[~][kernelspace] promotion and reclamation follow later; do not issue
-*PromotionSigns*[~][promotion-sign] for graphs still in the *young generation*[~][young-generation].
+Queue a *marking task*[~][marking-task] for every `commitkernel` in the same
+transaction, using the internal `datashed` owner:
+
+```sql
+CREATE TABLE marking_tasks (
+  flow TEXT NOT NULL,
+  viewpoint TEXT NOT NULL,
+  upstream TEXT NOT NULL,
+  prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (flow, viewpoint)
+);
+CREATE INDEX marking_tasks_prioritized
+  ON marking_tasks(prioritized, flow, viewpoint);
+```
+
+Here `viewpoint` and `upstream` use positive *Lexidecimal*[~][lexidecimal];
+`upstream` identifies the committing *Milestone*[~][milestone], after `M`.
+The backup worker performs bounded *marking*[~][marking-task] and
+*promotion*[~][node-promotion] phases even when no new backup is needed.
+Reuse the task, marking-batch, and object-I/O concurrency limits. These shallow
+*nodes*[~][node] have no children: mark verified retained revisions, then consume
+the `(promoted, marked)` queue. *Conditionally COPY*[~][conditional-write] to the
+*old generation*[~][old-generation], preserving image checksums and source
+*ETags*[~][etag]; confirm the destination before deleting young. Retry failures
+without relaying database images through the server.
+
+Durably record `marked` and `promoted` through the internal handler. Once every
+root is promoted and the *CommitMarker*[~][commit-marker] is stored, create and
+confirm its *PromotionSign*[~][promotion-sign], with the task's committing
+*Milestone*[~][milestone] as `upstream`; only then durably remove the task.
+Promotion bookkeeping must not recursively create backups. Keep the internal
+handler available through shutdown's final backup and promotion phases.
+
+Test paired-image checksums, logical/physical replay, bounded marking,
+failed and ambiguous COPYs, failed DELETEs and sign confirmation, interrupted
+publication, prefix eviction, concurrent writers, restart, and foreground
+progress during blocked uploads or COPYs. Run the *development checks*[~][development].
+*KernelSpace*[~][kernelspace] reclamation follows later.

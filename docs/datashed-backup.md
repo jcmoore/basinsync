@@ -10,8 +10,10 @@
 [flow]: <glossary/flow.md>
 [kernelspace]: <glossary/kernelspace.md>
 [lexidecimal]: <glossary/lexidecimal.md>
+[marking-task]: <glossary/marking-task.md>
 [milestone]: <glossary/milestone.md>
 [node]: <glossary/node.md>
+[node-promotion]: <glossary/node-promotion.md>
 [object-keys]: <object-keys.md>
 [prologue-vacuuming]: <glossary/prologue-vacuuming.md>
 [promotion-sign]: <glossary/promotion-sign.md>
@@ -75,6 +77,12 @@ all *Flow*[~][flow] *markers*[~][commit-marker] through its
 *conditional creation*[~][conditional-write]; preserve *context*[~][context] metadata and verify existing bytes and context on retry.
 Competing backup workers adopt the winning *Viewpoint*[~][viewpoint], keeping
 backed-up *Milestones*[~][milestone] increasing.
+
+Queue *marking tasks*[~][marking-task] with `commitkernel`; retain them through
+*promotion*[~][node-promotion] of both database images and S3 confirmation of the
+*PromotionSign*[~][promotion-sign]. Preserve image checksums through COPY.
+A sign's `upstream` is the committing *Milestone*[~][milestone], which follows
+the root's covered prefix `M`.
 
 Plan future *Epilogue compaction*[~][epilogue-compaction] around a contiguous
 available prefix of stored *CommitMarker*[~][commit-marker]/*PromotionSign*[~][promotion-sign]

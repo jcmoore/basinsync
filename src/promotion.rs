@@ -270,7 +270,7 @@ async fn source_context(
         .collect::<Result<_>>()
 }
 
-async fn conditional_copy(
+pub(crate) async fn conditional_copy(
     bucket: &s3::Bucket,
     source: &str,
     destination: &str,

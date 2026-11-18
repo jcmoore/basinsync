@@ -297,6 +297,9 @@ impl Stager {
                 &state.milestone,
                 state.head.as_deref(),
                 |conn| match &operation {
+                    crate::kernel::Operation::Promote(change) => {
+                        crate::kernel::promotion::apply(conn, change)
+                    }
                     crate::kernel::Operation::Reserve(graph) => {
                         ensure!(
                             graph.milestone.parse::<BigUint>()? <= state.milestone,
@@ -849,20 +852,27 @@ impl Datashed {
                     );
                     for command in &kernels {
                         let vp = Viewpoint::parse(&command.viewpoint)?;
-                        let stored = crate::kernel::text(
+                        let mut stored = None;
+                        crate::turso::rows(
                             candidate.connection(),
                             &format!(
-                                "SELECT hex(blob) FROM kernel_commits WHERE viewpoint='{}'",
+                                "SELECT blob FROM kernel_commits WHERE viewpoint='{}'",
                                 vp.lexidecimal()
                             ),
+                            |row| {
+                                let turso_core::Value::Blob(bytes) =
+                                    row.get::<&turso_core::Value>(0)?
+                                else {
+                                    anyhow::bail!("invalid kernel root")
+                                };
+                                stored = Some(crate::kernel::Graph::decode(bytes)?);
+                                Ok(())
+                            },
                         )?;
-                        let expected = command
-                            .graph
-                            .encode()?
-                            .iter()
-                            .map(|b| format!("{b:02X}"))
-                            .collect::<String>();
-                        ensure!(stored == expected, "recovered commitkernel mismatch");
+                        ensure!(
+                            stored.as_ref() == Some(&command.graph),
+                            "recovered commitkernel mismatch"
+                        );
                     }
                     Some(candidate)
                 } else {
@@ -1525,7 +1535,7 @@ mod group_tests {
         let commits =
             crate::kernel::committed(&committed.snapshot().unwrap().kernel_view.unwrap())?;
         assert_eq!(commits.len(), 1);
-        assert_eq!(commits[0].viewpoint, "0");
+        assert_eq!(commits[0].0.viewpoint, "0");
         let prefix = stager.prefix();
         assert!(
             stager

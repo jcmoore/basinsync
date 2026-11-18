@@ -210,8 +210,10 @@ async function datashedBackup(bucket:string){
   if(new TextDecoder().decode(marker.subarray(0,16))!=="SQLite format 3\0"){
     const graph=toObject(marker) as {databases:Record<string,{id:string;revision:string}>};
     const node=graph.databases["default.turso"];
-    const image=await s3.send(new GetObjectCommand({Bucket:bucket,Key:`kernelspace/heap/young/${node.id}/${node.revision}`}));
-    blob=await image.Body!.transformToByteArray();
+    for(const generation of ["old","young"]){
+      try{const image=await s3.send(new GetObjectCommand({Bucket:bucket,Key:`kernelspace/heap/${generation}/${node.id}/${node.revision}`}));blob=await image.Body!.transformToByteArray();break;}
+      catch(error){if(generation==="young"||(error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode!==404)throw error;}
+    }
   }
   return {key,milestone:BigInt(response.Metadata!.milestone),metadata:response.Metadata!,object,marker,blob};
 }
@@ -459,14 +461,14 @@ try {
     await mismatch(await commit(app.url,mixed,a,0n),1n);
     await status(await reserveHeap(app.url,mixed,0n,[node]),409);
     const longest="A".repeat(160);
-    await status(await commit(app.url,longest,a,0n),201);
+    const longestResponse=await commit(app.url,longest,a,0n);await status(longestResponse.clone(),201);
+    const portableTip=parse<CommitResponse>(await longestResponse.text()).timelines.datashed.milestone;
     assert.equal((await fullStatus(app.url,longest.toLowerCase())).latest?.viewpoint,0n);
     for(const invalid of ["", ".", "..", "/", "a/b", "a\\b", "a b", "a\tb", "a\0b", "雪", "%2f", "a?b", "a#b", "a:b", "a".repeat(161)]){
       await status(await commit(app.url,invalid,a,0n),400);
       await status(await reserveHeap(app.url,invalid,0n,[node]),400);
       await status(await fetch(`${app.url}/api/v0/epilogue/status?${new URLSearchParams({flow:invalid})}`),400);
     }
-    const portableTip=(await fullStatus(app.url,longest)).timelines.datashed.milestone;
     await eventually(()=>datashedBackup(name),v=>!!v&&v.milestone>=portableTip);
     const objects=(await s3.send(new ListObjectsV2Command({Bucket:name,Prefix:"flows/"}))).Contents??[];
     assert(objects.some(o=>o.Key!.startsWith(`flows/${canonical}/`)));
@@ -980,17 +982,19 @@ try {
     await stop(writer.process);
     const copying=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     const cp=await eventually(()=>datashedBackup(b),cp=>cp?.milestone===5n);assert(cp);
+    await stop(copying.process); // Settle maintenance before testing the absent-successor fast path.
+    const suffixWriter=await server(b);
     assert.deepEqual(await flowBlob(b,"known",3n),bytes("fourth"));
     const stored=(await checkedStatus("known",true)).latest!;
     assert.equal(stored.viewpoint,3n);assert.deepEqual(stored.headers,{"If-Match":"*",Range:"bytes=8-13"});
     assert(!reads.some(r=>r.method==="GET"&&r.url.pathname.includes("/timeline/")&&fromKey(r.url.pathname.slice(r.url.pathname.indexOf("timeline/")))<=cp.milestone),"load the newer snapshot instead of replaying its covered prefix");
     assert.deepEqual(await latestBlob(stored),bytes("fourth"));
     assert.deepEqual((await checkedStatus("known")).latest?.headers,{"If-Match":"*",Range:"bytes=8-13"});
-    await status(await commit(copying.url,"known",bytes("suffix"),4n),201);
+    await status(await commit(suffixWriter.url,"known",bytes("suffix"),4n),201);
     const suffix=(await checkedStatus("known",true)).latest!;
     assert.equal(suffix.viewpoint,4n);assert.deepEqual(await latestBlob(suffix),bytes("suffix"));
     assert.deepEqual(await checkedStatus("absent"),{latest:null});
-    await stop(copying.process);await stop(observer.process);
+    await stop(suffixWriter.process);await stop(observer.process);
   }
   console.log("put of success: latest-only status probes successors, discovers newer snapshots only when behind, and never lists Flow Epilogues");
   // Probe freshness is Datashed-wide; status cache hits never extend the window.
@@ -1498,9 +1502,10 @@ try {
   {
     const b=await bucket(),flow="sign-0x",attempted=Promise.withResolvers<void>();let target="";
     let stored=false,confirm=false,puts=0;let mismatch=Promise.withResolvers<void>();
-    async function counts(){
-      const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"timeline/"}));let image:Uint8Array|undefined;
+    async function counts(image?:Uint8Array){
+      if(!image){const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"timeline/"}));
       for(const m of (list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1)){const d=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;image=ingestWal(image??d.logical.base!,d.physical.segments);}
+      }
       assert(image);const path=`${artifacts}/signs-${serial++}.turso`;writeFileSync(path,image);
       const p=spawn([`${root}/target/debug/examples/frame-fixture`,"--graph",path],{cwd:root,stdout:"pipe",stderr:"inherit"});
       const rows=await new Response(p.stdout).json();assert.equal(await p.exited,0);return rows;
@@ -1543,10 +1548,9 @@ try {
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:target}))).Metadata!.upstream,"1");
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:await signKey(b,flow,1n)}))).Metadata!.upstream,"2");
     assert(await exists(b,await signKey(b,"foreground-sign",0n)));
-    const tip=(await fullStatus(app.url,flow)).timelines.datashed.milestone;
-    const cp=await eventually(()=>datashedBackup(b),cp=>!!cp&&cp.milestone>=tip);assert(cp);
+    const cp=await eventually(async()=>{const cp=await datashedBackup(b);if(!cp)return null;const rows=await counts(cp.blob);return rows.marking_tasks===0&&rows.sweeping_tasks===0?cp:null;},Boolean);assert(cp);
     const cpViewpoint=~unlex(cp.key.slice("epilogue/".length));const cpSign=`epilogue/${lex(cpViewpoint)}`;
-    assert.equal(await exists(b,cpSign),false,"unpromoted KernelSpace graphs must not receive PromotionSigns");
+    await eventually(()=>exists(b,cpSign),Boolean);
     await eventually(()=>flowBlob(b,flow,1n),v=>!!v);await stop(app.process);
     const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:await flowPrefix(b,flow)}));
     assert.deepEqual(objects.Contents!.map(o=>o.Key),[await flowKey(b,flow,0n),await flowKey(b,flow,1n),await signKey(b,flow,0n),await signKey(b,flow,1n)].sort());

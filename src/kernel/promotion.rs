@@ -1,0 +1,638 @@
+//! Bounded promotion of the shallow Datashed backup graphs.
+use super::*;
+use std::{collections::BTreeSet, sync::Arc};
+
+#[derive(Clone, Debug)]
+pub struct Task {
+    commit: Commit,
+    blob: Vec<u8>,
+    upstream: BigUint,
+}
+#[derive(Clone, Debug)]
+pub struct Proof {
+    node: Node,
+    etag: String,
+}
+#[derive(Clone)]
+pub struct ConfirmedSign {
+    task: Task,
+}
+#[derive(Clone)]
+pub enum Change {
+    Mark {
+        task: Task,
+        nodes: Vec<Proof>,
+        at: String,
+    },
+    Promoted {
+        task: Task,
+        nodes: Vec<Proof>,
+        at: String,
+    },
+    Signed(ConfirmedSign),
+}
+#[derive(Clone, Copy)]
+pub struct Limits {
+    pub tasks: usize,
+    pub nodes: usize,
+    pub concurrency: usize,
+}
+struct Candidate {
+    proof: Proof,
+    marked: bool,
+    promoted: bool,
+}
+struct Work {
+    task: Task,
+    nodes: Vec<Candidate>,
+}
+fn valid_task(conn: &Arc<Connection>, task: &Task) -> Result<()> {
+    let vp = Viewpoint::parse(&task.commit.viewpoint)?;
+    let mut found = false;
+    turso::rows(
+        conn,
+        &format!(
+            "SELECT c.blob FROM kernel_commits c JOIN marking_tasks t ON t.viewpoint=c.viewpoint AND t.upstream=c.upstream WHERE t.flow='datashed' AND t.viewpoint={} AND t.upstream={}",
+            q(&vp.lexidecimal()),
+            q(&crate::promotion::upstream_key(&task.upstream))
+        ),
+        |r| {
+            if let turso_core::Value::Blob(bytes) = r.get::<&turso_core::Value>(0)? {
+                found = *bytes == task.blob;
+            }
+            Ok(())
+        },
+    )?;
+    ensure!(found, "stale KernelSpace marking task");
+    Ok(())
+}
+fn candidate(conn: &Arc<Connection>, task: &Task, node: &Node) -> Result<Candidate> {
+    let owner = retainer("m", &Viewpoint::parse(&task.commit.viewpoint)?);
+    let mut found = None;
+    turso::rows(
+        conn,
+        &format!(
+            "SELECT revision,content_length,sha384,etag,marked,promoted FROM kernelspace_nodes n WHERE id={} AND freed='' AND EXISTS(SELECT 1 FROM kernelspace_edges WHERE node=n.id AND retainer={}) AND NOT EXISTS(SELECT 1 FROM kernelspace_edges WHERE retainer=n.id)",
+            q(&node.id),
+            q(&owner)
+        ),
+        |r| {
+            ensure!(
+                r.get::<String>(0)? == node.revision
+                    && r.get::<i64>(1)? == i64::try_from(node.length)?
+                    && r.get::<String>(2)? == node.sha384,
+                "kernel promotion descriptor changed"
+            );
+            let etag = r.get::<String>(3)?;
+            ensure!(!etag.is_empty(), "kernel node has no verified ETag");
+            found = Some(Candidate {
+                proof: Proof {
+                    node: node.clone(),
+                    etag,
+                },
+                marked: !r.get::<String>(4)?.is_empty(),
+                promoted: !r.get::<String>(5)?.is_empty(),
+            });
+            Ok(())
+        },
+    )?;
+    found.context("missing retained kernel promotion node")
+}
+fn scan(view: &Arc<turso::cow::View>, limits: Limits) -> Result<Vec<Work>> {
+    ensure!(
+        (1..=4096).contains(&limits.tasks)
+            && (1..=4096).contains(&limits.nodes)
+            && (1..=4096).contains(&limits.concurrency),
+        "invalid KernelSpace promotion limits"
+    );
+    let conn = view.connect()?;
+    let mut tasks = vec![];
+    turso::rows(
+        &conn,
+        &format!(
+            "SELECT c.viewpoint,c.upstream,c.blob FROM marking_tasks t JOIN kernel_commits c ON c.viewpoint=t.viewpoint AND c.upstream=t.upstream WHERE t.flow='datashed' ORDER BY t.prioritized,t.flow,t.viewpoint LIMIT {}",
+            limits.tasks
+        ),
+        |r| {
+            let viewpoint = crate::lexidecimal::decode(&r.get::<String>(0)?)?.to_string();
+            let upstream = crate::lexidecimal::decode(&r.get::<String>(1)?)?
+                .to_biguint()
+                .context("negative marking upstream")?;
+            ensure!(upstream > BigUint::from(0u8), "invalid marking upstream");
+            let turso_core::Value::Blob(blob) = r.get::<&turso_core::Value>(2)? else {
+                anyhow::bail!("invalid kernel root")
+            };
+            tasks.push(Task {
+                commit: Commit {
+                    viewpoint,
+                    graph: Graph::decode(blob)?,
+                },
+                blob: blob.clone(),
+                upstream,
+            });
+            Ok(())
+        },
+    )?;
+    tasks
+        .into_iter()
+        .map(|task| {
+            let nodes = task
+                .commit
+                .graph
+                .databases
+                .values()
+                .map(|n| candidate(&conn, &task, n))
+                .collect::<Result<_>>()?;
+            Ok(Work { task, nodes })
+        })
+        .collect()
+}
+pub(crate) fn apply(conn: &Arc<Connection>, change: &Change) -> Result<()> {
+    let task = match change {
+        Change::Mark { task, .. } | Change::Promoted { task, .. } => task,
+        Change::Signed(sign) => &sign.task,
+    };
+    valid_task(conn, task)?;
+    match change {
+        Change::Mark { nodes, at, .. } | Change::Promoted { nodes, at, .. } => {
+            ensure!(
+                !nodes.is_empty() && nodes.len() <= 4096,
+                "invalid kernel promotion batch"
+            );
+            time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339)?;
+            let promoted = matches!(change, Change::Promoted { .. });
+            for proof in nodes {
+                ensure!(
+                    task.commit
+                        .graph
+                        .databases
+                        .values()
+                        .any(|n| n == &proof.node),
+                    "node outside kernel graph"
+                );
+                let current = candidate(conn, task, &proof.node)?;
+                ensure!(
+                    current.proof.etag == proof.etag,
+                    "kernel promotion ETag changed"
+                );
+                if promoted {
+                    ensure!(current.marked, "unmarked kernel promotion");
+                }
+                let column = if promoted { "promoted" } else { "marked" };
+                conn.execute(format!(
+                    "UPDATE kernelspace_nodes SET {column}={} WHERE id={} AND {column}=''",
+                    q(at),
+                    q(&proof.node.id)
+                ))?;
+            }
+        }
+        Change::Signed(_) => {
+            for node in task.commit.graph.databases.values() {
+                ensure!(
+                    candidate(conn, task, node)?.promoted,
+                    "kernel graph not completely promoted"
+                );
+            }
+            conn.execute(format!(
+                "DELETE FROM marking_tasks WHERE flow='datashed' AND viewpoint={} AND upstream={}",
+                q(&Viewpoint::parse(&task.commit.viewpoint)?.lexidecimal()),
+                q(&crate::promotion::upstream_key(&task.upstream))
+            ))?;
+        }
+    }
+    Ok(())
+}
+fn matches(head: &s3::serde_types::HeadObjectResult, proof: &Proof) -> bool {
+    head.content_length == i64::try_from(proof.node.length).ok()
+        && head.metadata.as_ref().and_then(|m| m.get("sha384")) == Some(&proof.node.sha384)
+        && (head.e_tag.as_deref() == Some(&proof.etag)
+            || head
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("basinsync-source-etag"))
+                == Some(&proof.etag))
+}
+async fn old_exists(bucket: &s3::Bucket, proof: &Proof) -> Result<bool> {
+    let (head, status) = crate::object_read::if_present(bucket)?
+        .head_object(proof.node.key(OLD)?)
+        .await?;
+    match status {
+        200 => {
+            ensure!(
+                matches(&head, proof),
+                "old KernelSpace object differs from allocation"
+            );
+            Ok(true)
+        }
+        404 | 412 => Ok(false),
+        _ => anyhow::bail!("kernel destination HEAD returned HTTP {status}"),
+    }
+}
+async fn promote_one(bucket: &s3::Bucket, proof: &Proof) -> Result<()> {
+    if !old_exists(bucket, proof).await? {
+        let mut reader = bucket.clone();
+        reader.add_header("if-match", &proof.etag);
+        let (source, status) = reader.head_object(proof.node.key(YOUNG)?).await?;
+        ensure!(
+            status == 200
+                && source.e_tag.as_deref() == Some(&proof.etag)
+                && matches(&source, proof),
+            "young KernelSpace object changed"
+        );
+        let metadata = BTreeMap::from([("x-amz-meta-sha384".into(), proof.node.sha384.clone())]);
+        if let Err(error) = crate::promotion::conditional_copy(
+            bucket,
+            &proof.node.key(YOUNG)?,
+            &proof.node.key(OLD)?,
+            &proof.etag,
+            &metadata,
+        )
+        .await
+        {
+            tracing::debug!(%error,"kernel COPY completion uncertain");
+        }
+        ensure!(
+            old_exists(bucket, proof).await?,
+            "kernel promotion has no verified destination"
+        );
+    }
+    let response = bucket.delete_object(proof.node.key(YOUNG)?).await?;
+    ensure!(
+        matches!(response.status_code(), 200..=299 | 404),
+        "young KernelSpace DELETE failed"
+    );
+    Ok(())
+}
+async fn confirm(bucket: &s3::Bucket, task: Task) -> Result<ConfirmedSign> {
+    let vp = Viewpoint::parse(&task.commit.viewpoint)?;
+    let cp = task.commit.graph.checkpoint(vp.clone(), &task.blob)?;
+    let (head, status) = crate::object_read::if_present(bucket)?
+        .head_object(vp.key()?)
+        .await?;
+    ensure!(
+        status == 200
+            && head.content_length.is_some_and(|n| n >= 16)
+            && head.e_tag.as_deref() != Some(crate::sequence::reference(bucket)?.as_str()),
+        "kernel marker is not stored"
+    );
+    let headers = head
+        .metadata
+        .context("kernel marker metadata missing")?
+        .into_iter()
+        .map(|(k, v)| (format!("x-amz-meta-{k}"), v))
+        .collect();
+    cp.verify_headers(&headers)?;
+    crate::epilogue::confirm_promotion_sign(
+        bucket,
+        &crate::epilogue::promotion_key(crate::epilogue::DATASHED_PREFIX, &vp)?,
+        &task.upstream,
+    )
+    .await?;
+    Ok(ConfirmedSign { task })
+}
+async fn work(
+    targets: &tokio::sync::watch::Receiver<Option<timeline::Snapshot>>,
+    limits: Limits,
+) -> Result<Vec<Work>> {
+    let view = targets
+        .borrow()
+        .as_ref()
+        .and_then(|s| s.kernel_view.clone())
+        .context("missing kernel promotion snapshot")?;
+    tokio::task::spawn_blocking(move || scan(&view, limits)).await?
+}
+/// All object I/O stays outside preparation; each phase is acknowledged through the Timeline.
+pub(crate) async fn cycle(
+    bucket: &s3::Bucket,
+    targets: &tokio::sync::watch::Receiver<Option<timeline::Snapshot>>,
+    queue: &tokio::sync::mpsc::Sender<Request>,
+    limits: Limits,
+) -> Result<()> {
+    let mut remaining = limits.nodes;
+    let mut seen = BTreeSet::new();
+    for row in work(targets, limits).await? {
+        let nodes = row
+            .nodes
+            .into_iter()
+            .filter(|n| !n.marked && seen.insert(n.proof.node.id.clone()))
+            .take(remaining)
+            .map(|n| n.proof)
+            .collect::<Vec<_>>();
+        remaining -= nodes.len();
+        if !nodes.is_empty() {
+            crate::backup::internal(
+                queue,
+                Operation::Promote(Change::Mark {
+                    task: row.task,
+                    nodes,
+                    at: crate::cleanup::now()?,
+                }),
+            )
+            .await?;
+        }
+        if remaining == 0 {
+            break;
+        }
+    }
+    let view = targets
+        .borrow()
+        .as_ref()
+        .and_then(|s| s.kernel_view.clone())
+        .context("missing kernel promotion snapshot")?;
+    let eligible=tokio::task::spawn_blocking(move || {
+        let conn=view.connect()?;let mut ids=BTreeSet::new();
+        turso::rows(&conn,&format!("SELECT id FROM kernelspace_nodes WHERE promoted='' AND marked>'' AND freed='' ORDER BY promoted,marked,id LIMIT {}",limits.nodes),|r| {ids.insert(r.get::<String>(0)?);Ok(())})?;
+        Ok::<_,anyhow::Error>(ids)
+    }).await??;
+    let mut remaining = limits.nodes;
+    let mut seen = BTreeSet::new();
+    for row in work(targets, limits).await? {
+        let pending = row
+            .nodes
+            .into_iter()
+            .filter(|n| {
+                n.marked
+                    && !n.promoted
+                    && eligible.contains(&n.proof.node.id)
+                    && seen.insert(n.proof.node.id.clone())
+            })
+            .take(remaining)
+            .map(|n| n.proof)
+            .collect::<Vec<_>>();
+        remaining -= pending.len();
+        let mut pending = pending.into_iter();
+        let mut running = tokio::task::JoinSet::new();
+        let mut promoted = vec![];
+        loop {
+            while running.len() < limits.concurrency {
+                let Some(proof) = pending.next() else { break };
+                let bucket = bucket.clone();
+                running.spawn(async move {
+                    match promote_one(&bucket, &proof).await {
+                        Ok(()) => Some(proof),
+                        Err(error) => {
+                            tracing::warn!(%error,"KernelSpace promotion deferred");
+                            None
+                        }
+                    }
+                });
+            }
+            let Some(result) = running.join_next().await else {
+                break;
+            };
+            if let Some(proof) = result.context("kernel promotion task panicked")? {
+                promoted.push(proof);
+            }
+        }
+        // Failed attempts also consume the cycle's node budget.
+        if !promoted.is_empty() {
+            crate::backup::internal(
+                queue,
+                Operation::Promote(Change::Promoted {
+                    task: row.task,
+                    nodes: promoted,
+                    at: crate::cleanup::now()?,
+                }),
+            )
+            .await?;
+        }
+        if remaining == 0 {
+            break;
+        }
+    }
+    for row in work(targets, limits).await? {
+        if row.nodes.iter().all(|n| n.promoted) {
+            match confirm(bucket, row.task).await {
+                Ok(sign) => {
+                    crate::backup::internal(queue, Operation::Promote(Change::Signed(sign)))
+                        .await?;
+                }
+                Err(error) => tracing::warn!(%error,"KernelSpace PromotionSign deferred"),
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event;
+    fn limits() -> Limits {
+        Limits {
+            tasks: 1,
+            nodes: 1,
+            concurrency: 1,
+        }
+    }
+    fn initial() -> Result<(timeline::Stager, Vec<timeline::Prepared>, Task)> {
+        let mut stager = timeline::Datashed::default().into_stager();
+        let first = stager.prepare(vec![event::FlowCommand {
+            markers: BTreeMap::from([(
+                "kernel-test".into(),
+                event::Marker {
+                    viewpoint: "0".into(),
+                    context: Default::default(),
+                    edges: Default::default(),
+                    verified: Default::default(),
+                    blob: vec![],
+                    sha384: event::digest(&[]),
+                },
+            )]),
+        }])?;
+        let snapshot = first.snapshot().unwrap();
+        let graph = Graph::new(
+            &snapshot.prefix,
+            BTreeMap::from([
+                (
+                    turso::ID.into(),
+                    Node::new(
+                        snapshot.view.image()?.len() as u64,
+                        event::digest(&snapshot.view.image()?),
+                    ),
+                ),
+                (
+                    ID.into(),
+                    Node::new(
+                        snapshot.kernel_view.as_ref().unwrap().image()?.len() as u64,
+                        event::digest(&snapshot.kernel_view.as_ref().unwrap().image()?),
+                    ),
+                ),
+            ]),
+        )?;
+        let (reserved, vp) = stager.prepare_kernel(Operation::Reserve(graph.clone()))?;
+        let command = Commit {
+            viewpoint: vp.decimal(),
+            graph,
+        };
+        let etags = command
+            .graph
+            .databases
+            .values()
+            .map(|n| (n.id.clone(), "verified".into()))
+            .collect();
+        let (committed, _) = stager.prepare_kernel(Operation::Commit { command, etags })?;
+        let task = scan(
+            &committed.snapshot().unwrap().kernel_view.unwrap(),
+            limits(),
+        )?
+        .remove(0)
+        .task;
+        Ok((stager, vec![first, reserved, committed], task))
+    }
+    #[test]
+    fn task_identity_preserves_the_stored_root_encoding() -> Result<()> {
+        let (_, _, mut task) = initial()?;
+        let mut blob = vec![0; 8];
+        blob.extend_from_slice(&task.blob);
+        assert_eq!(Graph::decode(&blob)?.encode()?, task.commit.graph.encode()?);
+        let state = turso::State::genesis_schema(SCHEMA)?;
+        let conn = state.connection();
+        let viewpoint = Viewpoint::parse(&task.commit.viewpoint)?.lexidecimal();
+        let upstream = crate::promotion::upstream_key(&task.upstream);
+        let hex = blob.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        conn.execute(format!("INSERT INTO kernel_commits VALUES({},{},X'{hex}'); INSERT INTO marking_tasks(flow,viewpoint,upstream) VALUES('datashed',{},{})",q(&viewpoint),q(&upstream),q(&viewpoint),q(&upstream)))?;
+        task.blob = blob;
+        let cp = task
+            .commit
+            .graph
+            .checkpoint(Viewpoint::parse(&task.commit.viewpoint)?, &task.blob)?;
+        assert_eq!(cp.sha384, event::digest(&task.blob));
+        assert_ne!(cp.sha384, event::digest(&task.commit.graph.encode()?));
+        valid_task(conn, &task)?;
+        Ok(())
+    }
+    #[test]
+    fn bounded_phases_recheck_proofs_and_replay_both_databases() -> Result<()> {
+        let (mut stager, mut events, task) = initial()?;
+        let initial_activity = events.last().unwrap().snapshot().unwrap().activity;
+        let signed = Change::Signed(ConfirmedSign { task: task.clone() });
+        let prefix = stager.prefix();
+        assert!(
+            stager
+                .prepare_kernel(Operation::Promote(signed.clone()))
+                .is_err()
+        );
+        assert_eq!(stager.prefix(), prefix);
+        let row = scan(
+            &events
+                .last()
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .kernel_view
+                .unwrap(),
+            limits(),
+        )?
+        .remove(0);
+        let proofs: Vec<_> = row.nodes.into_iter().map(|n| n.proof).collect();
+        let at = crate::cleanup::now()?;
+        assert!(
+            stager
+                .prepare_kernel(Operation::Promote(Change::Promoted {
+                    task: task.clone(),
+                    nodes: vec![proofs[0].clone()],
+                    at: at.clone()
+                }))
+                .is_err()
+        );
+        let mut stale = proofs[0].clone();
+        stale.etag = "changed".into();
+        assert!(
+            stager
+                .prepare_kernel(Operation::Promote(Change::Mark {
+                    task: task.clone(),
+                    nodes: vec![stale],
+                    at: at.clone()
+                }))
+                .is_err()
+        );
+        for proof in &proofs {
+            events.push(
+                stager
+                    .prepare_kernel(Operation::Promote(Change::Mark {
+                        task: task.clone(),
+                        nodes: vec![proof.clone()],
+                        at: at.clone(),
+                    }))?
+                    .0,
+            );
+        }
+        let marked = scan(
+            &events
+                .last()
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .kernel_view
+                .unwrap(),
+            limits(),
+        )?
+        .remove(0);
+        assert!(marked.nodes.iter().all(|n| n.marked && !n.promoted));
+        for (i, proof) in proofs.into_iter().enumerate() {
+            events.push(
+                stager
+                    .prepare_kernel(Operation::Promote(Change::Promoted {
+                        task: task.clone(),
+                        nodes: vec![proof],
+                        at: at.clone(),
+                    }))?
+                    .0,
+            );
+            if i == 0 {
+                assert!(
+                    stager
+                        .prepare_kernel(Operation::Promote(signed.clone()))
+                        .is_err()
+                );
+            }
+        }
+        events.push(stager.prepare_kernel(Operation::Promote(signed.clone()))?.0);
+        let last = events.last().unwrap().snapshot().unwrap();
+        assert!(scan(&last.kernel_view.clone().unwrap(), limits())?.is_empty());
+        assert_eq!(
+            last.activity, initial_activity,
+            "promotion bookkeeping must not recursively trigger backups"
+        );
+        let prefix = stager.prefix();
+        assert!(stager.prepare_kernel(Operation::Promote(signed)).is_err());
+        assert_eq!(stager.prefix(), prefix);
+        let mut replay = timeline::Datashed::default();
+        for (i, event) in events.iter().enumerate() {
+            let event::Entry::Wal {
+                delta,
+                kernel: Some(kernel),
+                ..
+            } = event::decode_entry(event.bytes())?
+            else {
+                panic!()
+            };
+            for (id, delta) in [(turso::ID, delta), (ID, kernel)] {
+                let before = match &delta.logical.base {
+                    Some(base) => base.0.clone(),
+                    None => {
+                        if id == ID {
+                            replay.kernel_database.as_ref().unwrap().image.clone()
+                        } else {
+                            replay.database.as_ref().unwrap().image.clone()
+                        }
+                    }
+                };
+                let logical = turso::State::ingest_logical(&before, &delta.logical)?;
+                let physical =
+                    delta
+                        .physical
+                        .ingest(&before, &replay.milestone, replay.head.as_deref())?;
+                assert_eq!(logical.image, physical, "{id}: promotion frames disagree");
+            }
+            replay.apply_entry((i as u64 + 1).into(), event.bytes())?;
+        }
+        assert_eq!(replay.prefix(), stager.prefix());
+        assert_eq!(
+            replay.kernel_database.as_ref().unwrap().image,
+            last.kernel_view.unwrap().image()?
+        );
+        Ok(())
+    }
+}
