@@ -7,11 +7,12 @@ use std::collections::BTreeMap;
 use turso_core::Connection;
 
 pub mod promotion;
+pub(crate) mod roots;
 
 pub const ID: &str = "kernel.turso";
 pub const YOUNG: &str = "kernelspace/datashed/heap/young/";
 pub const OLD: &str = "kernelspace/datashed/heap/old/";
-pub const SCHEMA: &str = "CREATE TABLE datashed (id INTEGER PRIMARY KEY CHECK(id=1), milestone TEXT NOT NULL); INSERT INTO datashed VALUES(1,'0'); CREATE TABLE kernel_state (id INTEGER PRIMARY KEY CHECK(id=1), next_viewpoint TEXT NOT NULL, activity TEXT NOT NULL); INSERT INTO kernel_state VALUES(1,'0','0'); CREATE TABLE kernelspace_nodes (id TEXT PRIMARY KEY NOT NULL, content_length INTEGER NOT NULL CHECK(content_length>=0), reserved DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, etag TEXT NOT NULL DEFAULT '', promoted DATETIME NOT NULL DEFAULT '', revision TEXT NOT NULL, freed DATETIME NOT NULL DEFAULT '', marked DATETIME NOT NULL DEFAULT '', context TEXT NOT NULL DEFAULT '{}', sha384 TEXT NOT NULL); CREATE INDEX kernelspace_nodes_freed ON kernelspace_nodes(freed,id); CREATE INDEX kernelspace_nodes_promotion ON kernelspace_nodes(promoted,marked); CREATE TABLE kernelspace_edges (node TEXT NOT NULL, retainer TEXT NOT NULL, PRIMARY KEY(node,retainer), CHECK(retainer<node)); CREATE INDEX kernelspace_edges_retainer ON kernelspace_edges(retainer,node); CREATE TABLE marking_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, upstream TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX marking_tasks_prioritized ON marking_tasks(prioritized,flow,viewpoint); CREATE TABLE kernel_commits (viewpoint TEXT PRIMARY KEY NOT NULL, upstream TEXT NOT NULL, blob BLOB NOT NULL);";
+pub const SCHEMA: &str = "CREATE TABLE datashed (id INTEGER PRIMARY KEY CHECK(id=1), milestone TEXT NOT NULL); INSERT INTO datashed VALUES(1,'0'); CREATE TABLE kernel_state (id INTEGER PRIMARY KEY CHECK(id=1), next_viewpoint TEXT NOT NULL, activity TEXT NOT NULL); INSERT INTO kernel_state VALUES(1,'0','0'); CREATE TABLE kernelspace_nodes (id TEXT PRIMARY KEY NOT NULL, content_length INTEGER NOT NULL CHECK(content_length>=0), reserved DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, etag TEXT NOT NULL DEFAULT '', promoted DATETIME NOT NULL DEFAULT '', revision TEXT NOT NULL, freed DATETIME NOT NULL DEFAULT '', marked DATETIME NOT NULL DEFAULT '', context TEXT NOT NULL DEFAULT '{}', sha384 TEXT NOT NULL); CREATE INDEX kernelspace_nodes_freed ON kernelspace_nodes(freed,id); CREATE INDEX kernelspace_nodes_promotion ON kernelspace_nodes(promoted,marked); CREATE TABLE kernelspace_edges (node TEXT NOT NULL, retainer TEXT NOT NULL, PRIMARY KEY(node,retainer), CHECK(retainer<node)); CREATE INDEX kernelspace_edges_retainer ON kernelspace_edges(retainer,node); CREATE TABLE marking_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, upstream TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX marking_tasks_prioritized ON marking_tasks(prioritized,flow,viewpoint); CREATE TABLE kernel_commits (viewpoint TEXT PRIMARY KEY NOT NULL, upstream TEXT NOT NULL, covered TEXT NOT NULL, sha384 TEXT NOT NULL);";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -209,12 +210,13 @@ fn advancing(conn: &std::sync::Arc<Connection>, graph: &Graph) -> Result<()> {
     let mut previous = None;
     turso::rows(
         conn,
-        "SELECT blob FROM kernel_commits ORDER BY viewpoint DESC LIMIT 1",
+        "SELECT covered FROM kernel_commits ORDER BY viewpoint DESC LIMIT 1",
         |row| {
-            let turso_core::Value::Blob(bytes) = row.get::<&turso_core::Value>(0)? else {
-                anyhow::bail!("invalid kernel root")
-            };
-            previous = Some(Graph::decode(bytes)?.milestone.parse::<BigUint>()?);
+            previous = Some(
+                crate::lexidecimal::decode(&row.get::<String>(0)?)?
+                    .to_biguint()
+                    .context("negative backup prefix")?,
+            );
             Ok(())
         },
     )?;
@@ -313,12 +315,13 @@ pub(crate) fn commit(
         "DELETE FROM kernelspace_edges WHERE retainer={}",
         q(&retainer("a", &viewpoint))
     ))?;
-    let bytes = command.graph.encode()?;
-    let hex = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let index = roots::Index::from_command(command, upstream)?;
     conn.execute(format!(
-        "INSERT INTO kernel_commits VALUES({}, {}, X'{hex}')",
+        "INSERT INTO kernel_commits(viewpoint,upstream,covered,sha384) VALUES({},{},{},{})",
         q(&viewpoint.lexidecimal()),
-        q(&crate::lexidecimal::encode(&upstream.clone().into()))
+        q(&crate::promotion::upstream_key(upstream)),
+        q(&crate::promotion::upstream_key(&index.covered)),
+        q(&index.sha384)
     ))?;
     conn.execute(format!(
         "INSERT INTO marking_tasks(flow,viewpoint,upstream) VALUES('datashed',{},{})",
@@ -331,24 +334,14 @@ pub(crate) fn commit(
     ))?;
     Ok(())
 }
-pub(crate) fn committed(view: &std::sync::Arc<turso::cow::View>) -> Result<Vec<(Commit, Vec<u8>)>> {
+pub(crate) fn committed(view: &std::sync::Arc<turso::cow::View>) -> Result<Vec<roots::Index>> {
     let conn = view.connect()?;
     let mut result = vec![];
     turso::rows(
         &conn,
-        "SELECT viewpoint,blob FROM kernel_commits ORDER BY viewpoint",
+        "SELECT viewpoint,upstream,covered,sha384 FROM kernel_commits ORDER BY viewpoint",
         |row| {
-            let viewpoint = crate::lexidecimal::decode(&row.get::<String>(0)?)?.to_string();
-            let turso_core::Value::Blob(bytes) = row.get::<&turso_core::Value>(1)? else {
-                anyhow::bail!("invalid kernel CommitMarker blob")
-            };
-            result.push((
-                Commit {
-                    viewpoint,
-                    graph: Graph::decode(bytes)?,
-                },
-                bytes.clone(),
-            ));
+            result.push(roots::Index::from_row(row)?);
             Ok(())
         },
     )?;

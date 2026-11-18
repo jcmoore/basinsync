@@ -64,18 +64,20 @@ INSERT INTO kernel_state VALUES (1, '0', '0');
 CREATE TABLE kernel_commits (
   viewpoint TEXT PRIMARY KEY NOT NULL,
   upstream TEXT NOT NULL,
-  blob BLOB NOT NULL
+  covered TEXT NOT NULL,
+  sha384 TEXT NOT NULL
 );
 ```
 
-`next_viewpoint` and `activity` are decimal; `viewpoint` and `upstream` use
+`next_viewpoint` and `activity` are decimal; `viewpoint`, `upstream`, and `covered` use
 positive *Lexidecimal*[~][lexidecimal]. `kernel_state` tracks the next *Datashed*[~][datashed] *Viewpoint*[~][viewpoint]
 and the last non-backup mutation's *Milestone*[~][milestone] (`activity`), so
 backup bookkeeping cannot continually trigger new backups. `kernel_commits`
-retains the small *CommitMarker*[~][commit-marker] root messages and their
-committing *Milestones*[~][milestone] for interrupted publication, promotion,
-and covered-prefix checks without rereading the *Timeline*[~][timeline].
-Database images remain in *Heap nodes*[~][node].
+indexes each *Viewpoint*[~][viewpoint] by its committing *Milestone*[~][milestone],
+covered prefix, and hexadecimal root digest. Keep root messages only in a bounded
+memory cache; recover misses from `commitkernel` on the *Timeline*[~][timeline]
+or the published *Epilogue marker*[~][commit-marker].
+Database images remain in *Heap*[~][heap] *nodes*[~][node].
 
 The backup worker pins both images at durable *Milestone*[~][milestone] `M`,
 replicates covered *Flow*[~][flow] *markers*[~][commit-marker] as before, and exports the images outside the
@@ -89,11 +91,11 @@ Await reservation durability before uploading both images to the
 and single *conditional PUTs*[~][conditional-write]. HEAD the uploaded revisions,
 then request `commitkernel`: recheck their descriptors and staging edges,
 require the covered prefix to advance, cache *ETags*[~][etag], replace staging edges with `_m_` *retainers*[~][retainer], advance
-the *Viewpoint*[~][viewpoint], and retain the root message in one transaction.
+the *Viewpoint*[~][viewpoint], and index the root in one transaction.
 Journal both database changes and the command through the *Datashed Timeline*[~][datashed-timeline].
 
 Publish the acknowledged root in the *Epilogue*[~][epilogue]; repair interrupted
-publication from `kernel_commits` on restart. The *backup root*[~][datashed-backup]
+publication using `kernel_commits` to locate the durable command on restart. The *backup root*[~][datashed-backup]
 identifies both images and prefix `M`. Restore that pair and replay from `M + 1`,
 including its own reservations and `commitkernel`. Backup bookkeeping must not
 trigger another backup while otherwise idle.

@@ -62,7 +62,7 @@ CREATE INDEX userspace_nodes_promotion ON userspace_nodes(promoted, marked);
 Record the committing *upstream*[~][upstream] *Milestone*[~][milestone] in `upstream`,
 encoded with *Lexidecimal*[~][lexidecimal].
 
-Where staging sweeps advance breadth-first, traverse from each
+Whereas staging sweeps advance breadth-first, traverse from each
 *marker's*[~][commit-marker] roots depth-first. A *node*[~][node] receives its `marked` timestamp only after
 all children are marked. Use bounded transaction batches; retain the
 *marking task*[~][marking-task] through promotion and sign confirmation.

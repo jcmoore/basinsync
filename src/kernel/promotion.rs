@@ -7,6 +7,7 @@ pub struct Task {
     commit: Commit,
     blob: Vec<u8>,
     upstream: BigUint,
+    index: roots::Index,
 }
 #[derive(Clone, Debug)]
 pub struct Proof {
@@ -47,25 +48,30 @@ struct Work {
     nodes: Vec<Candidate>,
 }
 fn valid_task(conn: &Arc<Connection>, task: &Task) -> Result<()> {
-    let vp = Viewpoint::parse(&task.commit.viewpoint)?;
-    let mut found = false;
+    let mut pending = false;
     turso::rows(
         conn,
         &format!(
-            "SELECT c.blob FROM kernel_commits c JOIN marking_tasks t ON t.viewpoint=c.viewpoint AND t.upstream=c.upstream WHERE t.flow='datashed' AND t.viewpoint={} AND t.upstream={}",
-            q(&vp.lexidecimal()),
+            "SELECT 1 FROM marking_tasks WHERE flow='datashed' AND viewpoint={} AND upstream={}",
+            q(&task.index.viewpoint.lexidecimal()),
             q(&crate::promotion::upstream_key(&task.upstream))
         ),
-        |r| {
-            if let turso_core::Value::Blob(bytes) = r.get::<&turso_core::Value>(0)? {
-                found = *bytes == task.blob;
-            }
+        |_| {
+            pending = true;
             Ok(())
         },
     )?;
-    ensure!(found, "stale KernelSpace marking task");
+    ensure!(
+        pending && roots::Index::get(conn, &task.index.viewpoint)? == Some(task.index.clone()),
+        "stale KernelSpace marking task"
+    );
+    ensure!(
+        task.index.graph(&task.blob)? == task.commit.graph,
+        "kernel promotion graph changed"
+    );
     Ok(())
 }
+
 fn candidate(conn: &Arc<Connection>, task: &Task, node: &Node) -> Result<Candidate> {
     let owner = retainer("m", &Viewpoint::parse(&task.commit.viewpoint)?);
     let mut found = None;
@@ -98,7 +104,7 @@ fn candidate(conn: &Arc<Connection>, task: &Task, node: &Node) -> Result<Candida
     )?;
     found.context("missing retained kernel promotion node")
 }
-fn scan(view: &Arc<turso::cow::View>, limits: Limits) -> Result<Vec<Work>> {
+fn pending(view: &Arc<turso::cow::View>, limits: Limits) -> Result<Vec<roots::Index>> {
     ensure!(
         (1..=4096).contains(&limits.tasks)
             && (1..=4096).contains(&limits.nodes)
@@ -110,42 +116,27 @@ fn scan(view: &Arc<turso::cow::View>, limits: Limits) -> Result<Vec<Work>> {
     turso::rows(
         &conn,
         &format!(
-            "SELECT c.viewpoint,c.upstream,c.blob FROM marking_tasks t JOIN kernel_commits c ON c.viewpoint=t.viewpoint AND c.upstream=t.upstream WHERE t.flow='datashed' ORDER BY t.prioritized,t.flow,t.viewpoint LIMIT {}",
+            "SELECT c.viewpoint,c.upstream,c.covered,c.sha384 FROM marking_tasks t JOIN kernel_commits c ON c.viewpoint=t.viewpoint AND c.upstream=t.upstream WHERE t.flow='datashed' ORDER BY t.prioritized,t.flow,t.viewpoint LIMIT {}",
             limits.tasks
         ),
         |r| {
-            let viewpoint = crate::lexidecimal::decode(&r.get::<String>(0)?)?.to_string();
-            let upstream = crate::lexidecimal::decode(&r.get::<String>(1)?)?
-                .to_biguint()
-                .context("negative marking upstream")?;
-            ensure!(upstream > BigUint::from(0u8), "invalid marking upstream");
-            let turso_core::Value::Blob(blob) = r.get::<&turso_core::Value>(2)? else {
-                anyhow::bail!("invalid kernel root")
-            };
-            tasks.push(Task {
-                commit: Commit {
-                    viewpoint,
-                    graph: Graph::decode(blob)?,
-                },
-                blob: blob.clone(),
-                upstream,
-            });
+            tasks.push(roots::Index::from_row(r)?);
             Ok(())
         },
     )?;
-    tasks
-        .into_iter()
-        .map(|task| {
-            let nodes = task
-                .commit
-                .graph
-                .databases
-                .values()
-                .map(|n| candidate(&conn, &task, n))
-                .collect::<Result<_>>()?;
-            Ok(Work { task, nodes })
-        })
-        .collect()
+    Ok(tasks)
+}
+fn inspect(view: &Arc<turso::cow::View>, task: Task) -> Result<Work> {
+    let conn = view.connect()?;
+    valid_task(&conn, &task)?;
+    let nodes = task
+        .commit
+        .graph
+        .databases
+        .values()
+        .map(|n| candidate(&conn, &task, n))
+        .collect::<Result<_>>()?;
+    Ok(Work { task, nodes })
 }
 pub(crate) fn apply(conn: &Arc<Connection>, change: &Change) -> Result<()> {
     let task = match change {
@@ -291,15 +282,32 @@ async fn confirm(bucket: &s3::Bucket, task: Task) -> Result<ConfirmedSign> {
     Ok(ConfirmedSign { task })
 }
 async fn work(
+    bucket: &s3::Bucket,
     targets: &tokio::sync::watch::Receiver<Option<timeline::Snapshot>>,
     limits: Limits,
+    cache: &mut roots::Cache,
 ) -> Result<Vec<Work>> {
     let view = targets
         .borrow()
         .as_ref()
         .and_then(|s| s.kernel_view.clone())
         .context("missing kernel promotion snapshot")?;
-    tokio::task::spawn_blocking(move || scan(&view, limits)).await?
+    let pinned = view.clone();
+    let indices = tokio::task::spawn_blocking(move || pending(&pinned, limits)).await??;
+    let mut tasks = vec![];
+    for index in indices {
+        let (commit, blob) = cache.load(bucket, &index).await?;
+        tasks.push(Task {
+            commit,
+            blob,
+            upstream: index.upstream.clone(),
+            index,
+        });
+    }
+    tokio::task::spawn_blocking(move || {
+        tasks.into_iter().map(|task| inspect(&view, task)).collect()
+    })
+    .await?
 }
 /// All object I/O stays outside preparation; each phase is acknowledged through the Timeline.
 pub(crate) async fn cycle(
@@ -307,10 +315,11 @@ pub(crate) async fn cycle(
     targets: &tokio::sync::watch::Receiver<Option<timeline::Snapshot>>,
     queue: &tokio::sync::mpsc::Sender<Request>,
     limits: Limits,
+    cache: &mut roots::Cache,
 ) -> Result<()> {
     let mut remaining = limits.nodes;
     let mut seen = BTreeSet::new();
-    for row in work(targets, limits).await? {
+    for row in work(bucket, targets, limits, cache).await? {
         let nodes = row
             .nodes
             .into_iter()
@@ -346,7 +355,7 @@ pub(crate) async fn cycle(
     }).await??;
     let mut remaining = limits.nodes;
     let mut seen = BTreeSet::new();
-    for row in work(targets, limits).await? {
+    for row in work(bucket, targets, limits, cache).await? {
         let pending = row
             .nodes
             .into_iter()
@@ -400,7 +409,7 @@ pub(crate) async fn cycle(
             break;
         }
     }
-    for row in work(targets, limits).await? {
+    for row in work(bucket, targets, limits, cache).await? {
         if row.nodes.iter().all(|n| n.promoted) {
             match confirm(bucket, row.task).await {
                 Ok(sign) => {
@@ -424,6 +433,15 @@ mod tests {
             nodes: 1,
             concurrency: 1,
         }
+    }
+    fn scan(view: &Arc<turso::cow::View>, limits: Limits, task: &Task) -> Result<Vec<Work>> {
+        pending(view, limits)?
+            .into_iter()
+            .map(|index| {
+                ensure!(index == task.index, "unexpected root index");
+                inspect(view, task.clone())
+            })
+            .collect()
     }
     fn initial() -> Result<(timeline::Stager, Vec<timeline::Prepared>, Task)> {
         let mut stager = timeline::Datashed::default().into_stager();
@@ -471,35 +489,45 @@ mod tests {
             .values()
             .map(|n| (n.id.clone(), "verified".into()))
             .collect();
+        let index = roots::Index::from_command(&command, &(stager.prefix().milestone() + 1u8))?;
+        let task = Task {
+            blob: command.graph.encode()?,
+            commit: command.clone(),
+            upstream: index.upstream.clone(),
+            index,
+        };
         let (committed, _) = stager.prepare_kernel(Operation::Commit { command, etags })?;
-        let task = scan(
-            &committed.snapshot().unwrap().kernel_view.unwrap(),
-            limits(),
-        )?
-        .remove(0)
-        .task;
+        valid_task(
+            &committed
+                .snapshot()
+                .unwrap()
+                .kernel_view
+                .unwrap()
+                .connect()?,
+            &task,
+        )?;
         Ok((stager, vec![first, reserved, committed], task))
     }
     #[test]
-    fn task_identity_preserves_the_stored_root_encoding() -> Result<()> {
-        let (_, _, mut task) = initial()?;
-        let mut blob = vec![0; 8];
-        blob.extend_from_slice(&task.blob);
-        assert_eq!(Graph::decode(&blob)?.encode()?, task.commit.graph.encode()?);
-        let state = turso::State::genesis_schema(SCHEMA)?;
+    fn task_identity_is_bound_to_index_and_source_checksum() -> Result<()> {
+        let (_, events, mut task) = initial()?;
+        let state = turso::State::from_image(
+            events
+                .last()
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .kernel_view
+                .unwrap()
+                .image()?,
+        )?;
         let conn = state.connection();
-        let viewpoint = Viewpoint::parse(&task.commit.viewpoint)?.lexidecimal();
-        let upstream = crate::promotion::upstream_key(&task.upstream);
-        let hex = blob.iter().map(|b| format!("{b:02x}")).collect::<String>();
-        conn.execute(format!("INSERT INTO kernel_commits VALUES({},{},X'{hex}'); INSERT INTO marking_tasks(flow,viewpoint,upstream) VALUES('datashed',{},{})",q(&viewpoint),q(&upstream),q(&viewpoint),q(&upstream)))?;
-        task.blob = blob;
-        let cp = task
-            .commit
-            .graph
-            .checkpoint(Viewpoint::parse(&task.commit.viewpoint)?, &task.blob)?;
-        assert_eq!(cp.sha384, event::digest(&task.blob));
-        assert_ne!(cp.sha384, event::digest(&task.commit.graph.encode()?));
         valid_task(conn, &task)?;
+        task.blob.insert(0, 0);
+        assert!(valid_task(conn, &task).is_err());
+        task.blob.remove(0);
+        conn.execute("UPDATE kernel_commits SET covered='0z002'")?;
+        assert!(valid_task(conn, &task).is_err());
         Ok(())
     }
     #[test]
@@ -523,6 +551,7 @@ mod tests {
                 .kernel_view
                 .unwrap(),
             limits(),
+            &task,
         )?
         .remove(0);
         let proofs: Vec<_> = row.nodes.into_iter().map(|n| n.proof).collect();
@@ -567,6 +596,7 @@ mod tests {
                 .kernel_view
                 .unwrap(),
             limits(),
+            &task,
         )?
         .remove(0);
         assert!(marked.nodes.iter().all(|n| n.marked && !n.promoted));
@@ -590,7 +620,7 @@ mod tests {
         }
         events.push(stager.prepare_kernel(Operation::Promote(signed.clone()))?.0);
         let last = events.last().unwrap().snapshot().unwrap();
-        assert!(scan(&last.kernel_view.clone().unwrap(), limits())?.is_empty());
+        assert!(scan(&last.kernel_view.clone().unwrap(), limits(), &task)?.is_empty());
         assert_eq!(
             last.activity, initial_activity,
             "promotion bookkeeping must not recursively trigger backups"

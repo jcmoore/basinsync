@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import {GetObjectCommand,HeadObjectCommand,ListObjectsV2Command} from "@aws-sdk/client-s3";
+import {GetObjectCommand,HeadObjectCommand,ListObjectsV2Command,DeleteObjectCommand,PutObjectCommand} from "@aws-sdk/client-s3";
 import {fixture,eventually} from "./analogue-fixture";
 import {commit,epilogueStatus,sha384} from "./client";
 import {toObject} from "./flexbuffer";
 import {message} from "./envbuf";
 import {encode as lex} from "./lexidecimal";
-import {fromKey} from "./timeline";
+import {fromKey,key as timelineKey} from "./timeline";
 import {eventTuples} from "./events";
 const f=await fixture("kernel-promotion");
 type Node={id:string;revision:string;length:number;sha384:string};
@@ -93,6 +93,42 @@ try{
     const before=copies;confirm=true;const restarted=await f.server(bucket,{BASINSYNC_BACKUP_INTERVAL_MS:"30"},proxy);await eventually(async()=>signReads,n=>n>1);await Bun.sleep(150);await f.stop(restarted.process);assert.equal(copies,before);
     const remaining=signReads;const settled=await f.server(bucket,{BASINSYNC_BACKUP_INTERVAL_MS:"30"},proxy);await Bun.sleep(120);await f.stop(settled.process);assert.equal(signReads,remaining,"confirmed task removal survives replay");
     const roots=await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/epilogue/"}));assert.equal(roots.Contents!.filter(o=>o.Key!.startsWith("kernelspace/datashed/epilogue/0y")).length,1,"promotion must not recursively schedule backups");
+  }
+  // Hot roots stay in memory; restart can recover an old pending root after its source event is evicted.
+  {
+    const bucket=await f.bucket(),reads:string[]=[];let failCopies=true;
+    const proxy=f.relay(async(request,next)=>{
+      const path=new URL(request.url).pathname;
+      if(request.method==="GET")reads.push(path);
+      if(failCopies&&request.method==="PUT"&&path.includes("/kernelspace/datashed/heap/old/"))return new Response("COPY paused",{status:501});
+      return next();
+    });
+    const app=await f.server(bucket,{BASINSYNC_BACKUP_INTERVAL_MS:"40"},proxy);
+    assert.equal((await commit(app.url,"cached-root",new Uint8Array([7]),0n)).status,201);
+    const firstGraph=await uploaded(bucket),source=await sourceMilestone(bucket);
+    await Bun.sleep(100);
+    assert(!reads.includes(`/${bucket}/${marker}`),"fresh root publication and promotion use the memory cache");
+    assert(!reads.includes(`/${bucket}/${timelineKey(source)}`),"fresh roots need no source Timeline GET");
+    assert.equal((await commit(app.url,"cached-root",new Uint8Array([8]),1n)).status,201);
+    const secondMarker=`kernelspace/datashed/epilogue/${lex(~1n)}`,secondSign=`kernelspace/datashed/epilogue/${lex(1n)}`;
+    const second=await eventually(()=>f.s3.send(new GetObjectCommand({Bucket:bucket,Key:secondMarker})),Boolean);
+    const secondGraph=toObject(message(await second.Body!.transformToByteArray())) as Graph;
+    await f.stop(app.process);assert(BigInt(secondGraph.milestone)>=source);
+    for(const object of (await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/timeline/"}))).Contents!)
+      if(fromKey(object.Key!)<=BigInt(secondGraph.milestone))await f.s3.send(new DeleteObjectCommand({Bucket:bucket,Key:object.Key!}));
+    assert.equal(await exists(bucket,timelineKey(source)),null);
+    const stored=await f.s3.send(new GetObjectCommand({Bucket:bucket,Key:marker})),body=await stored.Body!.transformToByteArray(),metadata=stored.Metadata!;
+    const damaged=body.slice();damaged[8]^=1;
+    await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:marker,Body:damaged,Metadata:metadata}));
+    reads.length=0;failCopies=false;
+    const restarted=await f.server(bucket,{BASINSYNC_BACKUP_INTERVAL_MS:"40"},proxy);
+    await eventually(async()=>reads.includes(`/${bucket}/${marker}`),Boolean);await Bun.sleep(80);
+    assert.equal(await exists(bucket,sign),null,"corrupt source bytes must not produce a PromotionSign");
+    assert(!reads.includes(`/${bucket}/${timelineKey(source)}`),"a corrupt stored root must fail closed");
+    await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:marker,Body:body,Metadata:metadata}));
+    await eventually(()=>exists(bucket,sign),Boolean);await eventually(()=>exists(bucket,secondSign),Boolean);
+    await checkGraph(bucket,firstGraph);await checkGraph(bucket,secondGraph);await f.stop(restarted.process);
+    const settled=await f.server(bucket);assert.equal((await epilogueStatus(settled.url,"cached-root")).latest!.viewpoint,1n);await f.stop(settled.process);
   }
   // Shutdown waits for the active COPY and its durable completion while the handler stays open.
   {

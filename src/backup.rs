@@ -92,18 +92,23 @@ pub(crate) async fn internal(
     complete.await.context("backup handler stopped")?
 }
 
-async fn publish_roots(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
+async fn publish_roots(
+    bucket: &Bucket,
+    snapshot: &Snapshot,
+    cache: &mut crate::kernel::roots::Cache,
+) -> Result<()> {
     let Some(view) = &snapshot.kernel_view else {
         return Ok(());
     };
     let view = view.clone();
     let commits = tokio::task::spawn_blocking(move || crate::kernel::committed(&view)).await??;
     let latest = epilogue::latest_checkpoint(bucket).await?;
-    for (command, blob) in commits {
-        let viewpoint = Viewpoint::parse(&command.viewpoint)?;
+    for index in commits {
+        let viewpoint = index.viewpoint.clone();
         if latest.as_ref().is_some_and(|cp| cp.viewpoint >= viewpoint) {
             continue;
         }
+        let (command, blob) = cache.load(bucket, &index).await?;
         let cp = command.graph.checkpoint(viewpoint, &blob)?;
         let bytes = crate::envbuf::wrap(&blob)?;
         let key = cp.viewpoint.key()?;
@@ -131,9 +136,10 @@ async fn backup_graph(
     bucket: &Bucket,
     snapshot: &Snapshot,
     queue: &tokio::sync::mpsc::Sender<crate::kernel::Request>,
+    cache: &mut crate::kernel::roots::Cache,
 ) -> Result<()> {
     // Complete roots whose Timeline command survived a crash before Epilogue publication.
-    publish_roots(bucket, snapshot).await?;
+    publish_roots(bucket, snapshot, cache).await?;
     let previous = epilogue::latest_checkpoint(bucket).await?;
     if previous
         .as_ref()
@@ -178,6 +184,7 @@ async fn backup_graph(
         crate::kernel::upload(bucket, node, file.path(), headers).await?;
     }
     let etags = crate::kernel::verify(bucket, &graph).await?;
+    let blob = graph.encode()?;
     internal(
         queue,
         crate::kernel::Operation::Commit {
@@ -189,6 +196,7 @@ async fn backup_graph(
         },
     )
     .await?;
+    cache.remember(blob);
     // The watch target now includes the acknowledged commitkernel event.
     Ok(())
 }
@@ -204,6 +212,7 @@ pub async fn run(
     promotion: crate::kernel::promotion::Limits,
 ) {
     let mut completed: BigUint = 0u8.into();
+    let mut cache = crate::kernel::roots::Cache::default();
     loop {
         let sleep = tokio::time::sleep(interval);
         tokio::pin!(sleep);
@@ -225,12 +234,12 @@ pub async fn run(
         let target = targets.borrow_and_update().clone();
         let mut failed = false;
         if let Some(snapshot) = target.filter(|s| s.activity > completed) {
-            match backup_graph(&bucket, &snapshot, &queue).await {
+            match backup_graph(&bucket, &snapshot, &queue, &mut cache).await {
                 Ok(()) => {
                     completed = snapshot.activity.clone();
                     let target = targets.borrow().clone();
                     if let Some(target) = target
-                        && let Err(error) = publish_roots(&bucket, &target).await
+                        && let Err(error) = publish_roots(&bucket, &target, &mut cache).await
                     {
                         completed = 0u8.into();
                         tracing::warn!(%error,"Datashed graph publication will retry");
@@ -244,7 +253,8 @@ pub async fn run(
         }
         if targets.borrow().is_some()
             && let Err(error) =
-                crate::kernel::promotion::cycle(&bucket, &targets, &queue, promotion).await
+                crate::kernel::promotion::cycle(&bucket, &targets, &queue, promotion, &mut cache)
+                    .await
         {
             tracing::warn!(%error,"KernelSpace marking will retry");
         }

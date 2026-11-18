@@ -852,25 +852,12 @@ impl Datashed {
                     );
                     for command in &kernels {
                         let vp = Viewpoint::parse(&command.viewpoint)?;
-                        let mut stored = None;
-                        crate::turso::rows(
-                            candidate.connection(),
-                            &format!(
-                                "SELECT blob FROM kernel_commits WHERE viewpoint='{}'",
-                                vp.lexidecimal()
-                            ),
-                            |row| {
-                                let turso_core::Value::Blob(bytes) =
-                                    row.get::<&turso_core::Value>(0)?
-                                else {
-                                    anyhow::bail!("invalid kernel root")
-                                };
-                                stored = Some(crate::kernel::Graph::decode(bytes)?);
-                                Ok(())
-                            },
-                        )?;
+                        let index = crate::kernel::roots::Index::get(candidate.connection(), &vp)?;
                         ensure!(
-                            stored.as_ref() == Some(&command.graph),
+                            index
+                                == Some(crate::kernel::roots::Index::from_command(
+                                    command, &milestone
+                                )?),
                             "recovered commitkernel mismatch"
                         );
                     }
@@ -1538,7 +1525,7 @@ mod group_tests {
         let commits =
             crate::kernel::committed(&committed.snapshot().unwrap().kernel_view.unwrap())?;
         assert_eq!(commits.len(), 1);
-        assert_eq!(commits[0].0.viewpoint, "0");
+        assert_eq!(commits[0].viewpoint.decimal(), "0");
         let prefix = stager.prefix();
         assert!(
             stager
