@@ -21,14 +21,14 @@ pub struct Order {
     pub highest: BigUint,
 }
 impl Order {
-    pub fn key(&self, start: usize) -> Result<String> {
+    pub fn key(&self, start: usize, coordinate: &BigUint) -> Result<String> {
         ensure!(
             self.lowest > 0u8.into() && self.highest > self.lowest,
             "invalid BulkOrder interval"
         );
         ensure!(start >= 16 && start.is_multiple_of(8), "invalid event end");
         let key = format!(
-            "{PREFIX}{}/{}/v0/{start}",
+            "{PREFIX}{}/{}/v0/{start}/{coordinate}",
             lexidecimal::encode(&!BigInt::from(self.lowest.clone())),
             lexidecimal::encode(&!BigInt::from(self.highest.clone()))
         );
@@ -42,7 +42,7 @@ impl Order {
             .split('/')
             .collect::<Vec<_>>();
         ensure!(
-            parts.len() == 4 && parts[2] == "v0",
+            parts.len() == 5 && parts[2] == "v0",
             "invalid BulkOrder key"
         );
         let (low, high) = (parts[0], parts[1]);
@@ -55,7 +55,10 @@ impl Order {
                 .to_biguint()
                 .context("invalid upper bound")?,
         };
-        ensure!(order.key(start)? == key, "noncanonical BulkOrder key");
+        ensure!(
+            order.key(start, &key_coordinate(key)?)? == key,
+            "noncanonical BulkOrder key"
+        );
         Ok(order)
     }
     pub fn covers(&self, milestone: &BigUint) -> bool {
@@ -66,12 +69,20 @@ impl Order {
 /// v0 records only the exclusive end of the concatenated event bytes.
 pub fn manifest_start(key: &str) -> Result<usize> {
     let (_, suffix) = key.rsplit_once("/v0/").context("missing v0 event end")?;
+    let (suffix, _) = suffix.split_once('/').context("missing coordinate")?;
     let start = suffix.parse::<usize>()?;
     ensure!(
         start >= 16 && start.is_multiple_of(8) && start.to_string() == suffix,
         "invalid event end"
     );
     Ok(start)
+}
+
+pub fn key_coordinate(key: &str) -> Result<BigUint> {
+    let text = key.rsplit('/').next().context("missing coordinate")?;
+    let value: BigUint = text.parse()?;
+    ensure!(value.to_string() == text, "noncanonical coordinate");
+    Ok(value)
 }
 
 pub fn seek(milestone: &BigUint) -> String {
@@ -83,25 +94,35 @@ pub fn seek(milestone: &BigUint) -> String {
 
 #[derive(Clone, Debug)]
 pub struct Index {
+    pub coordinate: BigUint,
     pub lowest: BigUint,
-    pub offsets: Vec<usize>,
+    /// Exclusive event ends, shared by logical coordinates and physical offsets.
+    pub ends: Vec<usize>,
 }
 impl Index {
     pub fn order(&self) -> Order {
         Order {
             lowest: self.lowest.clone(),
-            highest: &self.lowest + self.offsets.len() - 1usize,
+            highest: &self.lowest + self.ends.len(),
         }
     }
-    pub fn range(&self, lowest: &BigUint, highest: &BigUint) -> Result<Range<usize>> {
-        let order = self.order();
+    pub fn boundary(&self, index: usize) -> usize {
+        if index == 0 { 0 } else { self.ends[index - 1] }
+    }
+    pub fn coordinate_at(&self, milestone: &BigUint) -> Result<BigUint> {
         ensure!(
-            order.covers(lowest) && highest > lowest && highest <= &order.highest,
+            milestone >= &self.lowest && milestone <= &self.order().highest,
+            "coordinate outside BulkOrder"
+        );
+        Ok(&self.coordinate + self.boundary(usize::try_from(milestone - &self.lowest)?))
+    }
+    pub fn range(&self, lowest: &BigUint, highest: &BigUint) -> Result<Range<usize>> {
+        ensure!(
+            self.order().covers(lowest) && highest > lowest && highest <= &self.order().highest,
             "range outside BulkOrder"
         );
-        let start = usize::try_from(lowest - &self.lowest)?;
-        let end = usize::try_from(highest - &self.lowest)?;
-        Ok(self.offsets[start]..self.offsets[end])
+        Ok(self.boundary(usize::try_from(lowest - &self.lowest)?)
+            ..self.boundary(usize::try_from(highest - &self.lowest)?))
     }
     pub fn decode(message: &[u8]) -> Result<Self> {
         let tuple = flexbuffers::Reader::get_root(message)?.get_vector()?;
@@ -114,38 +135,46 @@ impl Index {
             "invalid BulkOrder tuple"
         );
         let query = tuple.index(3)?.get_map()?;
-        ensure!(query.len() == 2, "invalid BulkOrder query");
+        ensure!(query.len() == 3, "invalid BulkOrder query");
         let Extension::BigInt(lowest) = flexbuffer::read(query.index("lowest")?)? else {
-            anyhow::bail!("lowest must be a bigint");
+            anyhow::bail!("lowest must be a bigint")
         };
         let lowest = lowest.to_biguint().context("negative lower bound")?;
         ensure!(lowest > 0u8.into(), "Milestones begin at one");
-        let vector = query.index("offsets")?;
+        let Extension::BigInt(coordinate) = flexbuffer::read(query.index("coordinate")?)? else {
+            anyhow::bail!("coordinate must be bigint")
+        };
+        let coordinate = coordinate.to_biguint().context("negative coordinate")?;
+        let vector = query.index("ends")?;
         ensure!(
             vector.flexbuffer_type() != flexbuffers::FlexBufferType::VectorUInt,
-            "offsets must not use the reserved extension type"
+            "ends must not use the reserved extension type"
         );
-        let offsets = vector
-            .get_vector()?
-            .iter()
-            .map(|v| Ok(usize::try_from(v.get_i64()?)?))
-            .collect::<Result<Vec<_>>>()?;
-        ensure!(
-            offsets.len() >= 2
-                && offsets[0] == 0
-                && offsets
-                    .windows(2)
-                    .all(|p| p[0] < p[1] && p[1].is_multiple_of(8)),
-            "invalid BulkOrder offsets"
-        );
-        Ok(Self { lowest, offsets })
+        let mut ends = vec![];
+        let mut previous = 0;
+        for value in vector.get_vector()?.iter() {
+            let end = usize::try_from(value.get_i64()?)?;
+            ensure!(
+                end > previous && end.is_multiple_of(8),
+                "invalid BulkOrder ends"
+            );
+            previous = end;
+            ends.push(end);
+        }
+        ensure!(!ends.is_empty(), "empty BulkOrder ends");
+        Ok(Self {
+            lowest,
+            coordinate,
+            ends,
+        })
     }
 }
 
 #[derive(Serialize)]
 struct Query {
+    coordinate: Vec<u8>,
     lowest: Vec<u8>,
-    offsets: Vec<i64>,
+    ends: Vec<i64>,
 }
 
 pub struct Builder {
@@ -158,7 +187,8 @@ impl Builder {
         Ok(Self {
             index: Index {
                 lowest,
-                offsets: vec![0],
+                coordinate: BigUint::default(),
+                ends: vec![],
             },
             bytes: vec![],
         })
@@ -174,50 +204,47 @@ impl Builder {
             milestone == &self.index.order().highest,
             "noncontiguous BulkOrder append"
         );
-        envbuf::nested_message(bytes)?;
+        event::envelope(bytes)?;
         event::entry_digest(bytes)?;
-        self.bytes.extend_from_slice(bytes);
-        self.index.offsets.push(self.bytes.len());
+        if self.bytes.is_empty() {
+            self.index.coordinate = event::coordinate(bytes)?.unwrap_or_default();
+        }
+        if let Some(coordinate) = event::coordinate(bytes)? {
+            ensure!(
+                coordinate == &self.index.coordinate + self.index.ends.last().copied().unwrap_or(0),
+                "BulkOrder coordinate gap"
+            );
+        }
+        ensure!(
+            self.bytes.len().is_multiple_of(1usize << (bytes[3] & 31)),
+            "event alignment incompatible with BulkOrder boundary"
+        );
+        let trimmed = event::trim_retry_margins(bytes)?;
+        self.bytes.extend_from_slice(&trimmed);
+        self.index.ends.push(self.bytes.len());
         Ok(())
     }
     pub fn finish(mut self) -> Result<(Order, Vec<u8>, Range<usize>)> {
         ensure!(!self.is_empty(), "empty BulkOrder");
         let order = self.index.order();
-        let mut lowest = Extension::BigInt(self.index.lowest.into()).payload()?;
-        let lowest_length = lowest.len();
-        // The upstream builder turns 2/3/4-element UInt vectors into fixed types.
-        // Reserve five elements, then shorten the extension's length word; its
-        // unused tail remains unreachable, just like other unused buffer bytes.
-        lowest.resize(lowest.len().max(5), 0);
         let query = Query {
-            lowest,
-            offsets: self
+            lowest: flexbuffer::bigint_payload(&self.index.lowest)?,
+            coordinate: flexbuffer::bigint_payload(&self.index.coordinate)?,
+            ends: self
                 .index
-                .offsets
+                .ends
                 .into_iter()
-                .map(i64::try_from)
-                .collect::<std::result::Result<_, _>>()?,
+                .map(|end| Ok(i64::try_from(end)?))
+                .collect::<Result<_>>()?,
         };
-        let species = Extension::WellKnownSymbol("species".into()).payload()?;
-        let mut message = flexbuffers::to_vec((species, event::NAMESPACE, COMMAND, query))?;
-        if lowest_length < 5 {
-            let uint = |at: usize, width: usize| {
-                let mut word = [0u8; 8];
-                word[..width].copy_from_slice(&message[at..at + width]);
-                usize::try_from(u64::from_le_bytes(word)).unwrap()
-            };
-            let root_width = *message.last().unwrap() as usize;
-            let root_slot = message.len() - 2 - root_width;
-            let root = root_slot - uint(root_slot, root_width);
-            let tuple_width = 1usize << (message[message.len() - 2] & 3);
-            let query_slot = root + 3 * tuple_width;
-            let query = query_slot - uint(query_slot, tuple_width);
-            let query_width = 1usize << (message[root + 4 * tuple_width + 3] & 3);
-            let lowest = query - uint(query, query_width);
-            let width = 1usize << (message[query + 2 * query_width] & 3);
-            message[lowest - width..lowest]
-                .copy_from_slice(&(lowest_length as u64).to_le_bytes()[..width]);
-        }
+        let message = flexbuffer::command(
+            COMMAND,
+            &query,
+            &[
+                ("lowest", &self.index.lowest),
+                ("coordinate", &self.index.coordinate),
+            ],
+        )?;
         let start = self.bytes.len();
         let end = envbuf::append(&mut self.bytes, &message, envbuf::FLEXBUFFERS)?;
         envbuf::append_counter_margin(&mut self.bytes, 0)?;
@@ -236,7 +263,7 @@ pub fn footer(bytes: &[u8]) -> Result<(Index, Range<usize>)> {
             );
             let index = Index::decode(frame.content)?;
             ensure!(
-                index.offsets.last() == Some(&frame.start),
+                index.ends.last() == Some(&frame.start),
                 "BulkOrder index does not meet its footer"
             );
             return Ok((index, frame.start..frame.end));
@@ -249,23 +276,23 @@ pub fn footer(bytes: &[u8]) -> Result<(Index, Range<usize>)> {
 pub fn decode(bytes: &[u8], order: &Order) -> Result<Index> {
     let (index, _) = footer(bytes)?;
     ensure!(index.order() == *order, "BulkOrder key/index mismatch");
-    validate_events(&bytes[..*index.offsets.last().unwrap()], &index.offsets)?;
-    Ok(index)
-}
-
-pub fn validate_events(bytes: &[u8], offsets: &[usize]) -> Result<()> {
-    ensure!(
-        offsets.last() == Some(&bytes.len()),
-        "BulkOrder data length mismatch"
-    );
-    for pair in offsets.windows(2) {
-        let frame = envbuf::at(bytes, pair[0])?;
+    let mut previous = 0;
+    for end in &index.ends {
+        let event = &bytes[previous..*end];
+        envbuf::nested_message(event)?;
         ensure!(
-            frame.format == envbuf::NESTED && frame.end == pair[1],
-            "BulkOrder event boundary mismatch"
+            event::coordinate_length(event)? == event.len(),
+            "BulkOrder event has retry margins"
         );
+        if let Some(coordinate) = event::coordinate(event)? {
+            ensure!(
+                coordinate == &index.coordinate + previous,
+                "BulkOrder event coordinate mismatch"
+            );
+        }
+        previous = *end;
     }
-    Ok(())
+    Ok(index)
 }
 
 pub async fn publish(
@@ -273,13 +300,21 @@ pub async fn publish(
     order: &Order,
     bytes: &[u8],
     range: Range<usize>,
+    crc32c_base: u32,
 ) -> Result<()> {
-    let key = order.key(range.start)?;
+    let coordinate = footer(bytes)?.0.coordinate;
+    let checksums = crate::checksum::Run {
+        before: crc32c_base,
+        after: crate::checksum::append(crc32c_base, &bytes[..range.start]),
+    };
+    let key = order.key(range.start, &coordinate)?;
     let mut headers = crate::epilogue::conditional_headers();
     headers.insert(
         RANGE_HEADER,
         format!("bytes={}-{}", range.start, range.end - 1).parse()?,
     );
+    headers.insert("x-amz-meta-coordinate", coordinate.to_string().parse()?);
+    checksums.headers(&mut headers)?;
     let response = crate::sequence::put_feed(bucket, &key, bytes, headers).await?;
     if response.status_code() == 412 {
         let existing = crate::object_read::if_present(bucket)?
@@ -304,6 +339,9 @@ pub async fn publish(
             "BulkManifest range/key mismatch"
         );
         verify_same_events(existing.as_slice(), bytes, order)?;
+        if let Some(actual) = crate::checksum::Run::from_headers(&existing.headers())? {
+            ensure!(actual == checksums, "conflicting BulkOrder CRC32C");
+        }
     } else {
         ensure!(
             response.status_code() == 200,
@@ -317,10 +355,14 @@ pub async fn publish(
 pub fn verify_same_events(actual: &[u8], expected: &[u8], order: &Order) -> Result<()> {
     let a = decode(actual, order)?;
     let b = decode(expected, order)?;
-    for (a, b) in a.offsets.windows(2).zip(b.offsets.windows(2)) {
+    ensure!(
+        a.coordinate == b.coordinate && a.ends == b.ends,
+        "conflicting BulkOrder coordinates"
+    );
+    for i in 0..a.ends.len() {
         ensure!(
-            event::entry_digest(&actual[a[0]..a[1]])?
-                == event::entry_digest(&expected[b[0]..b[1]])?,
+            event::entry_digest(&actual[a.boundary(i)..a.ends[i]])?
+                == event::entry_digest(&expected[b.boundary(i)..b.ends[i]])?,
             "conflicting BulkOrder event identity"
         );
     }
@@ -346,7 +388,8 @@ pub struct DurableEvent {
     pub bytes: Vec<u8>,
 }
 
-async fn resume(bucket: &Bucket, target: &BigUint) -> Result<BigUint> {
+async fn resume(bucket: &Bucket, target: &BigUint) -> Result<(BigUint, u32)> {
+    let mut crc32c = 0;
     let mut next = BigUint::from(1u8);
     while &next <= target {
         let mut after = Some(seek(&next));
@@ -382,25 +425,44 @@ async fn resume(bucket: &Bucket, target: &BigUint) -> Result<BigUint> {
                     .get_object(&key)
                     .await?;
                 ensure!(response.status_code() == 200, "BulkOrder resume GET failed");
-                decode(response.as_slice(), &order)?;
+                let index = decode(response.as_slice(), &order)?;
+                ensure!(
+                    index.coordinate == key_coordinate(&key)?,
+                    "BulkOrder coordinate/key mismatch"
+                );
                 ensure!(
                     footer(response.as_slice())?.1.start == manifest_start(&key)?,
                     "BulkManifest range/key mismatch"
                 );
-                Ok::<_, anyhow::Error>(())
+                let high = order.highest.clone().min(target + 1u8);
+                let start = index.boundary(usize::try_from(&next - &order.lowest)?);
+                if let Some(record) = crate::checksum::Run::from_headers(&response.headers())? {
+                    record.verify(&response.as_slice()[..manifest_start(&key)?])?;
+                    ensure!(
+                        crate::checksum::append(record.before, &response.as_slice()[..start])
+                            == crc32c,
+                        "BulkOrder CRC32C prefix mismatch"
+                    );
+                }
+                let end = index.boundary(usize::try_from(&high - &order.lowest)?);
+                Ok::<_, anyhow::Error>(crate::checksum::append(
+                    crc32c,
+                    &response.as_slice()[start..end],
+                ))
             }
             .await;
-            if result.is_ok() {
-                found = Some(order.highest);
+            if let Ok(crc) = result {
+                found = Some((order.highest, crc));
                 break;
             }
         }
-        let Some(highest) = found else {
+        let Some((highest, crc)) = found else {
             break;
         };
         next = highest.min(target + 1u8);
+        crc32c = crc;
     }
-    Ok(next)
+    Ok((next, crc32c))
 }
 
 /// Coalesced durable targets never hold up the publisher. Timeline bytes are the queue.
@@ -411,15 +473,16 @@ pub async fn run(
     mut events: mpsc::Receiver<DurableEvent>,
 ) {
     let target = targets.borrow().milestone().clone();
-    let mut next = match resume(&bucket, &target).await {
+    let (mut next, mut crc32c) = match resume(&bucket, &target).await {
         Ok(next) => next,
         Err(error) => {
             tracing::warn!(%error, "Analogue resume failed; reconstructing from Timeline");
-            1u8.into()
+            (1u8.into(), 0)
         }
     };
     let mut cached = std::collections::BTreeMap::new();
     let mut builder: Option<Builder> = None;
+    let mut builder_crc32c = 0;
     let mut started = tokio::time::Instant::now();
     let mut pending = None;
     let mut closing = false;
@@ -446,10 +509,12 @@ pub async fn run(
                     response.to_vec()
                 };
                 if builder.is_none() {
+                    builder_crc32c = crc32c;
                     builder = Some(Builder::new(next.clone())?);
                     started = tokio::time::Instant::now();
                 }
                 builder.as_mut().unwrap().append(&next, &bytes)?;
+                crc32c = crate::checksum::event(crc32c, &bytes)?;
                 Ok::<_, anyhow::Error>(())
             }
             .await;
@@ -470,15 +535,15 @@ pub async fn run(
         });
         if due {
             match builder.take().unwrap().finish() {
-                Ok(order) => pending = Some(order),
+                Ok((order, bytes, range)) => pending = Some((order, bytes, range, builder_crc32c)),
                 Err(error) => {
                     tracing::error!(%error, "BulkOrder encoding stopped");
                     return;
                 }
             }
         }
-        if let Some((order, bytes, range)) = &pending {
-            match publish(&bucket, order, bytes, range.clone()).await {
+        if let Some((order, bytes, range, base_crc)) = &pending {
+            match publish(&bucket, order, bytes, range.clone(), *base_crc).await {
                 Ok(()) => {
                     tracing::info!(lowest=%order.lowest, highest=%order.highest, bytes=bytes.len(), "BulkOrder published");
                     pending = None;

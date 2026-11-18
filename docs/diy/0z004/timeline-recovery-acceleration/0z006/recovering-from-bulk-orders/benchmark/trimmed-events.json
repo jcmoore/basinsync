@@ -1,0 +1,205 @@
+{
+  "recorded_at": "2026-11-18T03:24:59.563Z",
+  "machine": {
+    "cpu": "Apple M2",
+    "platform": "darwin",
+    "release": "27.0.0",
+    "memory": 25769803776
+  },
+  "rounds": 2,
+  "count": 96,
+  "archived_count": 80,
+  "overlap": false,
+  "blob_bytes": 32768,
+  "event_bytes": 24163960,
+  "profiles": [
+    {
+      "name": "100ms",
+      "delay": 100,
+      "bandwidth": null
+    }
+  ],
+  "samples": [
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 4,
+      "round": 0,
+      "mode": "bulk-parallel",
+      "coordinate": "24161656",
+      "elapsed_ms": 3032.2210840000002,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "08168831b00326d36c022751a898c04307e4d1962bbf6739968bef1a82472d6ee1b948eff30524186a880aae4e935eaa",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 79,
+        "bulk_gets": 4,
+        "cache_bypasses": 0,
+        "cache_evictions": 0,
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "coordinate_range_gets": 0,
+        "descending_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 5454664,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 10909328,
+        "peak_disk_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 17
+      },
+      "bytes": 24780815,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "LIST analogue/": 6,
+        "GET timeline": 17,
+        "GET analogue": 4
+      },
+      "peak_requests": 2
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 4,
+      "round": 0,
+      "mode": "bidirectional",
+      "coordinate": "24161656",
+      "elapsed_ms": 1973.847667,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "08168831b00326d36c022751a898c04307e4d1962bbf6739968bef1a82472d6ee1b948eff30524186a880aae4e935eaa",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 79,
+        "bulk_gets": 4,
+        "cache_bypasses": 0,
+        "cache_evictions": 0,
+        "cache_hits": 10,
+        "cache_misses": 0,
+        "coordinate_range_gets": 4,
+        "descending_gets": 11,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 5454416,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 10908832,
+        "peak_disk_bytes": 2479600,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 18
+      },
+      "bytes": 25027815,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "LIST analogue/": 6,
+        "GET timeline": 18,
+        "GET analogue": 4
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 4,
+      "round": 1,
+      "mode": "bidirectional",
+      "coordinate": "24161656",
+      "elapsed_ms": 2040.421334,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "08168831b00326d36c022751a898c04307e4d1962bbf6739968bef1a82472d6ee1b948eff30524186a880aae4e935eaa",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 79,
+        "bulk_gets": 4,
+        "cache_bypasses": 0,
+        "cache_evictions": 0,
+        "cache_hits": 10,
+        "cache_misses": 0,
+        "coordinate_range_gets": 4,
+        "descending_gets": 11,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 5454416,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 10908832,
+        "peak_disk_bytes": 2479600,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 18
+      },
+      "bytes": 25027815,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "LIST analogue/": 6,
+        "GET timeline": 18,
+        "GET analogue": 4
+      },
+      "peak_requests": 4
+    },
+    {
+      "profile": "100ms",
+      "checkpoint": 0,
+      "orders": 4,
+      "round": 1,
+      "mode": "bulk-parallel",
+      "coordinate": "24161656",
+      "elapsed_ms": 3232.90875,
+      "flows": {
+        "f": "95"
+      },
+      "milestone": "96",
+      "sha384": "08168831b00326d36c022751a898c04307e4d1962bbf6739968bef1a82472d6ee1b948eff30524186a880aae4e935eaa",
+      "stats": {
+        "applied": 96,
+        "bulk_events": 79,
+        "bulk_gets": 4,
+        "cache_bypasses": 0,
+        "cache_evictions": 0,
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "coordinate_range_gets": 0,
+        "descending_gets": 0,
+        "manifest_gets": 0,
+        "peak_buffer_bytes": 5454664,
+        "peak_bulk_downloads": 2,
+        "peak_bulk_reserved_bytes": 10909328,
+        "peak_disk_bytes": 0,
+        "peak_manifest_reads": 0,
+        "rejected_orders": 0,
+        "timeline_gets": 17
+      },
+      "bytes": 24780815,
+      "requests": {
+        "PUT other": 3,
+        "HEAD other": 1,
+        "GET other": 2,
+        "LIST epilogue/": 1,
+        "LIST timeline/": 1,
+        "GET timeline": 17,
+        "LIST analogue/": 6,
+        "GET analogue": 4
+      },
+      "peak_requests": 2
+    }
+  ],
+  "foreground": []
+}

@@ -142,6 +142,8 @@ pub async fn latest_key(bucket: &Bucket, prefix: &str) -> Result<Option<(String,
 
 #[derive(Clone, Debug)]
 pub struct Checkpoint {
+    pub crc32c: u32,
+    pub coordinate: BigUint,
     pub viewpoint: Viewpoint,
     pub milestone: BigUint,
     pub digest: String,
@@ -166,6 +168,13 @@ impl Checkpoint {
         let result = Self {
             viewpoint,
             milestone,
+            coordinate: {
+                let text = field("coordinate")?;
+                let value: BigUint = text.parse()?;
+                ensure!(value.to_string() == text, "invalid backup coordinate");
+                value
+            },
+            crc32c: crate::checksum::parse(&field("crc32c")?)?,
             digest: field("event-sha384")?,
             sha384: field("sha384")?,
             version: field("turso-version")?,
@@ -189,6 +198,8 @@ impl Checkpoint {
         let mut headers = conditional_headers();
         for (name, value) in [
             ("x-amz-meta-milestone", self.milestone.to_string()),
+            ("x-amz-meta-coordinate", self.coordinate.to_string()),
+            ("x-amz-meta-crc32c", crate::checksum::format(self.crc32c)),
             ("x-amz-meta-event-sha384", self.digest.clone()),
             ("x-amz-meta-sha384", self.sha384.clone()),
             ("x-amz-meta-turso-version", self.version.clone()),
@@ -208,7 +219,9 @@ impl Checkpoint {
         );
         let actual = Self::from_headers(self.viewpoint.clone(), &response.headers())?;
         ensure!(
-            actual.milestone == self.milestone
+            actual.crc32c == self.crc32c
+                && actual.coordinate == self.coordinate
+                && actual.milestone == self.milestone
                 && actual.digest == self.digest
                 && actual.sha384 == self.sha384,
             "backup metadata changed"
@@ -226,6 +239,8 @@ impl Checkpoint {
         );
         Ok(crate::timeline::Datashed {
             milestone: self.milestone.clone(),
+            coordinate: self.coordinate.clone(),
+            crc32c: self.crc32c,
             head: Some(self.digest.clone()),
             database: Some(database),
             ..Default::default()
@@ -381,6 +396,8 @@ mod tests {
     #[test]
     fn backup_metadata_requires_a_complete_canonical_anchor() -> Result<()> {
         let cp = Checkpoint {
+            crc32c: 0x12345678,
+            coordinate: 4096u32.into(),
             viewpoint: Viewpoint::zero(),
             milestone: 42u8.into(),
             digest: "a".repeat(96),
@@ -396,7 +413,14 @@ mod tests {
             Checkpoint::from_headers(cp.viewpoint.clone(), &headers)?.milestone,
             cp.milestone
         );
-        for name in ["milestone", "event-sha384", "sha384", "turso-version"] {
+        for name in [
+            "milestone",
+            "coordinate",
+            "crc32c",
+            "event-sha384",
+            "sha384",
+            "turso-version",
+        ] {
             let mut bad = headers.clone();
             bad.remove(&format!("x-amz-meta-{name}"));
             assert!(Checkpoint::from_headers(cp.viewpoint.clone(), &bad).is_err());

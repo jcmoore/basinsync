@@ -288,6 +288,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
+ "crc32c",
  "flexbuffers",
  "hmac",
  "num-bigint",

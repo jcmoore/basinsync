@@ -1006,14 +1006,21 @@ fn measure() -> Result<()> {
         }
         engine.image()
     });
+    let mut crc32c = 0;
     let records = runtime.block_on(publish_ordered(rx, |milestone, bytes| {
+        let crc_base = crc32c;
+        let next_crc = crate::checksum::event(crc32c, &bytes);
+        if let Ok(next) = next_crc {
+            crc32c = next;
+        }
         let bucket = &bucket;
         async move {
+            next_crc?;
             let response = crate::sequence::put_entry(
                 bucket,
                 crate::timeline::key(&milestone.into())?,
                 &bytes,
-                crate::timeline::entry_headers(&bytes)?,
+                crate::timeline::entry_headers(&bytes, crc_base)?,
             )
             .await?;
             ensure!(

@@ -1,6 +1,7 @@
 [commit-marker]: <glossary/commit-marker.md>
 [conditional-write]: <glossary/conditional-write.md>
 [context]: <glossary/context.md>
+[crc32c]: <glossary/crc32c.md>
 [datashed]: <glossary/datashed.md>
 [envbuf]: <glossary/envbuf.md>
 [epilogue]: <glossary/epilogue.md>
@@ -34,12 +35,15 @@ binds its image to the recovery prefix:
 
 ```text
 x-amz-meta-milestone: <canonical decimal>
+x-amz-meta-coordinate: <exclusive Timeline byte coordinate, canonical decimal>
+x-amz-meta-crc32c: <cumulative coordinate-run CRC32C, eight lowercase hex digits>
 x-amz-meta-event-sha384: <digest of DifferentialEvent at that Milestone>
 x-amz-meta-sha384: <digest of CommitMarker bytes>
 x-amz-meta-turso-version: <engine release and revision>
 ```
 
-Digests are hexadecimal *SHA-384*[~][sha384]. Unwrap the raw *EnvBuf message*[~][envbuf], then validate metadata, its checksum,
+Retain the *CRC32C*[~][crc32c] as the recovered prefix's accumulator.
+Other digests are hexadecimal *SHA-384*[~][sha384]. Unwrap the raw *EnvBuf message*[~][envbuf], then validate metadata, its checksum,
 *Turso*[~][turso] version, and the image's recorded *Milestone*[~][milestone].
 
 Before publishing a *Datashed*[~][datashed] *CommitMarker*[~][commit-marker], replicate

@@ -71,14 +71,18 @@ fn concatenated_events_keep_boundaries_alignment_ranges_and_recovery() -> Result
     }
     let mut recovered = Datashed::default();
     let frames = basinsync::envbuf::all(&feed)?;
-    assert_eq!(frames.len(), 4);
+    assert_eq!(frames.len(), 7);
     let mut end = feed.len();
     for frame in frames.iter().rev() {
         assert_eq!(*frame, basinsync::envbuf::before(&feed, end)?);
         end = frame.start;
     }
     assert_eq!(end, 0);
-    for (n, frame) in frames.iter().skip(1).enumerate() {
+    for (n, frame) in frames
+        .iter()
+        .filter(|frame| frame.format == basinsync::envbuf::NESTED)
+        .enumerate()
+    {
         assert_eq!(frame.format, basinsync::envbuf::NESTED);
         let bytes = &feed[frame.start..frame.end];
         let borrowed = basinsync::envbuf::nested_message(bytes)?;
@@ -100,7 +104,7 @@ fn concatenated_events_keep_boundaries_alignment_ranges_and_recovery() -> Result
     assert_eq!(recovered.prefix(), stager.prefix());
     assert_eq!(recovered.latest("f")?.unwrap().decimal(), "2");
     assert!(event::decode_entry(&feed).is_err());
-    assert!(event::decode_entry(basinsync::envbuf::nested_message(&events[0])?).is_err());
+    assert!(event::decode_entry(event::envelope(&events[0])?.content).is_err());
     Ok(())
 }
 
@@ -120,7 +124,7 @@ fn retry_margin_preserves_prepared_successors_and_locations() -> Result<()> {
             &counter.to_le_bytes(),
             basinsync::envbuf::MARGIN,
         )?;
-        let start = manifest.as_ref().unwrap().end;
+        let start = event::envelope(first.bytes())?.end;
         retried[start..start + margin.len()].copy_from_slice(&margin);
         assert_eq!(retried.len(), first.bytes().len());
         assert_eq!(event::entry_digest(&retried)?, digest);
@@ -243,4 +247,111 @@ proptest::proptest! {
             before=image.clone();
         }
     }
+}
+
+#[test]
+fn byte_coordinates_are_digest_bound_contiguous_and_ignore_retry_margins() -> Result<()> {
+    let mut stager = Datashed::default().into_stager();
+    let first = stager.prepare(vec![command("f", "0")])?;
+    let second = stager.prepare(vec![command("f", "1")])?;
+    assert_eq!(event::coordinate(first.bytes())?, Some(0u8.into()));
+    let mut reframed = first.bytes().to_vec();
+    basinsync::envbuf::append_counter_margin(&mut reframed, 0)?;
+    assert_eq!(
+        event::entry_digest(&reframed)?,
+        event::entry_digest(first.bytes())?
+    );
+    let mut unmodified = Datashed::default();
+    unmodified.apply_entry(1u8.into(), &reframed)?;
+    unmodified.apply_entry(2u8.into(), second.bytes())?;
+    assert_eq!(unmodified.prefix(), stager.prefix());
+    assert_eq!(
+        event::coordinate(second.bytes())?,
+        Some(event::coordinate_length(first.bytes())?.into())
+    );
+    assert_eq!(
+        stager.prefix().coordinate(),
+        &BigUint::from(
+            event::coordinate_length(first.bytes())? + event::coordinate_length(second.bytes())?
+        )
+    );
+    let event::Entry::Wal { commands, delta } = event::decode_entry(first.bytes())? else {
+        panic!()
+    };
+    for wrong in [1u8.into(), BigUint::from(1u8) << 256usize] {
+        let bad = event::encode_wal_at(commands.clone(), *delta.clone(), &wrong)?;
+        assert_eq!(event::coordinate(&bad)?, Some(wrong));
+        assert_ne!(
+            event::entry_digest(&bad)?,
+            event::entry_digest(first.bytes())?
+        );
+        let mut recovered = Datashed::default();
+        assert!(recovered.apply_entry(1u8.into(), &bad).is_err());
+        assert_eq!(recovered.milestone, 0u8.into());
+        assert!(recovered.database.is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn external_retry_margins_leave_the_entire_event_unchanged_and_reject_other_suffixes() -> Result<()>
+{
+    let mut stager = Datashed::default().into_stager();
+    let first = stager.prepare(vec![command("f", "0")])?;
+    let second = stager.prepare(vec![command("f", "1")])?;
+    let original = first.bytes();
+    let outer = event::envelope(original)?;
+    let bytes = event::coordinate_bytes(original)?;
+    assert_eq!(outer.end, bytes.len());
+    assert_eq!(
+        basinsync::envbuf::all(original)?
+            .iter()
+            .map(|f| f.format)
+            .collect::<Vec<_>>(),
+        vec![4, 6]
+    );
+    assert_eq!(
+        basinsync::envbuf::before(outer.content, outer.content.len())?.format,
+        basinsync::envbuf::FLEXBUFFERS
+    );
+    assert_eq!(event::entry_digest(original)?, event::digest(bytes));
+    assert_eq!(
+        basinsync::checksum::event(0, original)?,
+        basinsync::checksum::append(0, bytes)
+    );
+    for count in 0..=3 {
+        let mut stored = bytes.to_vec();
+        for n in 0..count {
+            basinsync::envbuf::append(
+                &mut stored,
+                &vec![n as u8; n * 9],
+                basinsync::envbuf::MARGIN,
+            )?;
+        }
+        assert_eq!(event::coordinate_bytes(&stored)?, bytes);
+        assert_eq!(
+            event::entry_digest(&stored)?,
+            event::entry_digest(original)?
+        );
+        let mut recovered = Datashed::default();
+        recovered.apply_entry(1u8.into(), &stored)?;
+        recovered.apply_entry(2u8.into(), second.bytes())?;
+        assert_eq!(recovered.prefix(), stager.prefix());
+    }
+    for format in [basinsync::envbuf::NESTED, basinsync::envbuf::FLEXBUFFERS, 0] {
+        let mut stored = original.to_vec();
+        basinsync::envbuf::append(&mut stored, b"unexpected", format)?;
+        assert!(event::decode_entry(&stored).is_err());
+        assert!(event::coordinate_bytes(&stored).is_err());
+    }
+    let mut truncated = original.to_vec();
+    truncated.pop();
+    assert!(event::decode_entry(&truncated).is_err());
+    // Margins within the command feed belong in its manifest; they cannot trail it.
+    let mut internal = vec![0; 8];
+    internal.extend_from_slice(outer.content);
+    basinsync::envbuf::append_counter_margin(&mut internal, 0)?;
+    let internal = basinsync::envbuf::finish_nested(internal)?;
+    assert!(event::decode_entry(&internal).is_err());
+    Ok(())
 }

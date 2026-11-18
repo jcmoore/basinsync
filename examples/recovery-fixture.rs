@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
             analogue::decode(&bytes, &index.order())?;
             println!(
                 "{}",
-                serde_json::json!({"lowest":index.lowest.to_string(),"highest":index.order().highest.to_string(),"offsets":index.offsets,"footer":[range.start,range.end]})
+                serde_json::json!({"coordinate":index.coordinate.to_string(),"lowest":index.lowest.to_string(),"highest":index.order().highest.to_string(),"ends":index.ends,"footer":[range.start,range.end]})
             );
         }
         Some("--pack") => {
@@ -45,7 +45,10 @@ async fn main() -> Result<()> {
             std::io::stdin().read_to_end(&mut bytes)?;
             let mut next: num_bigint::BigUint = args.get(2).context("missing lowest")?.parse()?;
             let mut builder = analogue::Builder::new(next.clone())?;
-            for event in basinsync::envbuf::all(&bytes)? {
+            for event in basinsync::envbuf::all(&bytes)?
+                .into_iter()
+                .filter(|event| event.format != basinsync::envbuf::MARGIN)
+            {
                 builder.append(&next, &bytes[event.start..event.end])?;
                 next += 1u8;
             }
@@ -84,7 +87,7 @@ async fn main() -> Result<()> {
                 .collect();
             println!(
                 "{}",
-                serde_json::json!({"elapsed_ms":elapsed.as_secs_f64()*1000.,"milestone":state.milestone.to_string(),"sha384":basinsync::event::digest(&database.image),"flows":flows,"stats":state.recovery_stats})
+                serde_json::json!({"crc32c":basinsync::checksum::format(state.crc32c),"coordinate":state.coordinate.to_string(),"elapsed_ms":elapsed.as_secs_f64()*1000.,"milestone":state.milestone.to_string(),"sha384":basinsync::event::digest(&database.image),"flows":flows,"stats":state.recovery_stats})
             );
         }
         _ => anyhow::bail!("expected --generate, --pack, --decode, or --recover"),

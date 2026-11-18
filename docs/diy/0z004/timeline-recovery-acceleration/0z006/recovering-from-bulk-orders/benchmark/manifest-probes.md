@@ -5,7 +5,7 @@
 
 # Key-located manifests and separate probes
 
-These measurements used a full footer range in each key. The current `/v0/<start>`
+These measurements used a full footer range in each key. The current `/v0/<bulkmanifest-start>/<coordinate>`
 hint retains the same no-HEAD request path using an open-ended GET that also
 returns the trailing margin.
 

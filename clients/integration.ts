@@ -11,7 +11,7 @@ import { parse, stringify } from "./json0";
 import { key, fromKey } from "./timeline";
 import { decodeBulkOrder } from "./bulkorder";
 import { key as epilogueKey, encode as lex, decode as unlex } from "./lexidecimal";
-import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, entryDigest, commandFrames, type WalDelta, type Marker } from "./events";
+import { encodeEvent, markerAt, deltasAt, legacyDeltasAt, entriesAt, rangesAt, eventTuples, encodeTuples, encodeWalEvent, entryDigest, commandFrames, trimRetryMargins, type WalDelta, type Marker } from "./events";
 import { ingestWal } from "./wal";
 import { all as envelopes, before as previousEnvelope, message as envelopeMessage, wrap as wrapEnvelope } from "./envbuf";
 import { stress } from "./stress";
@@ -342,7 +342,7 @@ try {
     proxy.release.resolve();await status(await first,201);await status(await next,201);assert.equal(proxy.retries(),259);
     const payload=await get(b,1n),original=proxy.originals.get(key(1n))!.body;assert.equal(entryDigest(payload),entryDigest(original));assert.notEqual(sha384(payload),sha384(original));
     const archives=await eventually(()=>s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"analogue/"})),r=>r.KeyCount===1);
-    const archived=await s3.send(new GetObjectCommand({Bucket:b,Key:archives.Contents![0].Key!}));assert.deepEqual(decodeBulkOrder(await archived.Body!.transformToByteArray()).events[0],payload,"archive handoff receives the accepted 259th retry margin");
+    const archived=await s3.send(new GetObjectCommand({Bucket:b,Key:archives.Contents![0].Key!}));assert.deepEqual(decodeBulkOrder(await archived.Body!.transformToByteArray()).events[0],trimRetryMargins(payload),"archive handoff trims the accepted event without changing its command bytes");
     assert.equal((deltasAt(await get(b,2n)).turso["default.turso"] as WalDelta).physical.parent,entryDigest(payload));await assertManifestRange(b,1n,payload);await stop(app.process);
     const replayed=await server(b);assert.equal((await fullStatus(replayed.url,"collision")).latest?.viewpoint,1n);await stop(replayed.process);
     const backed=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await eventually(()=>datashedBackup(b),cp=>cp?.milestone===2n);await stop(backed.process);
@@ -374,9 +374,9 @@ try {
     await status(await commit(app.url,"bulk-margin",a,0n),201);
     await eventually(async()=>proxy.retries(),n=>n===3);
     const archives=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"analogue/"}));assert.equal(archives.KeyCount,1);
-    const object=await s3.send(new GetObjectCommand({Bucket:b,Key:archives.Contents![0].Key!}));
-    const body=await object.Body!.transformToByteArray(),order=decodeBulkOrder(body);
-    assert.deepEqual(order.events[0],await get(b,1n));assert.equal(envelopes(body).at(-1)!.content[0],3);
+    const {object,body}=await eventually(async()=>{const object=await s3.send(new GetObjectCommand({Bucket:b,Key:archives.Contents![0].Key!}));return {object,body:await object.Body!.transformToByteArray()};},r=>envelopes(r.body).at(-1)!.content[0]===3);
+    const order=decodeBulkOrder(body);
+    assert.deepEqual(order.events[0],trimRetryMargins(await get(b,1n)));assert.equal(envelopes(body).at(-1)!.content[0],3);
     assert.equal(object.Metadata!["bulkmanifest-range"],`bytes=${order.range.start}-${order.range.end-1}`);
     await stop(app.process);
   }
@@ -1062,12 +1062,19 @@ try {
     for(const response of await Promise.all(requests))await status(response,201);
     const stored=await get(b,1n),ranges=rangesAt(stored),range=ranges.find(r=>r.flow==="public"&&r.marker.viewpoint==="1")!;
     await assertManifestRange(b,1n,stored);
-    const outerFooter=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=${stored.length-8}-${stored.length-1}`}));
-    const outerBytes=await outerFooter.Body!.transformToByteArray();assert.equal(outerBytes.length,8);assert.equal(outerBytes[4]>>5,4);
+    let eventEnd=stored.length,skipped=0,outerBytes:Uint8Array;
+    for(;;){
+      const footer=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=${eventEnd-8}-${eventEnd-1}`}));
+      outerBytes=await footer.Body!.transformToByteArray();assert.equal(outerBytes.length,8);
+      if(outerBytes[4]>>5!==6)break;
+      const length=new DataView(outerBytes.buffer,outerBytes.byteOffset,8).getUint32(0,true),alignment=2**(outerBytes[4]&31);
+      eventEnd-=Math.ceil((length+16)/alignment)*alignment;skipped++;
+    }
+    assert.equal(outerBytes[4]>>5,4);
     const messageLength=new DataView(outerBytes.buffer,outerBytes.byteOffset,8).getUint32(0,true);
     const outerAlignment=2**(outerBytes[4]&31),outerSpan=Math.ceil((messageLength+16)/outerAlignment)*outerAlignment;
     assert.equal(outerAlignment,8);
-    let end=stored.length-outerSpan+8+messageLength,query:any[],skipped=0;
+    let end=eventEnd-outerSpan+8+messageLength,query:any[];
     for(;;){
       const footer=await s3.send(new GetObjectCommand({Bucket:b,Key:key(1n),Range:`bytes=${end-8}-${end-1}`}));
       const tailBytes=await footer.Body!.transformToByteArray();assert.equal(tailBytes.length,8);
@@ -1081,7 +1088,7 @@ try {
     }
     assert.equal(skipped,1);assert.equal(query[2],"sts/0/databasin/rangemanifest");
     const frames=commandFrames(stored);for(const frame of frames){assert.equal(frame.start%8,0);assert.equal(frame.end%8,0);}
-    assert.deepEqual(Object.keys(query[3].envelopes),frames.slice(0,-2).map(e=>lex(BigInt(e.end-8))));
+    assert.deepEqual(Object.keys(query[3].envelopes),frames.slice(0,-1).map(e=>lex(BigInt(e.end-8))));
     const current=(await fullStatus(app.url,"public")).latest!;
     assert.equal(current.viewpoint,1n);assert.equal(current.length,target.length);
     assert.equal(current.headers?.Range,`bytes=${range.offset}-${range.offset+range.length-1}`);
@@ -1284,7 +1291,7 @@ try {
     for(const action of [actions.preview,actions.read]){assert.equal(action.headers["If-Match"],"*");const r=await fetch(action.url,{headers:action.headers});assert([404,412].includes(r.status));await r.arrayBuffer();}
     const first=await get(b,1n),tuples=eventTuples(first);
     assert.equal(tuples.length,1);assert.equal(tuples[0][2],"sts/0/databasin/ingestturso");
-    assert.equal(envelopes(first).length,1);assert.equal(commandFrames(first).length,3);assert.deepEqual(commandFrames(first).at(-1)!.content,new Uint8Array(8));assert.deepEqual(rangesAt(first),[]);
+    assert.equal(envelopes(first).length,2);assert.equal(commandFrames(first).length,2);assert.deepEqual(envelopes(first).at(-1)!.content,new Uint8Array(8));assert.deepEqual(rangesAt(first),[]);
     const delta=deltasAt(first).turso["default.turso"] as WalDelta;
     let image=ingestWal(delta.logical.base!,delta.physical.segments);
     const original=await inspectHeap(image,secret);assert.equal(original.length,7);assert.equal(original.etag,"");assert.equal(original.promoted,"");assert(original.retained);assert(Number.isFinite(Date.parse(original.reserved)));

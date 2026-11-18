@@ -276,34 +276,90 @@ pub fn digest(bytes: &[u8]) -> String {
 
 pub const RANGE_MANIFEST: &str = "sts/0/databasin/rangemanifest";
 
-/// Locate the object-absolute manifest range without traversing preceding commands.
+/// One event envelope, followed only by optional storage-margin envelopes.
+pub fn envelope(bytes: &[u8]) -> Result<crate::envbuf::Envelope<'_>> {
+    let event = crate::envbuf::at(bytes, 0)?;
+    ensure!(
+        event.format == crate::envbuf::NESTED,
+        "expected one event EnvBuf"
+    );
+    let mut end = event.end;
+    while end < bytes.len() {
+        let margin = crate::envbuf::at(bytes, end)?;
+        ensure!(
+            margin.format == crate::envbuf::MARGIN,
+            "unexpected envelope after event"
+        );
+        end = margin.end;
+    }
+    Ok(event)
+}
+
+/// Locate the object-absolute manifest range inside the event envelope.
 pub fn manifest_range(bytes: &[u8]) -> Result<Option<std::ops::Range<usize>>> {
     if !bytes.starts_with(b"enV") {
         return Ok(None);
     }
-    let feed = crate::envbuf::nested_message(bytes)?;
-    let mut end = feed.len();
-    while end > 0 {
-        let frame = crate::envbuf::before(feed, end)?;
-        if frame.format != crate::envbuf::MARGIN {
-            ensure!(
-                frame.format == crate::envbuf::FLEXBUFFERS
-                    && tuple(frame.content)?.index(2)?.get_str()? == RANGE_MANIFEST,
-                "last readable envelope must be rangemanifest"
-            );
-            return Ok(Some(frame.start + 8..frame.end + 8));
-        }
-        end = frame.start;
-    }
-    anyhow::bail!("missing range manifest envelope")
+    let event = envelope(bytes)?;
+    let frame = crate::envbuf::before(event.content, event.content.len())?;
+    ensure!(
+        frame.format == crate::envbuf::FLEXBUFFERS
+            && tuple(frame.content)?.index(2)?.get_str()? == RANGE_MANIFEST,
+        "event must end with rangemanifest"
+    );
+    Ok(Some(
+        frame.start + event.content_start..frame.end + event.content_start,
+    ))
 }
 
-/// Bind the inner feed through its manifest, excluding outer framing and retry margin.
+/// The complete event envelope; storage margins are outside its identity.
 pub fn entry_digest(bytes: &[u8]) -> Result<String> {
-    Ok(match manifest_range(bytes)? {
-        Some(range) => digest(&bytes[8..range.end]),
-        None => digest(bytes),
-    })
+    Ok(digest(coordinate_bytes(bytes)?))
+}
+
+/// Borrow the logical coordinate bytes without rewriting or copying the event.
+pub fn coordinate_bytes(bytes: &[u8]) -> Result<&[u8]> {
+    if bytes.starts_with(b"enV") {
+        Ok(&bytes[..envelope(bytes)?.end])
+    } else {
+        Ok(bytes)
+    }
+}
+
+/// Timeline-global byte start, authenticated by this event's existing digest.
+pub fn coordinate(bytes: &[u8]) -> Result<Option<num_bigint::BigUint>> {
+    let Some(range) = manifest_range(bytes)? else {
+        return Ok(None);
+    };
+    let frame = crate::envbuf::at(bytes, range.start)?;
+    let query = tuple(frame.content)?.index(3)?.get_map()?;
+    let Some(value) = query.index("coordinate").ok() else {
+        return Ok(None);
+    };
+    let Extension::BigInt(value) = flexbuffer::read(value)? else {
+        anyhow::bail!("event coordinate must be bigint");
+    };
+    Ok(Some(
+        value.to_biguint().context("negative event coordinate")?,
+    ))
+}
+
+/// Event size, excluding the separate storage margins.
+pub fn coordinate_length(bytes: &[u8]) -> Result<usize> {
+    Ok(coordinate_bytes(bytes)?.len())
+}
+
+/// Strip the separate storage suffix by borrowing the unchanged event envelope.
+pub fn trim_retry_margins(bytes: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
+    Ok(std::borrow::Cow::Borrowed(&bytes[..envelope(bytes)?.end]))
+}
+
+pub fn encode_wal_at(
+    commands: Vec<FlowCommand>,
+    delta: crate::turso::wal::Delta,
+    coordinate: &num_bigint::BigUint,
+) -> Result<Vec<u8>> {
+    FlowChunks::new(&commands)?.finish_at(delta, coordinate)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -318,6 +374,8 @@ pub struct BlobRange {
 type CommandPrefix = (Vec<u8>, String, String);
 #[derive(Serialize)]
 struct RangeManifest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coordinate: Option<Vec<u8>>,
     envelopes: BTreeMap<String, Option<CommandPrefix>>,
 }
 
@@ -384,19 +442,37 @@ impl FlowChunks {
         self.append(INGEST_TURSO, body)?;
         self.finish_manifest()
     }
-    fn finish_manifest(mut self) -> Result<Vec<u8>> {
-        let species = Extension::WellKnownSymbol("species".into()).payload()?;
-        let content = flexbuffers::to_vec((
-            species,
-            NAMESPACE,
+    pub fn finish_at(
+        mut self,
+        delta: crate::turso::wal::Delta,
+        coordinate: &num_bigint::BigUint,
+    ) -> Result<Vec<u8>> {
+        self.append(
+            INGEST_TURSO,
+            &IngestTurso {
+                turso: BTreeMap::from([(crate::turso::ID.into(), delta)]),
+            },
+        )?;
+        self.finish_manifest_at(Some(coordinate))
+    }
+    fn finish_manifest(self) -> Result<Vec<u8>> {
+        self.finish_manifest_at(None)
+    }
+    fn finish_manifest_at(mut self, coordinate: Option<&num_bigint::BigUint>) -> Result<Vec<u8>> {
+        let content = flexbuffer::command(
             RANGE_MANIFEST,
-            RangeManifest {
+            &RangeManifest {
+                coordinate: coordinate.map(flexbuffer::bigint_payload).transpose()?,
                 envelopes: self.envelopes,
             },
-        ))?;
+            &coordinate
+                .map(|p| vec![("coordinate", p)])
+                .unwrap_or_default(),
+        )?;
         crate::envbuf::append(&mut self.bytes, &content, crate::envbuf::FLEXBUFFERS)?;
-        crate::envbuf::append_counter_margin(&mut self.bytes, 0)?;
-        crate::envbuf::finish_nested(self.bytes)
+        let mut bytes = crate::envbuf::finish_nested(self.bytes)?;
+        crate::envbuf::append_counter_margin(&mut bytes, 0)?;
+        Ok(bytes)
     }
 }
 
@@ -461,7 +537,7 @@ pub fn encode_wal(commands: Vec<FlowCommand>, delta: crate::turso::wal::Delta) -
 }
 
 fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
-    let bytes = crate::envbuf::nested_message(bytes)?;
+    let bytes = envelope(bytes)?.content;
     let frames = crate::envbuf::all(bytes)?;
     let envelopes: Vec<_> = frames
         .iter()
@@ -472,13 +548,20 @@ fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
         "missing ingestion or range manifest envelope"
     );
     let last = envelopes.last().unwrap();
+    ensure!(
+        last.end == bytes.len(),
+        "retry margin must be outside event envelope"
+    );
     let manifest = tuple(last.content)?;
     ensure!(
         manifest.index(2)?.get_str()? == RANGE_MANIFEST,
         "last envelope must be rangemanifest"
     );
     let body = manifest.index(3)?.get_map()?;
-    ensure!(body.len() == 1, "invalid range manifest fields");
+    ensure!(
+        body.len() == 1 || (body.len() == 2 && body.index("coordinate").is_ok()),
+        "invalid range manifest fields"
+    );
     let index = body.index("envelopes")?.get_map()?;
     let mut expected_entries = envelopes.len() - 1;
     for (n, frame) in frames
@@ -591,19 +674,27 @@ fn historical_ranges(bytes: &[u8]) -> Result<Vec<BlobRange>> {
 mod envelope_tests {
     use super::*;
     fn frames(bytes: &[u8]) -> Result<Vec<crate::envbuf::Envelope<'_>>> {
-        let mut frames = crate::envbuf::all(crate::envbuf::nested_message(bytes)?)?;
+        let event = envelope(bytes)?;
+        let mut frames = crate::envbuf::all(event.content)?;
         for frame in &mut frames {
             frame.start += 8;
             frame.content_start += 8;
             frame.end += 8;
         }
+        frames.extend(
+            crate::envbuf::all(&bytes[event.end..])?
+                .into_iter()
+                .map(|mut f| {
+                    f.start += event.end;
+                    f.end += event.end;
+                    f.content_start += event.end;
+                    f
+                }),
+        );
         Ok(frames)
     }
     fn append_margin(bytes: &mut Vec<u8>, message: &[u8]) -> Result<()> {
-        let mut reserved = vec![0; 8];
-        reserved.extend_from_slice(crate::envbuf::nested_message(bytes)?);
-        crate::envbuf::append(&mut reserved, message, crate::envbuf::MARGIN)?;
-        *bytes = crate::envbuf::finish_nested(reserved)?;
+        crate::envbuf::append(bytes, message, crate::envbuf::MARGIN)?;
         Ok(())
     }
     #[test]
@@ -745,7 +836,7 @@ mod envelope_tests {
         assert_eq!(frames.last().unwrap().format, crate::envbuf::MARGIN);
         assert_eq!(frames.last().unwrap().content, &0u64.to_le_bytes());
         assert_eq!(manifest_range(&bytes)?, Some(last.start..last.end));
-        let headers = crate::timeline::entry_headers(&bytes)?;
+        let headers = crate::timeline::entry_headers(&bytes, 0)?;
         assert_eq!(headers["if-none-match"], "*");
         assert_eq!(
             headers["x-amz-meta-manifest-range"],
@@ -758,7 +849,7 @@ mod envelope_tests {
         );
         assert_eq!(
             crate::envbuf::before(&bytes, bytes.len())?.format,
-            crate::envbuf::NESTED
+            crate::envbuf::MARGIN
         );
         assert_eq!(blob_ranges(&bytes)?, locations.clone());
         for location in locations {

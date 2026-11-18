@@ -733,7 +733,7 @@ fn command_reads_and_hook_agree_for_repeated_flow_batches() -> Result<()> {
             consolidated(&snapshot(&writer.state.native, &schema)?)?
         );
         let bytes = encode(&commands, &delta, Some(&hook))?;
-        let command_feed = crate::envbuf::nested_message(&bytes)?;
+        let command_feed = crate::event::envelope(&bytes)?.content;
         let manifest = crate::envbuf::readable(command_feed)?.pop().unwrap();
         let ingestion = crate::envbuf::before(command_feed, manifest.start)?;
         let feed = flexbuffers::Reader::get_root(ingestion.content)?
@@ -895,6 +895,7 @@ fn measure() -> Result<()> {
     let mut integrated = snapshot(&writer.state.native, &schema)?;
     let mut measured = std::time::Duration::ZERO;
     let mut stored = Vec::new();
+    let mut crc32c = 0;
     for index in (0..warmup + count).step_by(batch) {
         let commands = input(index, batch, flows, &blob);
         let base = writer.cursor.clone();
@@ -937,6 +938,8 @@ fn measure() -> Result<()> {
             encode(&commands, &delta, feed.as_ref())?
         };
         let digest = event::entry_digest(&encoded)?;
+        let crc_base = crc32c;
+        crc32c = crate::checksum::event(crc32c, &encoded)?;
         let cpu = start.elapsed();
         let put = Instant::now();
         if let Some(bucket) = &bucket {
@@ -945,7 +948,7 @@ fn measure() -> Result<()> {
                     bucket,
                     crate::timeline::key(&(&base + 1u8))?,
                     &encoded,
-                    crate::timeline::entry_headers(&encoded)?,
+                    crate::timeline::entry_headers(&encoded, crc_base)?,
                 )
                 .await?;
                 ensure!((200..300).contains(&response.status_code()), "PUT failed");

@@ -48,8 +48,8 @@ Each entry contains decimal `viewpoint`, hexadecimal *SHA-384*[~][sha384] in
 *DifferentialEvent*[~][differential-event] at the next *Milestone*[~][milestone]
 arbitrates competing writers. Concatenate zero or more *EnvBuf-wrapped*[~][envbuf]
 commitflow tuples, one `sts/0/databasin/ingestturso` tuple, then a
-*range manifest*[~][range-manifest] and trailing *counter margin*[~][margin].
-Wrap that command feed in one nested *EnvBuf*[~][envbuf] (`100`). Each tuple is its own
+*range manifest*[~][range-manifest]. Wrap that command feed in one nested
+*EnvBuf*[~][envbuf] (`100`), then append a separate *counter margin*[~][margin]. Each tuple is its own
 *FlexBuffers*[~][flexbuffers] document. The ingestion command's
 *Turso deltas*[~][turso-state] carry the *physical frames*[~][physical-frame]
 that materialize the recorded state; all requests wait for durable publication.
@@ -58,9 +58,9 @@ Regardless of in-flight limits, durable publication must follow
 *Milestone*[~][milestone] order to preserve *causal consistency*[~][causal-consistency].
 Complete one *conditional PUT*[~][conditional-write] before starting the next;
 acknowledge a batch only after it and all predecessors are durable.
-Predecessor *digests*[~][sha384] cover the inner command feed through its *range manifest*[~][range-manifest],
-excluding outer framing and trailing retry *margins*[~][margin]; commands, internal *margins*[~][margin], and the manifest
-remain covered.
+Predecessor *digests*[~][sha384] cover the complete event *EnvBuf*[~][envbuf],
+including its header, message, alignment padding, and footer. Separate trailing
+retry *margins*[~][margin] are outside that identity.
 
 `PUT /api/v0/epilogue` adds a `flow` string to the
 *commit details*[~][epilogue-protocol] and validates against that

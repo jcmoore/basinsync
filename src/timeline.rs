@@ -38,6 +38,8 @@ pub struct Datashed {
     pub recovery: crate::recovery::Config,
     pub recovery_stats: crate::recovery::Stats,
     pub milestone: BigUint,
+    pub coordinate: BigUint,
+    pub crc32c: u32,
     pub database: Option<crate::turso::State>,
     pub stopped: bool,
     pub writer: Option<crate::turso::wal::Writer>,
@@ -192,6 +194,8 @@ impl Datashed {
 }
 
 pub struct Prepared {
+    crc32c_base: u32,
+    crc32c: u32,
     bytes: Vec<u8>,
     milestone: BigUint,
     parent: Option<String>,
@@ -202,11 +206,19 @@ pub struct Prepared {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Prefix {
     milestone: BigUint,
+    coordinate: BigUint,
+    crc32c: u32,
     digest: Option<String>,
 }
 impl Prefix {
     pub fn milestone(&self) -> &BigUint {
         &self.milestone
+    }
+    pub fn coordinate(&self) -> &BigUint {
+        &self.coordinate
+    }
+    pub fn crc32c(&self) -> u32 {
+        self.crc32c
     }
     pub fn digest(&self) -> Option<&str> {
         self.digest.as_deref()
@@ -231,7 +243,9 @@ impl Stager {
     }
     pub fn prepare(&mut self, commands: Vec<event::FlowCommand>) -> Result<Prepared> {
         let prepared = self.state.prepare_wal(commands)?;
+        self.state.coordinate += event::coordinate_length(&prepared.bytes)?;
         self.state.milestone = prepared.milestone.clone();
+        self.state.crc32c = prepared.crc32c;
         self.state.head = Some(prepared.digest.clone());
         Ok(prepared)
     }
@@ -276,15 +290,19 @@ impl Stager {
         else {
             return Ok(None);
         };
-        let bytes = event::encode_wal(vec![], delta)?;
+        let bytes = event::encode_wal_at(vec![], delta, &self.state.coordinate)?;
         let prepared = Prepared {
+            crc32c_base: self.state.crc32c,
+            crc32c: crate::checksum::event(self.state.crc32c, &bytes)?,
             digest: event::entry_digest(&bytes)?,
             bytes,
             milestone: &self.state.milestone + 1u8,
             parent: self.state.head.clone(),
             view: self.state.writer.as_ref().unwrap().snapshot()?,
         };
+        self.state.coordinate += event::coordinate_length(&prepared.bytes)?;
         self.state.milestone = prepared.milestone.clone();
+        self.state.crc32c = prepared.crc32c;
         self.state.head = Some(prepared.digest.clone());
         Ok(Some(prepared))
     }
@@ -299,15 +317,19 @@ impl Stager {
             request,
         )?;
         let prepared = if let Some((_command, delta)) = captured {
-            let bytes = event::encode_wal(vec![], delta)?;
+            let bytes = event::encode_wal_at(vec![], delta, &self.state.coordinate)?;
             let prepared = Prepared {
+                crc32c_base: self.state.crc32c,
+                crc32c: crate::checksum::event(self.state.crc32c, &bytes)?,
                 digest: event::entry_digest(&bytes)?,
                 bytes,
                 milestone: &self.state.milestone + 1u8,
                 parent: self.state.head.clone(),
                 view: self.state.writer.as_ref().unwrap().snapshot()?,
             };
+            self.state.coordinate += event::coordinate_length(&prepared.bytes)?;
             self.state.milestone = prepared.milestone.clone();
+            self.state.crc32c = prepared.crc32c;
             self.state.head = Some(prepared.digest.clone());
             Some(prepared)
         } else {
@@ -328,15 +350,19 @@ impl Stager {
         let Some((_command, delta)) = captured else {
             return Ok(None);
         };
-        let bytes = event::encode_wal(vec![], delta)?;
+        let bytes = event::encode_wal_at(vec![], delta, &self.state.coordinate)?;
         let prepared = Prepared {
+            crc32c_base: self.state.crc32c,
+            crc32c: crate::checksum::event(self.state.crc32c, &bytes)?,
             digest: event::entry_digest(&bytes)?,
             bytes,
             milestone: &self.state.milestone + 1u8,
             parent: self.state.head.clone(),
             view: self.state.writer.as_ref().unwrap().snapshot()?,
         };
+        self.state.coordinate += event::coordinate_length(&prepared.bytes)?;
         self.state.milestone = prepared.milestone.clone();
+        self.state.crc32c = prepared.crc32c;
         self.state.head = Some(prepared.digest.clone());
         Ok(Some(prepared))
     }
@@ -350,8 +376,16 @@ impl Stager {
 }
 
 /// Conditional creation plus an HTTP Range for a framed entry's manifest.
-pub fn entry_headers(bytes: &[u8]) -> Result<axum::http::HeaderMap> {
+pub fn entry_headers(bytes: &[u8], crc32c_base: u32) -> Result<axum::http::HeaderMap> {
     let mut headers = crate::epilogue::conditional_headers();
+    crate::checksum::Run {
+        before: crc32c_base,
+        after: crate::checksum::event(crc32c_base, bytes)?,
+    }
+    .headers(&mut headers)?;
+    if let Some(coordinate) = event::coordinate(bytes)? {
+        headers.insert("x-amz-meta-coordinate", coordinate.to_string().parse()?);
+    }
     if let Some(range) = event::manifest_range(bytes)? {
         headers.insert(
             "x-amz-meta-manifest-range",
@@ -366,6 +400,11 @@ impl Prepared {
         self.view.as_ref().map(|view| Snapshot {
             prefix: Prefix {
                 milestone: self.milestone.clone(),
+                coordinate: event::coordinate(&self.bytes)
+                    .expect("prepared coordinate")
+                    .expect("coordinate")
+                    + event::coordinate_length(&self.bytes).expect("prepared length"),
+                crc32c: self.crc32c,
                 digest: Some(self.digest.clone()),
             },
             view: view.clone(),
@@ -387,14 +426,17 @@ impl Prepared {
     ) -> Result<(Prefix, Vec<u8>)> {
         check_write_base(bucket, prefix).await?;
         ensure!(
-            self.milestone == &prefix.milestone + 1u8 && self.parent == prefix.digest,
+            self.milestone == &prefix.milestone + 1u8
+                && self.crc32c_base == prefix.crc32c
+                && self.parent == prefix.digest
+                && event::coordinate(&self.bytes)? == Some(prefix.coordinate.clone()),
             "publication prefix mismatch"
         );
         let (response, accepted) = crate::sequence::put_feed_returning(
             bucket,
             &key(&self.milestone)?,
             &self.bytes,
-            entry_headers(&self.bytes)?,
+            entry_headers(&self.bytes, self.crc32c_base)?,
         )
         .await?;
         ensure!(
@@ -409,6 +451,9 @@ impl Prepared {
         Ok((
             Prefix {
                 milestone: self.milestone,
+                coordinate: event::coordinate(&bytes)?.context("missing prepared coordinate")?
+                    + event::coordinate_length(&bytes)?,
+                crc32c: self.crc32c,
                 digest: Some(self.digest),
             },
             bytes,
@@ -419,6 +464,8 @@ impl Datashed {
     pub fn prefix(&self) -> Prefix {
         Prefix {
             milestone: self.milestone.clone(),
+            coordinate: self.coordinate.clone(),
+            crc32c: self.crc32c,
             digest: self.head.clone(),
         }
     }
@@ -488,9 +535,11 @@ impl Datashed {
             &commands,
             chunks.ranges(),
         )?;
-        let bytes = chunks.finish(delta)?;
+        let bytes = chunks.finish_at(delta, &self.coordinate)?;
         let digest = event::entry_digest(&bytes)?;
         Ok(Prepared {
+            crc32c_base: self.crc32c,
+            crc32c: crate::checksum::event(self.crc32c, &bytes)?,
             bytes,
             milestone,
             parent: self.head.clone(),
@@ -500,12 +549,21 @@ impl Datashed {
     }
     pub async fn publish(&mut self, bucket: &Bucket, prepared: Prepared) -> Result<()> {
         let published = prepared.publish(bucket, &self.prefix()).await?;
+        self.crc32c = published.crc32c;
+        self.coordinate = published.coordinate;
         self.milestone = published.milestone;
         self.head = published.digest;
         Ok(())
     }
     pub fn apply_entry(&mut self, milestone: BigUint, bytes: &[u8]) -> Result<()> {
         ensure!(milestone == &self.milestone + 1u8, "Timeline Milestone gap");
+        if let Some(coordinate) = event::coordinate(bytes)? {
+            ensure!(
+                coordinate == self.coordinate,
+                "Timeline byte coordinate gap"
+            );
+        }
+        let crc32c = crate::checksum::event(self.crc32c, bytes)?;
         let enveloped = bytes.starts_with(b"enV");
         let ranges = event::blob_ranges(bytes)?;
         match event::decode_entry(bytes)? {
@@ -569,6 +627,8 @@ impl Datashed {
                 self.milestone = milestone;
             }
         }
+        self.crc32c = crc32c;
+        self.coordinate += event::coordinate_length(bytes)?;
         self.head = Some(event::entry_digest(bytes)?);
         Ok(())
     }
@@ -646,7 +706,9 @@ pub async fn check_write_base(bucket: &Bucket, prefix: &Prefix) -> Result<()> {
         );
         if checkpoint.milestone == prefix.milestone {
             ensure!(
-                Some(checkpoint.digest.as_str()) == prefix.digest(),
+                Some(checkpoint.digest.as_str()) == prefix.digest()
+                    && checkpoint.coordinate == prefix.coordinate
+                    && checkpoint.crc32c == prefix.crc32c,
                 "backup prefix mismatch"
             );
         }
@@ -689,7 +751,9 @@ pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
             state.recovery = config;
         } else if checkpoint.milestone == state.milestone {
             ensure!(
-                Some(checkpoint.digest.as_str()) == state.head.as_deref(),
+                Some(checkpoint.digest.as_str()) == state.head.as_deref()
+                    && checkpoint.coordinate == state.coordinate
+                    && checkpoint.crc32c == state.crc32c,
                 "backup prefix mismatch"
             );
         }
@@ -842,6 +906,8 @@ mod tests {
             assert_eq!(digest, event::digest(&image));
             let mut recovered = Datashed {
                 milestone: snapshot.prefix.milestone.clone(),
+                coordinate: snapshot.prefix.coordinate.clone(),
+                crc32c: snapshot.prefix.crc32c,
                 head: snapshot.prefix.digest.clone(),
                 database: Some(crate::turso::State::from_image(image)?),
                 ..Default::default()

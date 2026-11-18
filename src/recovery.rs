@@ -29,6 +29,7 @@ pub enum Mode {
     BulkParallel,
     RangeParallel,
     RangePrefetch,
+    Bidirectional,
 }
 impl Mode {
     pub fn parse(value: &str) -> Result<Self> {
@@ -41,6 +42,7 @@ impl Mode {
             "bulk-parallel" => Self::BulkParallel,
             "range-parallel" => Self::RangeParallel,
             "range-prefetch" => Self::RangePrefetch,
+            "bidirectional" => Self::Bidirectional,
             _ => anyhow::bail!("unknown recovery mode"),
         })
     }
@@ -53,6 +55,9 @@ pub struct Config {
     pub bulk_concurrency: usize,
     pub bulk_buffer_bytes: usize,
     pub manifest_concurrency: usize,
+    pub disk_bytes: usize,
+    pub disk_segment_bytes: usize,
+    pub disk_directory: Option<std::path::PathBuf>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -63,6 +68,9 @@ impl Default for Config {
             bulk_concurrency: 2,
             bulk_buffer_bytes: 32 * 1024 * 1024,
             manifest_concurrency: 8,
+            disk_bytes: 256 * 1024 * 1024,
+            disk_segment_bytes: 8 * 1024 * 1024,
+            disk_directory: None,
         }
     }
 }
@@ -87,12 +95,27 @@ impl Config {
         if let Ok(value) = std::env::var("BASINSYNC_RECOVERY_MANIFEST_CONCURRENCY") {
             config.manifest_concurrency = value.parse()?;
         }
+        if let Ok(value) = std::env::var("BASINSYNC_RECOVERY_DISK_BYTES") {
+            config.disk_bytes = value.parse()?;
+        }
+        if let Ok(value) = std::env::var("BASINSYNC_RECOVERY_DISK_SEGMENT_BYTES") {
+            config.disk_segment_bytes = value.parse()?;
+        }
+        config.disk_directory =
+            std::env::var_os("BASINSYNC_RECOVERY_DISK_DIRECTORY").map(Into::into);
         Ok(config)
     }
 }
 #[derive(Default, Debug, Serialize)]
 pub struct Stats {
     pub timeline_gets: usize,
+    pub descending_gets: usize,
+    pub cache_hits: usize,
+    pub cache_evictions: usize,
+    pub peak_disk_bytes: usize,
+    pub cache_bypasses: usize,
+    pub cache_misses: usize,
+    pub coordinate_range_gets: usize,
     pub bulk_gets: usize,
     pub bulk_events: usize,
     pub applied: usize,
@@ -254,6 +277,12 @@ async fn get_event(bucket: &Bucket, milestone: BigUint, max_bytes: usize) -> Res
         response.as_slice().len() <= max_bytes,
         "Timeline event exceeds recovery buffer limit"
     );
+    if let Some(record) = crate::checksum::Run::from_headers(&response.headers())? {
+        ensure!(
+            crate::checksum::event(record.before, response.as_slice())? == record.after,
+            "Timeline coordinate CRC32C mismatch"
+        );
+    }
     let bytes = Arc::new(response.to_vec());
     Ok(Download {
         entries: vec![(
@@ -316,7 +345,9 @@ async fn get_manifest(bucket: &Bucket, candidate: &Candidate) -> Result<analogue
     );
     let index = analogue::Index::decode(frame.content)?;
     ensure!(
-        index.order() == candidate.order && index.offsets.last() == Some(&start),
+        index.order() == candidate.order
+            && index.ends.last() == Some(&start)
+            && index.coordinate == analogue::key_coordinate(&candidate.key)?,
         "BulkManifest key/index mismatch"
     );
     Ok(index)
@@ -325,6 +356,7 @@ async fn get_manifest(bucket: &Bucket, candidate: &Candidate) -> Result<analogue
 enum Fetched {
     Data(Download),
     Manifest(analogue::Index),
+    Cached(Option<Vec<u8>>),
 }
 
 async fn get_order(
@@ -359,8 +391,16 @@ async fn get_order(
             response.status_code() == 200 && response.as_slice().len() <= max_bytes,
             "BulkOrder GET failed"
         );
+        let record = crate::checksum::Run::from_headers(&response.headers())?;
         let bytes = response.to_vec();
         let index = analogue::decode(&bytes, &candidate.order)?;
+        if let Some(record) = record {
+            record.verify(&bytes[..analogue::manifest_start(&candidate.key)?])?;
+        }
+        ensure!(
+            index.coordinate == analogue::key_coordinate(&candidate.key)?,
+            "BulkOrder coordinate/key mismatch"
+        );
         ensure!(
             analogue::footer(&bytes)?.1.start == analogue::manifest_start(&candidate.key)?,
             "BulkManifest range/key mismatch"
@@ -372,12 +412,22 @@ async fn get_order(
     let bytes = Arc::new(bytes);
     let mut entries = Vec::with_capacity(count);
     for i in first..first + count {
-        let range = index.offsets[i] - base..index.offsets[i + 1] - base;
+        let range = index.boundary(i) - base..index.ends[i] - base;
         envbuf::nested_message(
             bytes
                 .get(range.clone())
                 .context("BulkOrder index outside response")?,
         )?;
+        if let Some(coordinate) = crate::event::coordinate(&bytes[range.clone()])? {
+            ensure!(
+                coordinate == &index.coordinate + index.boundary(i),
+                "BulkOrder event coordinate mismatch"
+            );
+        }
+        ensure!(
+            crate::event::coordinate_length(&bytes[range.clone()])? == range.len(),
+            "BulkOrder logical end mismatch"
+        );
         entries.push((
             &index.lowest + i,
             Entry {
@@ -390,7 +440,94 @@ async fn get_order(
     Ok(Download { entries })
 }
 
+struct CoordinateSpan {
+    range: Range<usize>,
+    high: BigUint,
+    end_coordinate: BigUint,
+    start_coordinate: BigUint,
+}
+fn coordinate_span(
+    candidate: &Candidate,
+    low: &BigUint,
+    tail: &BigUint,
+    coordinate: &BigUint,
+    suffix: Option<&(BigUint, BigUint)>,
+) -> Result<CoordinateSpan> {
+    ensure!(
+        candidate.order.covers(low) && candidate.order.highest <= tail + 1u8,
+        "order outside recovery interval"
+    );
+    let base = analogue::key_coordinate(&candidate.key)?;
+    let length = analogue::manifest_start(&candidate.key)?;
+    ensure!(
+        &base <= coordinate && coordinate < &(&base + length),
+        "coordinate outside order"
+    );
+    let mut high = candidate.order.highest.clone();
+    let mut end = &base + length;
+    if let Some((milestone, coordinate)) = suffix
+        && low < milestone
+        && milestone < &high
+        && coordinate < &end
+        && coordinate >= &base
+    {
+        high = milestone.clone();
+        end = coordinate.clone();
+    }
+    ensure!(coordinate < &end, "empty coordinate range");
+    Ok(CoordinateSpan {
+        range: usize::try_from(coordinate - &base)?..usize::try_from(&end - &base)?,
+        high,
+        end_coordinate: end,
+        start_coordinate: coordinate.clone(),
+    })
+}
+
+async fn get_coordinate_order(
+    bucket: &Bucket,
+    candidate: &Candidate,
+    low: BigUint,
+    span: CoordinateSpan,
+    max_bytes: usize,
+) -> Result<Download> {
+    let bytes = Arc::new(ranged_get(bucket, &candidate.key, span.range.clone(), max_bytes).await?);
+    let mut coordinate = span.start_coordinate;
+    let mut milestone = low;
+    let mut entries = vec![];
+    for frame in envbuf::all(&bytes)? {
+        ensure!(
+            frame.format == envbuf::NESTED,
+            "coordinate range is not complete events"
+        );
+        let range = frame.start..frame.end;
+        ensure!(
+            crate::event::coordinate(&bytes[range.clone()])? == Some(coordinate.clone()),
+            "archive byte coordinate mismatch"
+        );
+        ensure!(
+            crate::event::coordinate_length(&bytes[range.clone()])? == range.len(),
+            "BulkOrder event has retry margins"
+        );
+        coordinate += range.len();
+        entries.push((
+            milestone.clone(),
+            Entry {
+                bytes: bytes.clone(),
+                range,
+                source: Some(candidate.key.clone()),
+            },
+        ));
+        milestone += 1u8;
+    }
+    ensure!(
+        milestone == span.high && coordinate == span.end_coordinate,
+        "archive coordinate/Milestone boundary mismatch"
+    );
+    Ok(Download { entries })
+}
+
 struct ActiveOrder {
+    end_coordinate: Option<BigUint>,
     range: Range<BigUint>,
     bytes: usize,
 }
@@ -470,9 +607,31 @@ pub async fn replay(
     }
     let parallel_bulk = matches!(
         config.mode,
-        Mode::BulkParallel | Mode::RangeParallel | Mode::RangePrefetch
+        Mode::BulkParallel | Mode::RangeParallel | Mode::RangePrefetch | Mode::Bidirectional
     );
     let bulk = parallel_bulk || matches!(config.mode, Mode::Bulk | Mode::Range | Mode::Hedged);
+    let bidirectional = config.mode == Mode::Bidirectional;
+    let mut cache = if bidirectional && config.disk_bytes > 0 {
+        match crate::recovery_cache::Cache::new(
+            config.disk_directory.clone(),
+            config.disk_bytes,
+            config.disk_segment_bytes,
+        )
+        .await
+        {
+            Ok(cache) => Some(cache),
+            Err(error) => {
+                tracing::warn!(%error,"recovery disk cache unavailable; continuing without it");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let disk_metrics = cache.as_ref().map(|cache| cache.metrics.clone());
+    let mut reverse = JoinSet::new();
+    let mut reverse_next = tail.clone();
+    let mut cache_reading = BTreeSet::new();
     let prefetch = config.mode == Mode::RangePrefetch;
     let bulk_window = if parallel_bulk {
         config.bulk_concurrency
@@ -484,10 +643,10 @@ pub async fn replay(
     } else {
         usize::MAX
     };
-    let (position, positions) = watch::channel(cursor.clone());
+    let (frontier, frontiers) = watch::channel(cursor.clone());
     let (output, mut discovered) = mpsc::channel(64);
     let listing =
-        bulk.then(|| tokio::spawn(discover(bucket.clone(), positions, cursor.clone(), output)));
+        bulk.then(|| tokio::spawn(discover(bucket.clone(), frontiers, cursor.clone(), output)));
     let result = async {
         let mut candidates = HashMap::<String, Candidate>::new();
         let mut failed = BTreeSet::<String>::new();
@@ -499,6 +658,13 @@ pub async fn replay(
         let mut downloads = JoinSet::new();
         let mut discovery_open = bulk;
         loop {
+            // The descending reader never waits for archive progress or cache space.
+            if bidirectional && reverse.is_empty() && reverse_next >= cursor {
+                let milestone=reverse_next.clone(); reverse_next-=1u8;
+                let reader=bucket.clone(); let max_bytes=config.max_bytes;
+                reverse.spawn(async move { (milestone.clone(), get_event(&reader,milestone,max_bytes).await) });
+                stats.timeline_gets+=1; stats.descending_gets+=1;
+            }
             while let Ok(candidate) = discovered.try_recv() {
                 candidates.insert(candidate.key.clone(), candidate);
             }
@@ -519,10 +685,16 @@ pub async fn replay(
                 }
             }
             if cursor > tail { break; }
+            if !waiting.contains_key(&cursor) && !cache_reading.contains(&cursor)
+                && let Some(cache)=&cache && cache.contains(&cursor) {
+                cache_reading.insert(cursor.clone());
+                let read=cache.reader(cursor.clone()); let milestone=cursor.clone();
+                downloads.spawn(async move { (None,Some(milestone),Ok(Fetched::Cached(read.await))) });
+            }
             candidates.retain(|key, c| c.order.highest > cursor && !failed.contains(key));
             // Discovery can look ahead without advancing the applied cursor.
-            if cursor > *position.borrow() {
-                position.send_replace((&cursor + 31u8).min(&tail + 1u8));
+            if cursor > *frontier.borrow() {
+                frontier.send_replace((&cursor + 31u8).min(&tail + 1u8));
             }
             if candidates.len() > 128 {
                 let mut ranked: Vec<_> = candidates.values().map(|c| (c.order.highest.clone(), c.key.clone())).collect();
@@ -540,8 +712,8 @@ pub async fn replay(
                             && analogue::manifest_start(&candidate.key).is_ok_and(|start| candidate.size.checked_sub(start as u64).is_some_and(|length| length > 0 && length <= MAX_MANIFEST_BYTES as u64))
                     }).max_by_key(|candidate| &candidate.order.highest).cloned() else { break; };
                     let high = candidate.order.highest.clone().min(&tail + 1u8);
-                    if high > *position.borrow() { position.send_replace(high.clone()); }
-                    probes.insert(candidate.key.clone(), ActiveOrder { range: low..high, bytes: 0 });
+                    if high > *frontier.borrow() { frontier.send_replace(high.clone()); }
+                    probes.insert(candidate.key.clone(), ActiveOrder { range: low..high, bytes: 0, end_coordinate: None });
                     stats.manifest_gets += 1;
                     stats.peak_manifest_reads = stats.peak_manifest_reads.max(probes.len());
                     let reader = bucket.clone();
@@ -550,11 +722,19 @@ pub async fn replay(
             }
             if bulk {
                 loop {
-                    let low = next_uncovered(&cursor, &waiting, &active);
+                    let mut low = next_uncovered(&cursor, &waiting, &active);
+                    if bidirectional { while cache.as_ref().is_some_and(|cache|cache.contains(&low)) {low+=1u8;} }
                     let (slots, bytes) = bulk_usage(&waiting, &active);
-                    if low > tail || slots >= bulk_window { break; }
+                    if low > tail || slots >= bulk_window || cache_reading.contains(&low) { break; }
+                    let known_coordinate = if low==cursor {Some(state.coordinate.clone())} else {
+                        active.values().find(|a|a.range.end==low).and_then(|a|a.end_coordinate.clone())
+                            .or_else(|| waiting.get(&low).and_then(|e|crate::event::coordinate(&e.bytes[e.range.clone()]).ok().flatten()))
+                    };
+                    let suffix=cache.as_ref().and_then(|cache|cache.suffix(&tail,&cursor));
                     let reservation = |candidate: &Candidate| -> Option<usize> {
-                        if prefetch {
+                        if bidirectional {
+                            coordinate_span(candidate,&low,&tail,known_coordinate.as_ref()?,suffix.as_ref()).ok().map(|span|span.range.len())
+                        } else if prefetch {
                             manifests.get(&candidate.key)?.range(&low, &candidate.order.highest.clone().min(&tail + 1u8)).ok().map(|range| range.len())
                         } else { usize::try_from(candidate.size).ok() }
                     };
@@ -564,11 +744,13 @@ pub async fn replay(
                             && reservation(candidate).is_some_and(|reserved| reserved <= bulk_budget.saturating_sub(bytes))
                     }).max_by_key(|candidate| &candidate.order.highest).cloned() else { break; };
                     let reserved = reservation(&candidate).context("missing BulkOrder reservation")?;
-                    let high = candidate.order.highest.clone().min(&tail + 1u8);
-                    if high > *position.borrow() { position.send_replace(high.clone()); }
+                    let span=if bidirectional {Some(coordinate_span(&candidate,&low,&tail,known_coordinate.as_ref().unwrap(),suffix.as_ref())?)}else{None};
+                    let high = span.as_ref().map(|span|span.high.clone()).unwrap_or_else(||candidate.order.highest.clone().min(&tail + 1u8));
+                    if high > *frontier.borrow() { frontier.send_replace(high.clone()); }
                     active.insert(candidate.key.clone(), ActiveOrder {
-                        range: low.clone()..high,
+                        range: low.clone()..high.clone(),
                         bytes: reserved,
+                        end_coordinate: span.as_ref().map(|span|span.end_coordinate.clone()),
                     });
                     stats.peak_bulk_downloads = stats.peak_bulk_downloads.max(active.len());
                     stats.peak_bulk_reserved_bytes = stats.peak_bulk_reserved_bytes.max(bulk_usage(&waiting, &active).1);
@@ -578,18 +760,20 @@ pub async fn replay(
                     let range_reads = matches!(config.mode, Mode::Range | Mode::RangeParallel | Mode::RangePrefetch);
                     let cached = manifests.remove(&candidate.key);
                     let max_bytes = config.max_bytes;
+                    if span.is_some() { stats.coordinate_range_gets+=1; }
                     downloads.spawn(async move {
-                        (Some(candidate.key.clone()), None, get_order(&reader, &candidate, low, tail, range_reads, max_bytes, cached).await.map(Fetched::Data))
+                        let result=if let Some(span)=span {get_coordinate_order(&reader,&candidate,low,span,max_bytes).await} else {get_order(&reader, &candidate, low, tail, range_reads, max_bytes, cached).await};
+                        (Some(candidate.key.clone()), None, result.map(Fetched::Data))
                     });
                 }
             }
             let window = if config.mode == Mode::Parallel { config.concurrency } else { 1 };
             // A future buffered order must not prevent filling an earlier gap.
-            if (!active.values().any(|order| order.range.contains(&cursor)) && !probes.values().any(|order| order.range.contains(&cursor))) || config.mode == Mode::Hedged {
+            if (!active.values().any(|order| order.range.contains(&cursor)) && !probes.values().any(|order| order.range.contains(&cursor))) || config.mode == Mode::Hedged || (bidirectional && reverse.is_empty() && reverse_next < cursor) {
                 for offset in 0..window {
                     let milestone = &cursor + offset;
                     if milestone > tail || individuals.len() >= window { break; }
-                    if !waiting.contains_key(&milestone) && individuals.insert(milestone.clone()) {
+                    if !waiting.contains_key(&milestone) && !cache_reading.contains(&milestone) && individuals.insert(milestone.clone()) {
                         let reader = bucket.clone();
                         let max_bytes = config.max_bytes;
                         downloads.spawn(async move { (None, Some(milestone.clone()), get_event(&reader, milestone, max_bytes).await.map(Fetched::Data)) });
@@ -598,15 +782,34 @@ pub async fn replay(
                 }
             }
             tokio::select! {
+                changed = async { match &mut cache {Some(cache)=>cache.changed.changed().await, None=>std::future::pending().await} } => {
+                    if changed.is_err() { cache=None; }
+                },
+                result=reverse.join_next(),if !reverse.is_empty()=>{
+                    let (milestone,result)=result.context("missing descending download")?.context("descending reader panicked")?;
+                    match result {
+                        Ok(download)=>for (m,entry) in download.entries {
+                            if m==cursor {waiting.entry(m).or_insert(entry);}
+                            else if m>cursor && !cache.as_ref().is_some_and(|cache|cache.insert(m,entry.bytes)) {stats.cache_bypasses+=1;}
+                        },
+                        Err(error)=>tracing::warn!(%error,%milestone,"descending fetch failed; forward retrieval remains authoritative"),
+                    }
+                },
                 candidate = discovered.recv(), if discovery_open => match candidate {
                     Some(candidate) => { candidates.insert(candidate.key.clone(), candidate); },
                     None => discovery_open = false,
                 },
                 download = downloads.join_next(), if !downloads.is_empty() => {
                     let (source, milestone, result) = download.context("missing recovery download")?.context("recovery download panicked")?;
-                    if let Some(milestone) = milestone { individuals.remove(&milestone); }
+                    if let Some(milestone) = &milestone { individuals.remove(milestone); cache_reading.remove(milestone); }
                     if let Some(source) = &source { active.remove(source); probes.remove(source); }
                     match result {
+                        Ok(Fetched::Cached(bytes))=>{
+                            if let Some(bytes)=bytes {
+                                let bytes=Arc::new(bytes); let m=milestone.context("cache reply without milestone")?;
+                                if m>=cursor { waiting.entry(m).or_insert(Entry{range:0..bytes.len(),bytes,source:None});stats.cache_hits+=1; }
+                            }else{stats.cache_misses+=1;}
+                        },
                         Ok(Fetched::Manifest(index)) => { manifests.insert(source.context("manifest without source")?, index); },
                         Ok(Fetched::Data(download)) => for (milestone, entry) in download.entries {
                             if milestone >= cursor { waiting.entry(milestone).or_insert(entry); }
@@ -623,8 +826,14 @@ pub async fn replay(
                 },
             }
         }
+        if let Some(metrics)=disk_metrics {
+            stats.cache_evictions=metrics.evicted.load(std::sync::atomic::Ordering::Relaxed);
+            stats.peak_disk_bytes=metrics.peak_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        }
         Ok(stats)
     }.await;
+    reverse.abort_all();
+    while reverse.join_next().await.is_some() {}
     if let Some(listing) = listing {
         listing.abort();
         match listing.await {
@@ -669,6 +878,7 @@ mod tests {
         let active = HashMap::from([(
             "first".into(),
             ActiveOrder {
+                end_coordinate: None,
                 range: 42u8.into()..80u8.into(),
                 bytes: 100,
             },

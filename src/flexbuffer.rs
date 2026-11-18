@@ -102,6 +102,56 @@ pub fn encode(extension: &Extension) -> Result<Vec<u8>> {
     Ok(buffer)
 }
 
+/// Reserve a typed UInt vector even when serde would choose UInt2/3/4.
+pub fn bigint_payload(value: &num_bigint::BigUint) -> Result<Vec<u8>> {
+    let mut payload = Extension::BigInt(value.clone().into()).payload()?;
+    payload.resize(payload.len().max(5), 0);
+    Ok(payload)
+}
+
+/// Serialize a command, then restore the reserved bigint vectors' true lengths.
+pub fn command(
+    path: &str,
+    query: &impl serde::Serialize,
+    fields: &[(&str, &num_bigint::BigUint)],
+) -> Result<Vec<u8>> {
+    let species = Extension::WellKnownSymbol("species".into()).payload()?;
+    let mut bytes = flexbuffers::to_vec((species, crate::event::NAMESPACE, path, query))?;
+    for (name, value) in fields {
+        let length = Extension::BigInt((*value).clone().into()).payload()?.len();
+        if length >= 5 {
+            continue;
+        }
+        let map = Reader::get_root(bytes.as_slice())?
+            .get_vector()?
+            .index(3)?
+            .get_map()?;
+        let index = map
+            .iter_keys()
+            .position(|key| key == *name)
+            .context("missing bigint field")?;
+        let count = map.len();
+        let uint = |at: usize, width: usize| -> usize {
+            let mut word = [0u8; 8];
+            word[..width].copy_from_slice(&bytes[at..at + width]);
+            u64::from_le_bytes(word) as usize
+        };
+        let root_width = *bytes.last().unwrap() as usize;
+        let slot = bytes.len() - 2 - root_width;
+        let root = slot - uint(slot, root_width);
+        let tuple_width = 1usize << (bytes[bytes.len() - 2] & 3);
+        let slot = root + 3 * tuple_width;
+        let query = slot - uint(slot, tuple_width);
+        let width = 1usize << (bytes[root + 4 * tuple_width + 3] & 3);
+        let slot = query + index * width;
+        let vector = slot - uint(slot, width);
+        let element_width = 1usize << (bytes[query + count * width + index] & 3);
+        bytes[vector - element_width..vector]
+            .copy_from_slice(&(length as u64).to_le_bytes()[..element_width]);
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

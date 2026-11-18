@@ -1,6 +1,6 @@
 import { expect,test } from "bun:test";
 import { all,at,before,concat,wrap,readable,MARGIN,PLATFORM_EXTENSION, message, nestedMessage, NESTED } from "./envbuf";
-import { encodeWalEvent,encodeTuples,manifestPath,commandFrames,entryDigest,rangesAt,eventTuples,deltasAt,type WalDelta } from "./events";
+import { encodeWalEvent,encodeTuples,manifestPath,commandFrames,entryDigest,eventEnvelope,trimRetryMargins,rangesAt,eventTuples,deltasAt,type WalDelta } from "./events";
 import { encode,toObject } from "./flexbuffer";
 import { encode as lex } from "./lexidecimal";
 import { sha384 } from "./client";
@@ -54,13 +54,13 @@ test("independent EnvBuf event writer records absolute blob offsets across FlexB
   const bytes=encodeWalEvent(commands,{} as any),ranges=rangesAt(bytes);
   expect(eventTuples(bytes).length).toBe(commands.length+1);
   for(const range of ranges){expect(bytes.subarray(range.offset,range.offset+range.length)).toEqual(range.marker.blob);expect(sha384(range.marker.blob)).toBe(range.marker.sha384);}
-  const frames=commandFrames(bytes);expect(frames.length).toBe(commands.length+3);expect(before(bytes,bytes.length).format).toBe(NESTED);for(const frame of frames)expect((frame.end-frame.start)%8).toBe(0);
+  const frames=commandFrames(bytes);expect(frames.length).toBe(commands.length+2);expect(before(bytes,bytes.length).format).toBe(MARGIN);for(const frame of frames)expect((frame.end-frame.start)%8).toBe(0);
 });
 
 test("ingestion-only events have one indexed command and no marker ranges",()=>{
   const delta:WalDelta={version:"test",logical:{base:null,header:new Uint8Array(),frames:[]},physical:{format:"sqlite-wal/1",base:"0",milestone:"1",parent:null,base_sha384:null,segments:[]}};
   const bytes=encodeWalEvent([],delta);
-  expect(all(bytes).length).toBe(1);expect(commandFrames(bytes).length).toBe(3);
+  expect(all(bytes).length).toBe(2);expect(commandFrames(bytes).length).toBe(2);
   expect(eventTuples(bytes).map(t=>t[2])).toEqual(["sts/0/databasin/ingestturso"]);
   expect(rangesAt(bytes)).toEqual([]);
   expect(deltasAt(bytes).turso["default.turso"]).toEqual(delta);
@@ -70,11 +70,11 @@ test("range manifests index each consecutive margin run once at its exclusive en
   const marker={viewpoint:"0",sha384:sha384(new Uint8Array([1])),blob:new Uint8Array([1]),edges:[],context:{}};
   const plain=encodeWalEvent([{flow:marker}],delta),commands=eventTuples(plain),pad={margin:new Uint8Array([255,0,1])};
   const bytes=encodeTuples([pad,pad,commands[0],pad,pad,commands[1],pad,pad]);
-  const frames=commandFrames(bytes),manifest=frames.at(-2)!,index=(toObject(new Uint8Array(manifest.content)) as any[])[3].envelopes;
+  const frames=commandFrames(bytes),manifest=frames.at(-1)!,index=(toObject(new Uint8Array(manifest.content)) as any[])[3].envelopes;
   const marginEnds=[frames[1].end,frames[4].end,frames[7].end].map(n=>lex(BigInt(n-8)));
   expect(Object.keys(index).filter(key=>index[key]===null)).toEqual(marginEnds);
   expect(Object.keys(index).length).toBe(5);expect(index[lex(BigInt(frames[0].end-8))]).toBeUndefined();
-  const padded=wrap(concat([nestedMessage(bytes),wrap(new Uint8Array(),MARGIN)]),NESTED);
+  const padded=concat([bytes,wrap(new Uint8Array(),MARGIN)]);
   expect(eventTuples(padded)).toEqual(commands);expect(deltasAt(padded).turso["default.turso"]).toEqual(delta);
   const ranges=rangesAt(padded);expect(ranges.length).toBe(1);expect(ranges[0].marker).toEqual(marker);
   expect(padded.subarray(ranges[0].offset,ranges[0].offset+ranges[0].length)).toEqual(marker.blob);
@@ -103,11 +103,11 @@ test("empty raw messages and empty margin are framed above the tombstone floor",
 
 test("Timeline identity excludes trailing retry margin while manifest ranges stay fixed",()=>{
   const commands=[[Symbol.species,"sync.memoremix.com","sts/0/databasin/ingestturso",{turso:{}}]];
-  const bytes=encodeTuples(commands),identity=entryDigest(bytes),last=commandFrames(bytes).at(-2)!;
-  expect(commandFrames(bytes).at(-1)!.content).toEqual(new Uint8Array(8));
+  const bytes=encodeTuples(commands),identity=entryDigest(bytes),last=commandFrames(bytes).at(-1)!;
+  expect(all(bytes).at(-1)!.content).toEqual(new Uint8Array(8));
   for(const counter of [0n,1n,256n,(1n<<64n)-1n]){
     const message=new Uint8Array(8);new DataView(message.buffer).setBigUint64(0,counter,true);
-    const retried=new Uint8Array(bytes);retried.set(wrap(message,MARGIN),last.end);expect(retried.length).toBe(bytes.length);
+    const retried=new Uint8Array(bytes);retried.set(wrap(message,MARGIN),eventEnvelope(bytes).end);expect(retried.length).toBe(bytes.length);
     expect(entryDigest(retried)).toBe(identity);expect(sha384(retried)).not.toBe(identity);
     expect(commandFrames(retried).filter(e=>e.format!==MARGIN).at(-1)!.start).toBe(last.start);
   }
@@ -119,15 +119,15 @@ test("concatenated DifferentialEvents preserve borrowed feeds, relative manifest
     return encodeWalEvent([{flow:{viewpoint:"0",sha384:sha384(blob),blob,edges:[],context:{}}}],{} as any);
   });
   const bytes=concat([wrap(new Uint8Array([1]),MARGIN),...inputs]),frames=all(bytes);
-  expect(frames.map(f=>f.format)).toEqual([MARGIN,NESTED,NESTED,NESTED]);
+  expect(frames.map(f=>f.format)).toEqual([MARGIN,NESTED,MARGIN,NESTED,MARGIN,NESTED,MARGIN]);
   let end=bytes.length;for(const frame of [...frames].reverse()){expect(before(bytes,end)).toEqual(frame);end=frame.start;}expect(end).toBe(0);
-  for(const [n,outer] of frames.slice(1).entries()){
+  for(const [n,outer] of frames.filter(f=>f.format===NESTED).entries()){
     const event=bytes.subarray(outer.start,outer.end),feed=nestedMessage(event);
     expect(feed.buffer).toBe(bytes.buffer);expect(feed.byteOffset).toBe(outer.content.byteOffset);
     expect(entryDigest(event)).toBe(entryDigest(inputs[n]));
-    const commands=commandFrames(event),manifest=commands.at(-2)!,index=(toObject(new Uint8Array(manifest.content)) as any[])[3].envelopes;
+    const commands=commandFrames(event),manifest=commands.at(-1)!,index=(toObject(new Uint8Array(manifest.content)) as any[])[3].envelopes;
     let previous=0;
-    for(const command of commands.slice(0,-2)){
+    for(const command of commands.slice(0,-1)){
       expect(index[lex(BigInt(command.end-8))]).toBeDefined();
       const extracted=bytes.subarray(outer.start+8+previous,outer.start+command.end);
       expect(at(extracted,0).content).toEqual(command.content);previous=command.end-8;
@@ -136,5 +136,18 @@ test("concatenated DifferentialEvents preserve borrowed feeds, relative manifest
     for(const range of rangesAt(event))expect(bytes.subarray(outer.start+range.offset,outer.start+range.offset+range.length)).toEqual(range.marker.blob);
   }
   expect(()=>rangesAt(bytes)).toThrow();
-  expect(()=>rangesAt(nestedMessage(inputs[0]))).toThrow();
+  expect(()=>rangesAt(eventEnvelope(inputs[0]).content)).toThrow();
+});
+
+test("external storage margins leave the complete event stable and reject other suffixes",()=>{
+  const stored=encodeTuples([[Symbol.species,"sync.memoremix.com","sts/0/databasin/ingestturso",{turso:{}}]],0n),plain=trimRetryMargins(stored);
+  expect(all(stored).map(f=>f.format)).toEqual([NESTED,MARGIN]);
+  expect(entryDigest(stored)).toBe(sha384(plain));
+  for(const margins of [[],[wrap(new Uint8Array(1),MARGIN)],[wrap(new Uint8Array(8),MARGIN),wrap(new Uint8Array(9),MARGIN)]]){
+    const bytes=concat([plain,...margins]);expect(trimRetryMargins(bytes)).toEqual(plain);expect(entryDigest(bytes)).toBe(entryDigest(stored));expect(eventTuples(bytes)).toEqual(eventTuples(stored));
+  }
+  for(const suffix of [wrap(new Uint8Array(),NESTED),wrap(new Uint8Array(),5),wrap(new Uint8Array(),0),wrap(new Uint8Array(8),MARGIN).subarray(0,23)]){
+    const bytes=concat([plain,suffix]);expect(()=>eventTuples(bytes)).toThrow();expect(()=>entryDigest(bytes)).toThrow();
+  }
+  const inside=wrap(concat([eventEnvelope(stored).content,wrap(new Uint8Array(8),MARGIN)]),NESTED);expect(()=>rangesAt(inside)).toThrow();
 });

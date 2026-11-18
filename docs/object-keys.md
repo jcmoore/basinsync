@@ -2,6 +2,7 @@
 [analogue]: <glossary/analogue.md>
 [bulk-manifest]: <glossary/bulk-manifest.md>
 [bulk-order]: <glossary/bulk-order.md>
+[byte-coordinate]: <glossary/byte-coordinate.md>
 [commit-marker]: <glossary/commit-marker.md>
 [datashed]: <glossary/datashed.md>
 [derived-subkey]: <glossary/derived-subkey.md>
@@ -35,7 +36,7 @@ All implemented S3 key patterns, relative to the configured bucket:
 | *Tombstone*[~][tombstone] probes | `sentinel/tombstone/${length}` |
 | *Margin*[~][margin] probes | `sentinel/margin/${counter}` |
 | *Datashed*[~][datashed] *DifferentialEvent*[~][differential-event] | `timeline/${lex(~milestone)}` |
-| *Datashed*[~][datashed] *Analogue*[~][analogue] *BulkOrder*[~][bulk-order] | `analogue/${lex(~lowest)}/${lex(~highest)}/v0/${events_end_exclusive}` |
+| *Datashed*[~][datashed] *Analogue*[~][analogue] *BulkOrder*[~][bulk-order] | `analogue/${lex(~lowest)}/${lex(~highest)}/v0/${bulkmanifest_start}/${coordinate}` |
 | *Datashed*[~][datashed] backup *CommitMarker*[~][commit-marker] | `epilogue/${lex(~viewpoint)}` |
 | *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `epilogue/${lex(viewpoint)}` |
 | *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
@@ -87,7 +88,7 @@ Reserve `_r_` for future *retainers*[~][retainer].
 
 Sequence objects reserve zero bytes for *empty sentinels*[~][empty-sentinel].
 *DifferentialEvents*[~][differential-event] each wrap a command feed in one nested
-*EnvBuf*[~][envbuf] (`100`), including its trailing *counter margin*[~][margin];
+*EnvBuf*[~][envbuf] (`100`), followed by a separate *counter margin*[~][margin];
 *CommitMarkers*[~][commit-marker], including database backups, wrap their blob in
 one raw message. These feeds default to a trailing `u64` *counter margin*[~][margin].
 *PromotionSigns*[~][promotion-sign] use a *margin*[~][margin] with a one-byte counter
@@ -102,5 +103,7 @@ absent and verified on reuse. *Tombstone*[~][tombstone] probe lengths are decima
 *BulkOrders*[~][bulk-order] contain complete event envelopes, their own footer tuple,
 and a trailing *counter margin*[~][margin].
 
-The `v0` suffix stores the decimal exclusive end of the event bytes, where the
-*BulkManifest*[~][bulk-manifest] starts. Its representation and length do not enter the key.
+`bulkmanifest_start` is the exclusive end of the event bytes and the starting
+object offset of the *BulkManifest*[~][bulk-manifest]. `coordinate` is the events'
+starting *Timeline byte coordinate*[~][byte-coordinate]; both are canonical decimal.
+The manifest's representation and length do not enter the key.

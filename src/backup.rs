@@ -98,6 +98,8 @@ pub async fn publish(bucket: &Bucket, snapshot: &Snapshot) -> Result<()> {
         return Ok(());
     }
     let checkpoint = epilogue::Checkpoint {
+        crc32c: snapshot.prefix.crc32c(),
+        coordinate: snapshot.prefix.coordinate().clone(),
         viewpoint: latest
             .as_ref()
             .map_or_else(Viewpoint::zero, |cp| cp.viewpoint.next()),

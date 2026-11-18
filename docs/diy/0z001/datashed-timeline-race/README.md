@@ -3,8 +3,10 @@ prerequisites:
   - 0z000/shallow-epilogue-commits
 ---
 
+[byte-coordinate]: <../../../glossary/byte-coordinate.md>
 [commit-marker]: <../../../glossary/commit-marker.md>
 [context]: <../../../glossary/context.md>
+[crc32c]: <../../../glossary/crc32c.md>
 [datashed]: <../../../glossary/datashed.md>
 [datashed-timeline]: <../../../datashed-timeline.md>
 [development]: <../../../development.md>
@@ -74,10 +76,11 @@ Reserve the outer header before assembling chunks; translate blob offsets to the
 containing object. Set `x-amz-meta-manifest-range: bytes=start-end` on the S3
 object to the complete manifest *envelope's*[~][envbuf] inclusive decimal byte range,
 excluding the default trailing *counter margin*[~][margin], so clients can fetch it directly.
-Keep that margin inside the outer message, then finalize its header and footer.
+Finalize the outer header and footer, then append that margin as a separate envelope.
 Later appended commands must preserve earlier blob offsets.
-A *Timeline*[~][timeline] predecessor's *SHA-384*[~][sha384] covers the inner command feed through
-its *range manifest*[~][range-manifest], excluding outer framing and trailing *margins*[~][margin]. A retry can
+A *Timeline*[~][timeline] predecessor's *SHA-384*[~][sha384] covers the complete
+event *EnvBuf*[~][envbuf], including header, message, padding, and footer; separate
+trailing *margins*[~][margin] are excluded. A retry can
 therefore update its trailing *margin*[~][margin] without changing already-prepared successor bindings.
 
 Track each *Flow*[~][flow] and *downstream*[~][downstream]
@@ -100,3 +103,7 @@ Test multiple *Flows*[~][flow], concurrent servers, exact blob contents, restart
 replay, forward/backward framing, *margins*[~][margin], padding and width boundaries, manifests, and
 blob slices. Fetch signed ranges and reject omitted, expanded, or changed
 headers, including when other sensitive payloads share the object.
+
+Maintain cumulative *CRC32C*[~][crc32c] over the margin-free *coordinate run*[~][byte-coordinate].
+Publish its starting and ending values in each *DifferentialEvent's*[~][differential-event]
+S3 metadata.

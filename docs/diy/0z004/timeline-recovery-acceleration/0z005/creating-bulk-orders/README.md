@@ -7,7 +7,9 @@ prerequisites:
 [benchmark]: <benchmark/benchmark.md>
 [bulk-manifest]: <../../../../../glossary/bulk-manifest.md>
 [bulk-order]: <../../../../../glossary/bulk-order.md>
+[byte-coordinate]: <../../../../../glossary/byte-coordinate.md>
 [conditional-write]: <../../../../../glossary/conditional-write.md>
+[crc32c]: <../../../../../glossary/crc32c.md>
 [datashed]: <../../../../../glossary/datashed.md>
 [development]: <../../../../../development.md>
 [differential-event]: <../../../../../glossary/differential-event.md>
@@ -28,22 +30,26 @@ then complemented exclusive upper bounds sort descending.
 
 For the *Datashed*[~][datashed], hand durably published bytes to a background
 worker through a bounded, nonblocking queue. Include the bytes actually accepted
-after any *margin retry*[~][margin]. On overflow or restart, fetch missing events
+after any *margin retry*[~][margin]. Omit each *event's*[~][differential-event] separate
+storage *margins*[~][margin] and copy its outer *EnvBuf*[~][envbuf] unchanged before
+concatenation, preserving every event byte and digest. On overflow or restart, fetch missing events
 from the durable *Timeline*[~][timeline]; resume beyond contiguous existing orders.
 
 Accumulate in memory. Upload after reaching at least 5 MiB of whole events or
 30 seconds from the first buffered event; flush a partial order during shutdown.
 Append the *BulkManifest*[~][bulk-manifest] and its own *counter margin*[~][margin],
-record the exclusive event end in the key and the footer range in metadata, and use one *conditional PUT*[~][conditional-write].
+record the exclusive event end and starting *byte coordinate*[~][byte-coordinate] in the key, and the footer range and coordinate in metadata, and use one *conditional PUT*[~][conditional-write].
 Concurrent workers may create overlapping intervals; adopt an existing identical
-event sequence at the same key, allowing differing trailing event margins.
+trimmed event sequence at the same key.
+Publish cumulative *CRC32C*[~][crc32c] at the order's start and exclusive event end,
+continuing the same *coordinate run*[~][byte-coordinate] across orders and restarts.
 Worker failures retry independently of client acknowledgments.
 
 `BASINSYNC_BULK_TARGET_BYTES` defaults to `5242880`;
 `BASINSYNC_BULK_MAX_AGE_MS` defaults to `30000`, with zero disabling creation.
 Disk-backed accumulation and multipart uploads remain for later work.
 
-Test the two independent codecs, interval/offset boundaries, exact archived bytes,
+Test the two independent codecs, exclusive-end boundaries, exact trimmed bytes and preserved digests,
 byte/age/shutdown flushing, queue overflow, retry margins, competing workers,
 and restart. Run the *development checks*[~][development].
 

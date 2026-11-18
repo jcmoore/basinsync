@@ -229,22 +229,15 @@ pub async fn put_feed_returning<'a>(
     bytes: &'a [u8],
     mut headers: HeaderMap,
 ) -> Result<(ResponseData, Cow<'a, [u8]>)> {
-    let outer = crate::envbuf::at(bytes, 0)?;
-    let (feed, base) = if outer.format == crate::envbuf::NESTED && outer.end == bytes.len() {
-        (crate::envbuf::nested_message(bytes)?, outer.content_start)
-    } else {
-        (bytes, 0)
-    };
-    let tail = crate::envbuf::before(feed, feed.len())?;
+    let tail = crate::envbuf::before(bytes, bytes.len())?;
     let mut bytes = Cow::Borrowed(bytes);
     let (margin_range, mut counter) =
         if tail.format == crate::envbuf::MARGIN && tail.content.len() == 8 {
             (
-                base + tail.start..base + tail.end,
+                tail.start..tail.end,
                 u64::from_le_bytes(tail.content.try_into()?),
             )
         } else {
-            ensure!(base == 0, "nested event lacks its counter margin");
             let original_length = bytes.len();
             crate::envbuf::append_counter_margin(bytes.to_mut(), 0)?;
             (original_length..bytes.len(), 0)

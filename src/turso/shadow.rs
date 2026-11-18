@@ -932,7 +932,7 @@ fn make_capture(
 }
 
 fn decoded_event(bytes: &[u8]) -> Result<(Vec<FlowCommand>, Delta, Option<Feed>)> {
-    let envelopes = crate::envbuf::readable(crate::envbuf::nested_message(bytes)?)?;
+    let envelopes = crate::envbuf::readable(crate::event::envelope(bytes)?.content)?;
     let root = envelopes
         .iter()
         .take(envelopes.len() - 1)
@@ -1309,13 +1309,14 @@ fn measure_disk() -> Result<()> {
                 bucket,
                 crate::timeline::key(&1u8.into())?,
                 &seed,
-                crate::timeline::entry_headers(&seed)?,
+                crate::timeline::entry_headers(&seed, 0)?,
             )
             .await?;
             ensure!((200..300).contains(&r.status_code()), "seed PUT");
             Ok::<_, anyhow::Error>(())
         })?;
     }
+    let mut crc32c = crate::checksum::event(0, &seed)?;
     let result = run_pipeline(
         primary.clone(),
         capture,
@@ -1328,6 +1329,8 @@ fn measure_disk() -> Result<()> {
         Duration::ZERO,
         Arc::new(AtomicU64::new(0)),
         |milestone, bytes| {
+            let crc_base = crc32c;
+            crc32c = crate::checksum::event(crc32c, &bytes)?;
             if put_delay_ms > 0 {
                 std::thread::sleep(Duration::from_millis(put_delay_ms));
             }
@@ -1337,7 +1340,7 @@ fn measure_disk() -> Result<()> {
                         bucket,
                         crate::timeline::key(&milestone.into())?,
                         &bytes,
-                        crate::timeline::entry_headers(&bytes)?,
+                        crate::timeline::entry_headers(&bytes, crc_base)?,
                     )
                     .await?;
                     ensure!((200..300).contains(&r.status_code()), "event PUT");

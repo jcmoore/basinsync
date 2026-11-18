@@ -75,6 +75,7 @@ fn commits() -> Result<()> {
     let initial_bytes = initial.len();
     let mut state = State::from_image(initial)?;
     let mut samples = Vec::with_capacity(count);
+    let mut crc32c = 0;
     for index in 0..(warmup + count) {
         let flow = flow_ids[index % flow_count].clone();
         let viewpoint = (index / flow_count + 1).to_string();
@@ -125,13 +126,15 @@ fn commits() -> Result<()> {
             };
             let bytes = event::encode(command)?;
             observed("event_encode");
+            let crc_base = crc32c;
+            crc32c = crate::checksum::event(crc32c, &bytes)?;
             if let Some(bucket) = &bucket {
                 let key = timeline::key(&num_bigint::BigUint::from(index + 2))?;
                 let response = runtime.block_on(crate::sequence::put_entry(
                     bucket,
                     &key,
                     &bytes,
-                    crate::timeline::entry_headers(&bytes)?,
+                    crate::timeline::entry_headers(&bytes, crc_base)?,
                 ))?;
                 ensure!(
                     (200..300).contains(&response.status_code()),
