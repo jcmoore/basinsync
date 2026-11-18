@@ -124,8 +124,10 @@ Durably record `marked` and `promoted` through the internal handler. Once every
 root is promoted and the *CommitMarker*[~][commit-marker] is stored, create and
 confirm its *PromotionSign*[~][promotion-sign], with the task's committing
 *Milestone*[~][milestone] as `upstream`; only then durably remove the task.
-Promotion bookkeeping must not recursively create backups. Keep the internal
-handler available through shutdown's final backup and promotion phases.
+Promotion bookkeeping must not recursively create backups. Shutdown drains
+already-started work; `BASINSYNC_BACKUP_ON_SHUTDOWN=true` opts into an additional
+final backup and promotion pass. Keep the internal handler available until those
+producers finish their durable updates.
 
 Test paired-image checksums, logical/physical replay, bounded marking,
 failed and ambiguous COPYs, failed DELETEs and sign confirmation, interrupted

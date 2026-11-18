@@ -724,13 +724,15 @@ impl Worker {
             }
         });
         let (backup_stop, backup_shutdown) = watch::channel(false);
-        let backup_job = if !self.backup_interval.is_zero() {
+        let backup_on_shutdown = self.backup_on_shutdown;
+        let backup_job = if !self.backup_interval.is_zero() || backup_on_shutdown {
             Some(tokio::spawn(basinsync::backup::run(
                 self.bucket.clone(),
                 snapshots.clone(),
                 self.backup_interval,
                 kernel_queue,
                 backup_shutdown,
+                backup_on_shutdown,
                 basinsync::kernel::promotion::Limits {
                     tasks: self.cleanup.tasks,
                     nodes: self.cleanup.marking,
@@ -779,7 +781,7 @@ impl Worker {
             if !*external_shutdown.borrow() && !*failed.borrow() {
                 tokio::select! { _=external_shutdown.changed()=>{}, _=failed.changed()=>{} }
             }
-            if backup_job.is_some() && !*failed.borrow() {
+            if backup_on_shutdown && backup_job.is_some() && !*failed.borrow() {
                 let (reply, complete) = oneshot::channel();
                 if maintenance
                     .send(Message::BackupBarrier(reply))

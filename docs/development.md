@@ -27,9 +27,11 @@ cancel publication. Trace cancellation through callers before adding timeouts
 or `select!`, especially around temporarily removed state or remote writes;
 cancellation does not roll back S3.
 
-Shutdown must close admission, stop background producers, drain queued
-publications, and await tracked tasks. Keep the internal request handler available
-until backup producers finish their final reservations, commits, and promotion
-updates. `BASINSYNC_SHUTDOWN_TIMEOUT_MS` defaults to `30000`; exhausting
+Shutdown closes admission and drains queued publications and already-started
+background work. It starts no final backup or promotion pass by default.
+`BASINSYNC_BACKUP_ON_SHUTDOWN=true` opts into a final backup and promotion pass,
+including when `BASINSYNC_BACKUP_INTERVAL_MS=0` disables periodic backups.
+Keep the internal request handler available until active producers finish their
+durable updates. `BASINSYNC_SHUTDOWN_TIMEOUT_MS` defaults to `30000`; exhausting
 it exits unsuccessfully and leaves in-flight outcomes for recovery. Test these
 boundaries with gated I/O, disconnects, source failures, and shutdown signals.

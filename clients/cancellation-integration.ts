@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {createServer} from "node:net";
 import {mkdtempSync,openSync,closeSync,readFileSync} from "node:fs";
-import {S3Client,CreateBucketCommand,HeadObjectCommand} from "@aws-sdk/client-s3";
+import {S3Client,CreateBucketCommand,HeadObjectCommand,ListObjectsV2Command} from "@aws-sdk/client-s3";
 import {commit,reserveHeap,parseResponse,form,epilogueStatus,type HeapResponse} from "./client";
 import {s3Fixture} from "./s3-fixture";
 
@@ -78,16 +78,32 @@ try{
     const restored=await app(b,endpoint);assert.equal((await epilogueStatus(restored.url,"disconnect")).latest?.viewpoint,1n);await stop(restored.process);
     console.log(`put of success: ${signal} drains disconnected and pipelined commits in order and recovery sees both`);
   }
-  // Closing the publisher wakes even a long backup interval and flushes its final target.
-  {
+  // Starting/stopping an idle replica must not advance the Timeline or create backups.
+  for(const option of [undefined,"false"]){
+    const b=await bucket(),options:Record<string,string>={BASINSYNC_BACKUP_INTERVAL_MS:"3600000"};
+    if(option!==undefined)options.BASINSYNC_BACKUP_ON_SHUTDOWN=option;
+    let timelinePuts=0;
+    const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/timeline/"))timelinePuts++;});
+    const server=await app(b,p,options);
+    assert.equal((await commit(server.url,"no-final-backup",bytes("marker"),0n)).status,201);
+    const keys=async(prefix:string)=>(await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:prefix}))).Contents?.map(o=>o.Key)??[];
+    const before=await keys("timeline/");assert.equal(before.length,1);
+    server.process.kill("SIGINT");assert.equal(await deadline(server.process.exited),0);
+    assert.deepEqual(await keys("timeline/"),before);assert.deepEqual(await keys("epilogue/"),[]);assert.deepEqual(await keys("kernelspace/heap/"),[]);assert.equal(timelinePuts,1);
+    const replica=await app(b,p,options);assert.equal((await epilogueStatus(replica.url,"no-final-backup")).latest!.viewpoint,0n);
+    replica.process.kill("SIGINT");assert.equal(await deadline(replica.process.exited),0);assert.deepEqual(await keys("timeline/"),before);assert.equal(timelinePuts,1);
+  }
+  console.log("put of success: default and explicit-false shutdowns leave Timeline/Epilogue state unchanged across replica restart");
+  // An explicit opt-in wakes the worker for a final backup, even without a periodic schedule.
+  for(const interval of ["3600000","0"]){
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let backups=0;
     const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${b}/epilogue/`)&&request.headers.has("x-amz-meta-milestone")){backups++;entered.resolve();await release.promise;}});
-    const server=await app(b,p,{BASINSYNC_BACKUP_INTERVAL_MS:"3600000"});
-    assert.equal((await commit(server.url,"backup",bytes("marker"),0n)).status,201);
+    const server=await app(b,p,{BASINSYNC_BACKUP_INTERVAL_MS:interval,BASINSYNC_BACKUP_ON_SHUTDOWN:"true"});
+    assert.equal((await commit(server.url,"backup",bytes("marker"),0n)).status,201);assert.equal(backups,0);
     server.process.kill("SIGINT");await deadline(entered.promise);await Bun.sleep(50);assert.equal(server.process.exitCode,null);
     release.resolve();assert.equal(await deadline(server.process.exited),0);assert.equal(backups,1);
-    console.log("put of success: shutdown awaits final backup without waiting for its periodic interval");
   }
+  console.log("put of success: opted-in shutdown awaits a final backup with a long or disabled periodic interval");
   // The drain deadline is explicit and exits unsuccessfully rather than claiming completion.
   {
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();

@@ -366,6 +366,7 @@ struct Worker {
     batch_max: usize,
     batch_wait: Duration,
     backup_interval: Duration,
+    backup_on_shutdown: bool,
     analogue: basinsync::analogue::Config,
     status_probe_max_age: Duration,
 }
@@ -591,6 +592,10 @@ async fn main() -> Result<()> {
         state,
         batch_max,
         batch_wait: Duration::from_millis(batch_wait),
+        backup_on_shutdown: env::var("BASINSYNC_BACKUP_ON_SHUTDOWN")
+            .unwrap_or_else(|_| "false".into())
+            .parse()
+            .context("BASINSYNC_BACKUP_ON_SHUTDOWN must be true or false")?,
         backup_interval: Duration::from_millis(
             env::var("BASINSYNC_BACKUP_INTERVAL_MS")
                 .unwrap_or_else(|_| "1000".into())

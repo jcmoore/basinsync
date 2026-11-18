@@ -59,7 +59,13 @@ try{
     if(fault!=="lost-reply"){
       await Bun.sleep(70);assert.equal(await exists(bucket,sign),null);assert.equal(deletes,0);await f.stop(app.process);
       const graph=await uploaded(bucket);for(const node of Object.values(graph.databases))assert(await exists(bucket,key(node,"young")));
-      assert.equal(payloadGets,0);fail=false;
+      assert.equal(payloadGets,0);
+      const beforeReplica=await f.recover(bucket,"sequential"),beforeCopies=copies;
+      const idleReplica=await f.server(bucket,{BASINSYNC_BACKUP_INTERVAL_MS:"3600000"},proxy);await f.stop(idleReplica.process);
+      assert.equal(copies,beforeCopies,"an idle replica shutdown must not resume queued promotion");
+      assert.equal((await f.recover(bucket,"sequential")).milestone,beforeReplica.milestone,"shutdown must not append promotion frames");
+      assert.equal(await exists(bucket,sign),null);
+      fail=false;
       const restart=await f.server(bucket,{BASINSYNC_BACKUP_INTERVAL_MS:"30"},proxy);await eventually(()=>exists(bucket,sign),Boolean);await checkGraph(bucket,graph);await f.stop(restart.process);
     }else{await eventually(()=>exists(bucket,sign),Boolean);await checkGraph(bucket,await root(bucket));assert.equal(copies,2);assert.equal(payloadGets,0);await f.stop(app.process);}
   }

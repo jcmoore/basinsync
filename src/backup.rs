@@ -200,6 +200,7 @@ pub async fn run(
     interval: Duration,
     queue: tokio::sync::mpsc::Sender<crate::kernel::Request>,
     mut shutdown: watch::Receiver<bool>,
+    backup_on_shutdown: bool,
     promotion: crate::kernel::promotion::Limits,
 ) {
     let mut completed: BigUint = 0u8.into();
@@ -211,11 +212,16 @@ pub async fn run(
                 break true;
             }
             tokio::select! {
+                biased;
                 _ = shutdown.changed() => break true,
-                _ = &mut sleep => break false,
+                _ = &mut sleep, if !interval.is_zero() => break false,
                 changed = targets.changed() => if changed.is_err() { break true; },
             }
         };
+        // Finish active work, but never start an exit-triggered pass unless requested.
+        if (closing || *shutdown.borrow()) && !backup_on_shutdown {
+            return;
+        }
         let target = targets.borrow_and_update().clone();
         let mut failed = false;
         if let Some(snapshot) = target.filter(|s| s.activity > completed) {
@@ -242,7 +248,7 @@ pub async fn run(
         {
             tracing::warn!(%error,"KernelSpace marking will retry");
         }
-        // The shutdown coordinator keeps the internal handler available through this flush.
+        // An opted-in final pass retains the internal handler until it finishes.
         if closing {
             let more = targets
                 .borrow()
