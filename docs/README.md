@@ -7,6 +7,7 @@
 [diy/0z004/timeline-recovery-acceleration]: <diy/0z004/timeline-recovery-acceleration/README.md>
 [diy/0z005/deep-heap-support]: <diy/0z005/deep-heap-support/README.md>
 [diy/0z006/commit-marker-edges-with-node-promotion]: <diy/0z006/commit-marker-edges-with-node-promotion/README.md>
+[diy/0z007/shallow-datashed-backup-nodes]: <diy/0z007/shallow-datashed-backup-nodes/README.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [object-keys]: <object-keys.md>
 
@@ -40,5 +41,8 @@ Retain and promote committed graphs with
 *CommitMarker edges with node promotion*[~][diy/0z006/commit-marker-edges-with-node-promotion].
 
 Coalesce and retrieve history with *Timeline recovery acceleration*[~][diy/0z004/timeline-recovery-acceleration].
+
+Back up paired database graphs with
+*Shallow Datashed backup nodes*[~][diy/0z007/shallow-datashed-backup-nodes].
 
 Audit storage layouts in the *object-key reference*[~][object-keys].

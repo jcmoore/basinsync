@@ -67,9 +67,7 @@ try{
   const fast=await f.recover(bucket,"bulk",slow);assert.equal(fast.sha384,baseline.sha384);assert(blocked);gate.resolve();
   {
     const anchored=await f.bucket();await f.seed(anchored,events.slice(0,16));
-    const app=await f.server(anchored,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-    await eventually(async()=>{const objects=await f.s3.send(new ListObjectsV2Command({Bucket:anchored,Prefix:"epilogue/"}));const marker=objects.Contents?.find(o=>o.Key!.startsWith("epilogue/0y"));return marker?f.s3.send(new HeadObjectCommand({Bucket:anchored,Key:marker.Key})):null;},head=>head?.Metadata?.milestone==="16");
-    await f.stop(app.process);await f.seed(anchored,events.slice(16),17);
+    await f.checkpoint(anchored,events.slice(0,16));await f.seed(anchored,events.slice(16),17);
     const body=encodeBulkOrder(1n,events),decoded=decodeBulkOrder(body);
     await f.s3.send(new PutObjectCommand({Bucket:anchored,Key:key(1n,65n),Body:body,Metadata:{"bulkmanifest-range":`bytes=${decoded.range.start}-${decoded.range.end-1}`}}));
     const reads:{path:string;range:string|null}[]=[];

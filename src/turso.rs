@@ -231,11 +231,14 @@ pub struct State {
 
 impl State {
     pub fn genesis() -> Result<Self> {
+        Self::genesis_schema(SCHEMA)
+    }
+    pub(crate) fn genesis_schema(schema: &str) -> Result<Self> {
         let native = Native::open(&[], None)?;
         native.conn.pragma_update("page_size", PAGE_SIZE)?;
         native.conn.pragma_update("journal_mode", "'mvcc'")?;
         native.conn.set_portable_logical_changes_enabled(true);
-        native.conn.execute(SCHEMA)?;
+        native.conn.execute(schema)?;
         native.checkpoint()?;
         let image = native.image()?;
         ensure!(
@@ -262,6 +265,16 @@ impl State {
         Ok(Self { native, image })
     }
 
+    pub(crate) fn connection(&self) -> &Arc<Connection> {
+        &self.native.conn
+    }
+    pub(crate) fn kernel_genesis(milestone: &num_bigint::BigUint) -> Result<Self> {
+        let mut state = Self::genesis_schema(crate::kernel::SCHEMA)?;
+        state.native.conn.execute(format!("UPDATE datashed SET milestone='{milestone}'; UPDATE kernel_state SET activity='{milestone}'"))?;
+        state.native.checkpoint()?;
+        state.image = state.native.image()?;
+        Ok(state)
+    }
     pub fn flows(&self) -> Result<BTreeMap<String, Viewpoint>> {
         let mut query = self
             .native
@@ -687,6 +700,14 @@ impl Native {
         let file = io.open_file(&path, OpenFlags::default(), false)?;
         write_file(&*io, &*file, image)?;
         drop(file);
+        Self::connect_at(io, path, log, capture)
+    }
+    fn connect_at(
+        io: Arc<dyn IO>,
+        path: String,
+        log: Option<&[u8]>,
+        capture: bool,
+    ) -> Result<Self> {
         let log_file = io.open_file(&format!("{path}-log"), OpenFlags::default(), false)?;
         if let Some(log) = log {
             write_file(&*io, &*log_file, log)?;
@@ -729,6 +750,16 @@ impl Native {
             &*self.io.open_file(&self.path, OpenFlags::default(), false)?,
         )
     }
+}
+pub(crate) fn rows(
+    conn: &Arc<Connection>,
+    sql: &str,
+    mut row: impl FnMut(&turso_core::Row) -> Result<()>,
+) -> Result<()> {
+    conn.prepare(sql)?.run_with_row_callback(|r| {
+        row(r).map_err(|e| turso_core::LimboError::InternalError(e.to_string()))
+    })?;
+    Ok(())
 }
 fn ready_step(
     io: &dyn IO,

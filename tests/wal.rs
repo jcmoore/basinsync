@@ -275,7 +275,10 @@ fn byte_coordinates_are_digest_bound_contiguous_and_ignore_retry_margins() -> Re
             event::coordinate_length(first.bytes())? + event::coordinate_length(second.bytes())?
         )
     );
-    let event::Entry::Wal { commands, delta } = event::decode_entry(first.bytes())? else {
+    let event::Entry::Wal {
+        commands, delta, ..
+    } = event::decode_entry(first.bytes())?
+    else {
         panic!()
     };
     for wrong in [1u8.into(), BigUint::from(1u8) << 256usize] {

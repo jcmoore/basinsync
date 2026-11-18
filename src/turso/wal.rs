@@ -173,15 +173,15 @@ impl Frames {
         parent: Option<&str>,
     ) -> Result<Vec<u8>> {
         self.validate_binding(base, parent)?;
-        if base == &num_bigint::BigUint::from(0u8) {
+        if let Some(checksum) = &self.base_sha384 {
             ensure!(
-                self.base_sha384.as_deref() == Some(hash(before).as_str()),
+                checksum == &hash(before),
                 "initial database checksum mismatch"
             );
         } else {
             ensure!(
-                self.base_sha384.is_none(),
-                "unexpected initial database checksum"
+                base != &num_bigint::BigUint::from(0u8),
+                "missing initial database checksum"
             );
         }
         let (size, pages) = self.pages()?;
@@ -250,6 +250,10 @@ impl Delta {
     }
 }
 
+pub(crate) struct Savepoint {
+    view: Arc<super::cow::View>,
+    bootstrap: Option<Vec<u8>>,
+}
 pub struct Writer {
     state: State,
     recorder: Arc<Mutex<Recorder>>,
@@ -285,7 +289,10 @@ impl Writer {
         })
     }
     pub fn open_disk(image: &[u8]) -> Result<Self> {
-        let store = super::cow::Store::temporary(image)?;
+        Self::open_disk_named(image, crate::turso::ID)
+    }
+    pub(crate) fn open_disk_named(image: &[u8], name: &str) -> Result<Self> {
+        let store = super::cow::Store::temporary_named(image, name)?;
         let recorder = Arc::new(Mutex::new(Recorder::default()));
         let io = Arc::new(WalIO {
             inner: store.io(),
@@ -308,6 +315,87 @@ impl Writer {
             bootstrap,
             store: Some(store),
         })
+    }
+    pub(crate) fn bootstrap_pending(&self) -> bool {
+        self.bootstrap.is_some()
+    }
+    pub(crate) fn bootstrap(&mut self, image: &[u8]) {
+        self.bootstrap = Some(image.to_vec());
+    }
+    #[cfg(test)]
+    pub(crate) fn fail_checkpoint_after(&self, writes: usize) {
+        self.store.as_ref().unwrap().fail_after(writes);
+    }
+    pub(crate) fn savepoint(&self) -> Result<Savepoint> {
+        Ok(Savepoint {
+            view: self
+                .store
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("savepoint needs disk VFS"))?
+                .pin()?,
+            bootstrap: self.bootstrap.clone(),
+        })
+    }
+    pub(crate) fn restore(savepoint: Savepoint) -> Result<Self> {
+        let mut writer = Self::fork(savepoint.view)?;
+        writer.bootstrap = savepoint.bootstrap;
+        Ok(writer)
+    }
+    pub(crate) fn fork(view: Arc<super::cow::View>) -> Result<Self> {
+        let store = super::cow::Store::fork(view)?;
+        let recorder = Arc::new(Mutex::new(Recorder::default()));
+        let io = Arc::new(WalIO {
+            inner: store.io(),
+            recorder: recorder.clone(),
+        });
+        let native = Native::connect_at(io, store.path().into(), None, true)?;
+        native.conn.pragma_update("cache_size", -2048)?;
+        native.conn.pragma_update("synchronous", "FULL")?;
+        let state = State {
+            native,
+            image: vec![],
+        };
+        let cursor = state.milestone()?.parse()?;
+        let bootstrap = if cursor == BigUint::from(0u8) {
+            Some(store.pin()?.image()?)
+        } else {
+            None
+        };
+        Ok(Self {
+            state,
+            recorder,
+            cursor,
+            bootstrap,
+            store: Some(store),
+        })
+    }
+    pub(crate) fn transaction(
+        &mut self,
+        base: &BigUint,
+        parent: Option<&str>,
+        change: impl FnOnce(&Arc<Connection>) -> Result<()>,
+    ) -> Result<Delta> {
+        ensure!(&self.cursor == base, "unpublished database transaction");
+        let conn = &self.state.native.conn;
+        conn.set_portable_logical_changes_enabled(true);
+        conn.execute("BEGIN CONCURRENT")?;
+        let milestone = base + 1u8;
+        let result = (|| {
+            change(conn)?;
+            conn.execute(format!(
+                "UPDATE datashed SET milestone='{milestone}' WHERE id=1"
+            ))?;
+            conn.execute("COMMIT")?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let _ = conn.execute("ROLLBACK");
+            return Err(error);
+        }
+        self.capture(base, parent, milestone)
+    }
+    pub(crate) fn connection(&self) -> &Arc<Connection> {
+        &self.state.native.conn
     }
     pub fn snapshot(&self) -> Result<Option<Arc<super::cow::View>>> {
         self.store.as_ref().map(|s| s.pin()).transpose()

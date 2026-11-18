@@ -11,6 +11,7 @@
 [envbuf]: <glossary/envbuf.md>
 [flow]: <glossary/flow.md>
 [heap]: <glossary/heap.md>
+[kernelspace]: <glossary/kernelspace.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [margin]: <glossary/margin.md>
 [milestone]: <glossary/milestone.md>
@@ -41,6 +42,8 @@ All implemented S3 key patterns, relative to the configured bucket:
 | *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `epilogue/${lex(viewpoint)}` |
 | *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
 | *Flow*[~][flow] *PromotionSign*[~][promotion-sign] | `flows/${flow}/${flow_revision}/epilogue/${lex(viewpoint)}` |
+| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *young-generation*[~][young-generation] *node*[~][node] | `kernelspace/heap/young/${node_id}/${node_revision}` |
+| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *old-generation*[~][old-generation] *node*[~][node] | `kernelspace/heap/old/${node_id}/${node_revision}` |
 | *UserSpace*[~][userspace] *Heap*[~][heap] *young-generation*[~][young-generation] *node*[~][node] | `userspace/heap/young/${node_id}/${node_revision}` |
 | *UserSpace*[~][userspace] *Heap*[~][heap] *old-generation*[~][old-generation] *node*[~][node] | `userspace/heap/old/${node_id}/${node_revision}` |
 
@@ -78,6 +81,8 @@ These are *retainer*[~][retainer] identifiers, not additional S3 objects:
 _a_${flow}/v.${lex(version)}/e.${lex(viewpoint)}   # staging area
 _m_${flow}/v.${lex(version)}/e.${lex(viewpoint)}   # CommitMarker
 ```
+
+For *KernelSpace*[~][kernelspace], replace `${flow}` with the internal owner `datashed`.
 
 An outgoing *node*[~][node] edge uses the parent's `node_id` as its
 *retainer*[~][retainer]. Require `retainer < node`; `_a_`/`_m_` precede `n-`,

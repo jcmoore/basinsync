@@ -26,9 +26,7 @@ try{
   for(const checkpoint of checkpoints){
     const bucket=await f.bucket();await f.seed(bucket,events.slice(0,checkpoint||events.length));
     if(checkpoint){
-      const app=await f.server(bucket,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
-      await eventually(async()=>{const objects=await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/"}));const marker=objects.Contents?.find(o=>o.Key!.startsWith("epilogue/0y"));return marker?f.s3.send(new HeadObjectCommand({Bucket:bucket,Key:marker.Key})):null;},head=>head?.Metadata?.milestone===String(checkpoint));
-      await f.stop(app.process);await f.seed(bucket,events.slice(checkpoint),checkpoint+1);
+      await f.checkpoint(bucket,events.slice(0,checkpoint));await f.seed(bucket,events.slice(checkpoint),checkpoint+1);
     }
     let low=1,group:Uint8Array[]=[],size=0,orders=0;
     async function flush(){if(!group.length)return;const body=encodeBulkOrder(BigInt(low),group),{range,index}=decodeBulkOrder(body),high=low+group.length;await f.s3.send(new PutObjectCommand({Bucket:bucket,Key:key(BigInt(low),BigInt(high),range.start,index.coordinate),Body:body,Metadata:{"bulkmanifest-range":`bytes=${range.start}-${range.end-1}`}}));orders++;low=high;group=[];size=0;}

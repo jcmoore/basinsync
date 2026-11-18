@@ -56,7 +56,7 @@ function tuples(bytes:Uint8Array):{tuple:Reference;base:number}[] {
     const root=toReference(new Uint8Array(bytes).buffer);assert(root.isVector()&&root.length()>0);
     commands=Array.from({length:root.length()},(_,n)=>({tuple:root.get(n),base:0}));
   }
-  commands.forEach(({tuple},n)=>{assert(tuple.isVector()&&tuple.length()===4);assert.equal(tuple.get(0).symbolValue(),Symbol.species);assert.equal(tuple.get(1).stringValue(),namespace);const path=tuple.get(2).stringValue();if(n+1===commands.length&&(enveloped||commands.length>1))assert.equal(path,ingest);else assert(path===command);});return commands;
+  commands.forEach(({tuple},n)=>{assert(tuple.isVector()&&tuple.length()===4);assert.equal(tuple.get(0).symbolValue(),Symbol.species);assert.equal(tuple.get(1).stringValue(),namespace);const path=tuple.get(2).stringValue();if(n+1===commands.length&&(enveloped||commands.length>1))assert.equal(path,ingest);else assert(path===command||path==="sts/0/databasin/commitkernel");});return commands;
 }
 export function rangesAt(bytes:Uint8Array):BlobRange[] {
   const commands=tuples(bytes);if(commands.at(-1)?.tuple.get(2).stringValue()===ingest)commands.pop();const entries:BlobRange[]=[];

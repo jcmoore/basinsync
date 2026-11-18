@@ -9,7 +9,7 @@
 # Turso state deltas
 
 An `sts/0/databasin/ingestturso` command carries `{ turso: { [id]: delta } }`,
-with id `default.turso`:
+keyed by database id, including `default.turso` and `kernel.turso`:
 
 ```ts
 {
@@ -46,3 +46,8 @@ beginning. The first delta also carries the initialized database in `logical.bas
 and its checksum in `base_sha384`; both are `null` thereafter. This binds replay
 to a verified initial image and ordered history without hashing whole database
 files per transaction.
+
+All participants in one group share the same base, resulting *Milestone*[~][milestone],
+and predecessor digest. Validate every candidate before advancing the visible
+prefix. Local rollback restores the whole group, including writers' engine state
+and sidecars; the *Timeline event*[~][differential-event] remains the durable boundary.

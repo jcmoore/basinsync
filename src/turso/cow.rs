@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 #[cfg(unix)]
 use std::os::unix::fs::FileExt;
 use std::{fs, io::Write};
@@ -25,6 +26,10 @@ struct History {
     pins: BTreeMap<u64, Pin>,
     free: Vec<u64>,
     highwater: u64,
+    ancestor: Option<Arc<View>>,
+    materialized: std::collections::BTreeSet<u64>,
+    #[cfg(test)]
+    fail_after: Option<usize>,
 }
 impl Store {
     pub(crate) fn open(path: &str, history: &str) -> Result<Arc<Self>> {
@@ -44,10 +49,22 @@ impl Store {
                 pins: BTreeMap::new(),
                 free: Vec::new(),
                 highwater: 0,
+                ancestor: None,
+                materialized: Default::default(),
+                #[cfg(test)]
+                fail_after: None,
             }),
         }))
     }
+    #[cfg(test)]
     pub(crate) fn temporary(image: &[u8]) -> Result<Arc<Self>> {
+        Self::temporary_named(image, "default.turso")
+    }
+    pub(crate) fn temporary_named(image: &[u8], name: &str) -> Result<Arc<Self>> {
+        ensure!(
+            matches!(name, "default.turso" | "kernel.turso"),
+            "invalid database filename"
+        );
         let root = std::env::var_os("BASINSYNC_DATA_DIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::PathBuf::from(".local/state"));
@@ -55,7 +72,7 @@ impl Store {
         let directory = tempfile::Builder::new()
             .prefix("basinsync-")
             .tempdir_in(root)?;
-        let path = directory.path().join("default.turso");
+        let path = directory.path().join(name);
         fs::write(&path, image)?;
         let mut store = Self::open(
             path.to_str()
@@ -64,6 +81,74 @@ impl Store {
         )?;
         Arc::get_mut(&mut store).unwrap()._directory = Some(directory);
         Ok(store)
+    }
+    /// A sparse writable branch. Unchanged pages remain owned by the pinned parent.
+    pub(crate) fn fork(mut view: Arc<View>) -> Result<Arc<Self>> {
+        // Rejected operations which never checkpointed must not grow an ancestry chain.
+        loop {
+            let ancestor = {
+                let state = view.store.state.lock().unwrap();
+                if state.materialized.is_empty()
+                    && state.versions.is_empty()
+                    && state.generation == view.generation
+                {
+                    state
+                        .ancestor
+                        .as_ref()
+                        .filter(|parent| parent.size == view.size)
+                        .cloned()
+                } else {
+                    None
+                }
+            };
+            match ancestor {
+                Some(parent) => view = parent,
+                None => break,
+            }
+        }
+        let name = std::path::Path::new(view.store.path())
+            .file_name()
+            .and_then(|s| s.to_str())
+            .context("invalid database path")?;
+        let store = Self::temporary_named(&[], name)?;
+        {
+            let mut state = store.state.lock().unwrap();
+            state.base.set_len(view.size)?;
+            state.ancestor = Some(view);
+        }
+        // Each branch has fresh sidecars and a distinct Turso database identity.
+        Ok(store)
+    }
+    fn read_current(s: &History, at: u64, bytes: &mut [u8]) -> std::io::Result<()> {
+        let page = at / PAGE_SIZE as u64;
+        if !s.materialized.contains(&page)
+            && let Some(parent) = &s.ancestor
+            && at < parent.size
+        {
+            let count = bytes.len().min((parent.size - at) as usize);
+            parent.read_at(at, &mut bytes[..count])?;
+            bytes[count..].fill(0);
+            return Ok(());
+        }
+        s.base.read_exact_at(bytes, at)
+    }
+    fn materialize(s: &mut History, page: u64) -> std::io::Result<()> {
+        if s.ancestor.is_some() && !s.materialized.contains(&page) {
+            let at = page * PAGE_SIZE as u64;
+            let size = s.base.metadata()?.len();
+            let count = PAGE_SIZE.min(size.saturating_sub(at) as usize);
+            let mut bytes = vec![0; PAGE_SIZE];
+            if count > 0 {
+                Self::read_current(s, at, &mut bytes[..count])?;
+            }
+            s.base.write_all_at(&bytes, at)?;
+            s.materialized.insert(page);
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn fail_after(&self, writes: usize) {
+        self.state.lock().unwrap().fail_after = Some(writes);
     }
     pub(crate) fn path(&self) -> &str {
         &self.path
@@ -123,9 +208,7 @@ impl Store {
             }
             let mut bytes = vec![0; PAGE_SIZE];
             let count = PAGE_SIZE.min((size - page * PAGE_SIZE as u64) as usize);
-            s.base
-                .read_exact_at(&mut bytes[..count], page * PAGE_SIZE as u64)
-                .map_err(error)?;
+            Self::read_current(s, page * PAGE_SIZE as u64, &mut bytes[..count]).map_err(error)?;
             let offset = s.free.pop().unwrap_or_else(|| {
                 let n = s.highwater;
                 s.highwater += PAGE_SIZE as u64;
@@ -175,6 +258,29 @@ impl Drop for View {
     }
 }
 impl View {
+    fn read_at(&self, pos: u64, bytes: &mut [u8]) -> std::io::Result<()> {
+        let s = self.store.state.lock().unwrap();
+        let mut written = 0;
+        while written < bytes.len() {
+            let at = pos + written as u64;
+            let page = at / PAGE_SIZE as u64;
+            let offset = at % PAGE_SIZE as u64;
+            let n = (PAGE_SIZE - offset as usize).min(bytes.len() - written);
+            let old = s
+                .versions
+                .range((page, self.generation)..=(page, u64::MAX))
+                .next()
+                .map(|(_, offset)| *offset);
+            if let Some(old) = old {
+                s.history
+                    .read_exact_at(&mut bytes[written..written + n], old + offset)?;
+            } else {
+                Store::read_current(&s, at, &mut bytes[written..written + n])?;
+            }
+            written += n;
+        }
+        Ok(())
+    }
     /// Read a stable checkpointed generation; the primary may continue writing.
     pub fn image(self: &Arc<Self>) -> Result<Vec<u8>> {
         let mut bytes = Vec::with_capacity(self.size as usize);
@@ -272,7 +378,20 @@ impl File for CowFile {
         self.inner.unlock_file()
     }
     fn pread(&self, pos: u64, c: Completion) -> turso_core::Result<Completion> {
-        self.inner.pread(pos, c)
+        let b = c.as_read().buf();
+        let s = self.store.state.lock().unwrap();
+        let count = b
+            .len()
+            .min(s.base.metadata().map_err(error)?.len().saturating_sub(pos) as usize);
+        let mut done = 0;
+        while done < count {
+            let at = pos + done as u64;
+            let n = (PAGE_SIZE - at as usize % PAGE_SIZE).min(count - done);
+            Store::read_current(&s, at, &mut b.as_mut_slice()[done..done + n]).map_err(error)?;
+            done += n;
+        }
+        c.complete(count as i32);
+        Ok(c)
     }
     fn size(&self) -> turso_core::Result<u64> {
         self.inner.size()
@@ -282,9 +401,25 @@ impl File for CowFile {
     }
     fn pwrite(&self, pos: u64, b: Arc<Buffer>, c: Completion) -> turso_core::Result<Completion> {
         let mut s = self.store.state.lock().unwrap();
+        #[cfg(test)]
+        if let Some(left) = &mut s.fail_after {
+            if *left == 0 {
+                return Err(turso_core::LimboError::InternalError(
+                    "injected partial checkpoint".into(),
+                ));
+            }
+            *left -= 1;
+        }
         Store::preserve(&mut s, pos, b.len() as u64)?;
+        let original_size = self.inner.size()?;
+        for page in pos / PAGE_SIZE as u64..(pos + b.len() as u64).div_ceil(PAGE_SIZE as u64) {
+            Store::materialize(&mut s, page).map_err(error)?;
+        }
+        // Materializing a partial page may grow the sparse file beyond this write.
+        let final_size = original_size.max(pos + b.len() as u64);
         let done = self.inner.pwrite(pos, b, c)?;
         self.io.wait_for_completion(done.clone())?;
+        s.base.set_len(final_size).map_err(error)?;
         Ok(done)
     }
     fn truncate(&self, len: u64, c: Completion) -> turso_core::Result<Completion> {
@@ -292,6 +427,12 @@ impl File for CowFile {
         let size = self.inner.size()?;
         if len < size {
             Store::preserve(&mut s, len, size - len)?;
+        }
+        if s.ancestor.is_some() && len < size {
+            // A later extension must not resurrect inherited bytes past EOF.
+            for page in len / PAGE_SIZE as u64..size.div_ceil(PAGE_SIZE as u64) {
+                Store::materialize(&mut s, page).map_err(error)?;
+            }
         }
         let done = self.inner.truncate(len, c)?;
         self.io.wait_for_completion(done.clone())?;
@@ -356,23 +497,9 @@ impl File for ViewFile {
     fn pread(&self, pos: u64, c: Completion) -> turso_core::Result<Completion> {
         let b = c.as_read().buf();
         let count = (b.len() as u64).min(self.0.size.saturating_sub(pos)) as usize;
-        let s = self.0.store.state.lock().unwrap();
-        let mut written = 0;
-        while written < count {
-            let at = pos + written as u64;
-            let page = at / PAGE_SIZE as u64;
-            let offset = at % PAGE_SIZE as u64;
-            let n = (PAGE_SIZE - offset as usize).min(count - written);
-            let old = s
-                .versions
-                .range((page, self.0.generation)..=(page, u64::MAX))
-                .next()
-                .map(|(_, offset)| *offset);
-            let (file, at) = old.map_or((&s.base, at), |old| (&s.history, old + offset));
-            file.read_exact_at(&mut b.as_mut_slice()[written..written + n], at)
-                .map_err(error)?;
-            written += n;
-        }
+        self.0
+            .read_at(pos, &mut b.as_mut_slice()[..count])
+            .map_err(error)?;
         c.complete(count as i32);
         Ok(c)
     }
@@ -475,5 +602,77 @@ impl FileExt for fs::File {
         let mut file = self;
         file.seek(SeekFrom::Start(pos))?;
         file.write_all(bytes)
+    }
+}
+
+#[cfg(test)]
+mod branch_tests {
+    use super::*;
+    #[test]
+    fn rejected_operations_do_not_build_an_unmodified_branch_chain() -> Result<()> {
+        let root = Store::temporary(&vec![1; PAGE_SIZE])?;
+        let mut view = root.pin()?;
+        for _ in 0..128 {
+            let fork = Store::fork(view)?;
+            let state = fork.state.lock().unwrap();
+            assert!(
+                state
+                    .ancestor
+                    .as_ref()
+                    .unwrap()
+                    .store
+                    .state
+                    .lock()
+                    .unwrap()
+                    .ancestor
+                    .is_none()
+            );
+            drop(state);
+            view = fork.pin()?;
+        }
+        assert_eq!(view.image()?, vec![1; PAGE_SIZE]);
+        Ok(())
+    }
+    #[test]
+    fn sparse_writable_branches_keep_parents_and_pins_through_partial_writes_and_truncation()
+    -> Result<()> {
+        let original: Vec<_> = (0..PAGE_SIZE * 4)
+            .map(|n| (n / PAGE_SIZE + 1) as u8)
+            .collect();
+        let root = Store::temporary(&original)?;
+        let parent = root.pin()?;
+        let branch = Store::fork(parent.clone())?;
+        let before = branch.pin()?;
+        let io = branch.io();
+        let file = io.open_file(branch.path(), OpenFlags::default(), false)?;
+        let b = Arc::new(Buffer::new_temporary(1));
+        b.as_mut_slice()[0] = 99;
+        io.wait_for_completion(file.pwrite(7, b, Completion::new_write(|_| {}))?)?;
+        branch.seal();
+        assert_eq!(
+            branch.state.lock().unwrap().materialized.len(),
+            1,
+            "unchanged pages must not be copied"
+        );
+        let changed = branch.pin()?;
+        let mut expected = original.clone();
+        expected[7] = 99;
+        assert_eq!(changed.image()?, expected);
+        assert_eq!(before.image()?, original);
+        assert_eq!(parent.image()?, original);
+        let child = Store::fork(changed.clone())?;
+        let cio = child.io();
+        let cfile = cio.open_file(child.path(), OpenFlags::default(), false)?;
+        cio.wait_for_completion(cfile.truncate(17, Completion::new_write(|_| {}))?)?;
+        cio.wait_for_completion(
+            cfile.truncate((PAGE_SIZE * 5) as u64, Completion::new_write(|_| {}))?,
+        )?;
+        child.seal();
+        let mut truncated = expected[..17].to_vec();
+        truncated.resize(PAGE_SIZE * 5, 0);
+        assert_eq!(child.pin()?.image()?, truncated);
+        assert_eq!(changed.image()?, expected);
+        assert_eq!(before.image()?, original);
+        Ok(())
     }
 }

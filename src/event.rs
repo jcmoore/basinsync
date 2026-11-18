@@ -8,6 +8,7 @@ use sha2::{Digest, Sha384};
 use std::collections::BTreeMap;
 
 pub const NAMESPACE: &str = "sync.memoremix.com";
+pub const COMMIT_KERNEL: &str = "sts/0/databasin/commitkernel";
 pub const COMMIT_FLOW: &str = "sts/0/databasin/commitflow";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,6 +195,8 @@ pub enum Entry {
     Wal {
         commands: Vec<FlowCommand>,
         delta: Box<crate::turso::wal::Delta>,
+        kernel: Option<Box<crate::turso::wal::Delta>>,
+        kernels: Vec<crate::kernel::Commit>,
     },
 }
 
@@ -267,6 +270,8 @@ fn decode_vector_entry(bytes: &[u8]) -> Result<Entry> {
     Ok(Entry::Wal {
         commands,
         delta: Box::new(delta.unwrap()),
+        kernel: None,
+        kernels: vec![],
     })
 }
 
@@ -455,6 +460,18 @@ impl FlowChunks {
         )?;
         self.finish_manifest_at(Some(coordinate))
     }
+    pub fn finish_group(
+        mut self,
+        deltas: BTreeMap<String, crate::turso::wal::Delta>,
+        kernels: &[crate::kernel::Commit],
+        coordinate: &num_bigint::BigUint,
+    ) -> Result<Vec<u8>> {
+        for command in kernels {
+            self.append(COMMIT_KERNEL, command)?;
+        }
+        self.append(INGEST_TURSO, &IngestTurso { turso: deltas })?;
+        self.finish_manifest_at(Some(coordinate))
+    }
     fn finish_manifest(self) -> Result<Vec<u8>> {
         self.finish_manifest_at(None)
     }
@@ -584,6 +601,8 @@ fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
     );
     let mut commands = Vec::new();
     let mut delta = None;
+    let mut kernel = None;
+    let mut kernels = Vec::new();
     let mut ranges = Vec::new();
     let mut previous = String::new();
     for key in index.iter_keys() {
@@ -620,12 +639,22 @@ fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
                 "penultimate envelope must ingest Turso frames"
             );
             let mut body = IngestTurso::deserialize(command.index(3)?)?;
-            ensure!(body.turso.len() == 1, "expected one Turso database");
+            ensure!(
+                (1..=2).contains(&body.turso.len()),
+                "unexpected Turso database group"
+            );
+            kernel = body.turso.remove(crate::kernel::ID).map(Box::new);
+            ensure!(body.turso.len() == 1, "unknown Turso database");
             delta = Some(
                 body.turso
                     .remove(crate::turso::ID)
                     .context("missing default.turso delta")?,
             );
+        } else if path == COMMIT_KERNEL {
+            let body = crate::kernel::Commit::deserialize(command.index(3)?)?;
+            body.graph.validate()?;
+            Viewpoint::parse(&body.viewpoint)?;
+            kernels.push(body);
         } else {
             ensure!(path == COMMIT_FLOW, "unknown command envelope");
             ranges.extend(ranges_in(envelope.content, envelope.content_start + 8)?);
@@ -636,6 +665,8 @@ fn decode_envelopes(bytes: &[u8]) -> Result<(Entry, Vec<BlobRange>)> {
         Entry::Wal {
             commands,
             delta: Box::new(delta.context("missing Turso ingestion")?),
+            kernel,
+            kernels,
         },
         ranges,
     ))

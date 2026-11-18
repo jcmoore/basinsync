@@ -140,7 +140,7 @@ pub async fn latest_key(bucket: &Bucket, prefix: &str) -> Result<Option<(String,
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Checkpoint {
     pub crc32c: u32,
     pub coordinate: BigUint,
@@ -194,6 +194,13 @@ impl Checkpoint {
         }
         Ok(result)
     }
+    pub(crate) fn verify_headers(&self, headers: &HashMap<String, String>) -> Result<()> {
+        ensure!(
+            Self::from_headers(self.viewpoint.clone(), headers)? == *self,
+            "backup metadata changed"
+        );
+        Ok(())
+    }
     pub fn headers(&self) -> Result<HeaderMap> {
         let mut headers = conditional_headers();
         for (name, value) in [
@@ -231,8 +238,37 @@ impl Checkpoint {
             event::digest(&image) == self.sha384,
             "backup checksum mismatch"
         );
-        let database =
-            tokio::task::spawn_blocking(move || turso::State::from_image(image)).await??;
+        let (database, kernel_database) = if image.starts_with(b"SQLite format 3\0") {
+            (
+                tokio::task::spawn_blocking(move || turso::State::from_image(image)).await??,
+                None,
+            )
+        } else {
+            let graph = crate::kernel::Graph::decode(&image)?;
+            ensure!(
+                graph.milestone == self.milestone.to_string()
+                    && graph.coordinate == self.coordinate.to_string()
+                    && graph.crc32c == crate::checksum::format(self.crc32c)
+                    && graph.parent == self.digest,
+                "backup graph prefix mismatch"
+            );
+            let (primary, kernel) = tokio::try_join!(
+                crate::kernel::image(bucket, &graph.databases[turso::ID]),
+                crate::kernel::image(bucket, &graph.databases[crate::kernel::ID])
+            )?;
+            let pair = tokio::task::spawn_blocking(move || {
+                Ok::<_, anyhow::Error>((
+                    turso::State::from_image(primary)?,
+                    turso::State::from_image(kernel)?,
+                ))
+            })
+            .await??;
+            ensure!(
+                pair.1.milestone()? == self.milestone.to_string(),
+                "kernel backup Milestone mismatch"
+            );
+            (pair.0, Some(pair.1))
+        };
         ensure!(
             database.milestone()? == self.milestone.to_string(),
             "backup database Milestone mismatch"
@@ -243,6 +279,7 @@ impl Checkpoint {
             crc32c: self.crc32c,
             head: Some(self.digest.clone()),
             database: Some(database),
+            kernel_database,
             ..Default::default()
         })
     }

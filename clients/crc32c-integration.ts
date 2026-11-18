@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {DeleteObjectCommand,GetObjectCommand,HeadObjectCommand,ListObjectsV2Command,PutObjectCommand} from "@aws-sdk/client-s3";
-import {fixture,eventually} from "./analogue-fixture";
+import {fixture} from "./analogue-fixture";
 import {commit} from "./client";
 import {key} from "./timeline";
 import {decodeBulkOrder} from "./bulkorder";
@@ -28,9 +28,9 @@ try {
   }
   await verifyOrders();
   for(const mode of ["sequential","bulk-parallel","range-prefetch","bidirectional"]){const recovered=await f.recover(bucket,mode);assert.equal(recovered.crc32c,hex(prefix[count]));}
-  const backing=await f.server(bucket,{BASINSYNC_BACKUP_INTERVAL_MS:"10",BASINSYNC_BULK_MAX_AGE_MS:"30000"});
-  const checkpoint=await eventually(async()=>{const objects=await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"epilogue/"}));const marker=objects.Contents?.find(o=>o.Key!.startsWith("epilogue/0y"));return marker?f.s3.send(new HeadObjectCommand({Bucket:bucket,Key:marker.Key})):null;},r=>r?.Metadata?.milestone===String(count));
-  assert.equal(checkpoint!.Metadata!.crc32c,hex(prefix[count]));assert.equal(checkpoint!.Metadata!.coordinate,String(coordinate));await f.stop(backing.process);
+  const events=[];for(let n=1;n<=count;n++){const r=await f.s3.send(new GetObjectCommand({Bucket:bucket,Key:key(BigInt(n))}));events.push(await r.Body!.transformToByteArray());}
+  const checkpoint=await f.checkpoint(bucket,events);
+  assert.equal(checkpoint.Metadata!.crc32c,hex(prefix[count]));assert.equal(checkpoint.Metadata!.coordinate,String(coordinate));
   // Snapshot-only recovery retains the whole-run CRC after older Timeline entries disappear.
   for(let n=1;n<=count;n++)await f.s3.send(new DeleteObjectCommand({Bucket:bucket,Key:key(BigInt(n))}));
   assert.equal((await f.recover(bucket,"bulk-parallel")).crc32c,hex(prefix[count]));

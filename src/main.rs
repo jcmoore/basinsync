@@ -298,6 +298,8 @@ impl QueuedCommit {
     }
 }
 enum Message {
+    BackupBarrier(oneshot::Sender<Result<()>>),
+    Kernel(basinsync::kernel::Request),
     InspectCommit {
         request: Commit,
         reply: oneshot::Sender<Result<Commit>>,
@@ -324,6 +326,14 @@ enum Message {
 impl Message {
     fn reject(self, prefix: &timeline::Prefix) {
         match self {
+            Self::BackupBarrier(reply) => {
+                let _ = reply.send(Err(anyhow::anyhow!("publication stopped")));
+            }
+            Self::Kernel(request) => {
+                let _ = request
+                    .reply
+                    .send(Err(anyhow::anyhow!("publication stopped")));
+            }
             Self::Commit(c) => {
                 let _ = c.reply.send(observed(Err(stopped()), prefix));
             }

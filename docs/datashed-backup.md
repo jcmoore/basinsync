@@ -6,9 +6,12 @@
 [envbuf]: <glossary/envbuf.md>
 [epilogue]: <glossary/epilogue.md>
 [epilogue-compaction]: <glossary/epilogue-compaction.md>
+[flexbuffers]: <glossary/flexbuffers.md>
 [flow]: <glossary/flow.md>
+[kernelspace]: <glossary/kernelspace.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [milestone]: <glossary/milestone.md>
+[node]: <glossary/node.md>
 [object-keys]: <object-keys.md>
 [prologue-vacuuming]: <glossary/prologue-vacuuming.md>
 [promotion-sign]: <glossary/promotion-sign.md>
@@ -27,10 +30,30 @@ Keep *Reservoir*[~][reservoir] keyspaces separate using the shared
 
 Use *complemented Lexidecimal*[~][lexidecimal] positions for *markers*[~][commit-marker]
 in both *Epilogues*[~][epilogue]; their *PromotionSigns*[~][promotion-sign] use
-uncomplemented positions in those same namespaces. The full-file
-*Datashed*[~][datashed] *marker's*[~][commit-marker] own graph has no outgoing edges;
-confirm its sign after publication, repairing a missing sign on retry. *Datashed*[~][datashed] *Viewpoints*[~][viewpoint] count
-backups independently of *Milestones*[~][milestone]. A backup's S3 metadata
+uncomplemented positions in those same namespaces. *Datashed*[~][datashed]
+*Viewpoints*[~][viewpoint] count backups independently of *Milestones*[~][milestone].
+A *Datashed*[~][datashed] root is a *FlexBuffers*[~][flexbuffers] message:
+
+```ts
+{
+  version: string;             // Turso release and revision
+  milestone: string;           // covered decimal Milestone M
+  coordinate: string;          // exclusive decimal coordinate
+  crc32c: string;              // cumulative CRC32C, eight lowercase hex digits
+  parent: string;              // event SHA-384 at M
+  databases: Record<"default.turso" | "kernel.turso", {
+    id: string; revision: string; length: number; sha384: string;
+  }>;
+}
+```
+
+Both database images are height-zero *KernelSpace*[~][kernelspace] *nodes*[~][node]
+at the same prefix. Verify their lengths, checksums, and recorded
+*Milestones*[~][milestone] before exposing either. Restore both, then replay
+from `M + 1`; the *marker's*[~][commit-marker] own reservation and commit events
+follow `M`. Fetch immutable revisions from either generation using the
+*object-key patterns*[~][object-keys].
+A backup's S3 metadata
 binds its image to the recovery prefix:
 
 ```text
@@ -43,8 +66,8 @@ x-amz-meta-turso-version: <engine release and revision>
 ```
 
 Retain the *CRC32C*[~][crc32c] as the recovered prefix's accumulator.
-Other digests are hexadecimal *SHA-384*[~][sha384]. Unwrap the raw *EnvBuf message*[~][envbuf], then validate metadata, its checksum,
-*Turso*[~][turso] version, and the image's recorded *Milestone*[~][milestone].
+Other digests are hexadecimal *SHA-384*[~][sha384]. Unwrap the raw *EnvBuf message*[~][envbuf], validate metadata and its checksum,
+then validate the root's *Turso*[~][turso] version and recovery prefix.
 
 Before publishing a *Datashed*[~][datashed] *CommitMarker*[~][commit-marker], replicate
 all *Flow*[~][flow] *markers*[~][commit-marker] through its

@@ -47,12 +47,15 @@ Each entry contains decimal `viewpoint`, hexadecimal *SHA-384*[~][sha384] in
 `sha384`, binary `blob`, *context*[~][context] as `Record<string, string>`, and required `edges` (`[]` for an empty graph) containing derived child *node*[~][node] ids. *Conditional creation*[~][conditional-write] of a
 *DifferentialEvent*[~][differential-event] at the next *Milestone*[~][milestone]
 arbitrates competing writers. Concatenate zero or more *EnvBuf-wrapped*[~][envbuf]
-commitflow tuples, one `sts/0/databasin/ingestturso` tuple, then a
+commitflow or `sts/0/databasin/commitkernel` tuples, one `sts/0/databasin/ingestturso` tuple, then a
 *range manifest*[~][range-manifest]. Wrap that command feed in one nested
 *EnvBuf*[~][envbuf] (`100`), then append a separate *counter margin*[~][margin]. Each tuple is its own
 *FlexBuffers*[~][flexbuffers] document. The ingestion command's
 *Turso deltas*[~][turso-state] carry the *physical frames*[~][physical-frame]
 that materialize the recorded state; all requests wait for durable publication.
+
+`commitkernel` carries `{ viewpoint: string, graph }` for the server-driven
+*Datashed backup graph*[~][datashed-backup]; reservations use only ingestion frames.
 
 Regardless of in-flight limits, durable publication must follow
 *Milestone*[~][milestone] order to preserve *causal consistency*[~][causal-consistency].

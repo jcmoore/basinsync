@@ -41,6 +41,8 @@ pub struct Datashed {
     pub coordinate: BigUint,
     pub crc32c: u32,
     pub database: Option<crate::turso::State>,
+    pub kernel_database: Option<crate::turso::State>,
+    pub kernel_writer: Option<crate::turso::wal::Writer>,
     pub stopped: bool,
     pub writer: Option<crate::turso::wal::Writer>,
     pub head: Option<String>,
@@ -201,6 +203,8 @@ pub struct Prepared {
     parent: Option<String>,
     digest: String,
     view: Option<std::sync::Arc<crate::turso::cow::View>>,
+    kernel_view: Option<std::sync::Arc<crate::turso::cow::View>>,
+    activity: BigUint,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,6 +233,8 @@ impl Prefix {
 pub struct Snapshot {
     pub(crate) prefix: Prefix,
     pub(crate) view: std::sync::Arc<crate::turso::cow::View>,
+    pub(crate) kernel_view: Option<std::sync::Arc<crate::turso::cow::View>>,
+    pub(crate) activity: BigUint,
 }
 
 pub struct Stager {
@@ -248,6 +254,100 @@ impl Stager {
         self.state.crc32c = prepared.crc32c;
         self.state.head = Some(prepared.digest.clone());
         Ok(prepared)
+    }
+    pub fn poisoned(&self) -> bool {
+        self.state.stopped
+    }
+    fn transaction<T>(&mut self, operation: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        ensure!(!self.state.stopped, "database group is poisoned");
+        self.state.enable_vfs()?;
+        let prefix = self.state.prefix();
+        let primary = self.state.writer.as_ref().unwrap().savepoint()?;
+        let kernel = self.state.kernel_writer.as_ref().unwrap().savepoint()?;
+        match operation(self) {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                self.state.stopped = true;
+                // Reopen all participants before swapping either writer. Fresh sidecars discard
+                // local SQL commits, partially checkpointed WALs, and engine caches together.
+                let primary = crate::turso::wal::Writer::restore(primary)?;
+                let kernel = crate::turso::wal::Writer::restore(kernel)?;
+                self.state.writer = Some(primary);
+                self.state.kernel_writer = Some(kernel);
+                self.state.milestone = prefix.milestone;
+                self.state.coordinate = prefix.coordinate;
+                self.state.crc32c = prefix.crc32c;
+                self.state.head = prefix.digest;
+                self.state.stopped = false;
+                Err(error)
+            }
+        }
+    }
+    pub fn prepare_kernel(
+        &mut self,
+        operation: crate::kernel::Operation,
+    ) -> Result<(Prepared, Viewpoint)> {
+        self.transaction(|this| {
+            let state = &mut this.state;
+            let viewpoint =
+                crate::kernel::next(state.kernel_writer.as_ref().unwrap().connection())?;
+            let mut kernels = vec![];
+            let upstream = &state.milestone + 1u8;
+            let companion = state.kernel_writer.as_mut().unwrap().transaction(
+                &state.milestone,
+                state.head.as_deref(),
+                |conn| match &operation {
+                    crate::kernel::Operation::Reserve(graph) => {
+                        ensure!(
+                            graph.milestone.parse::<BigUint>()? <= state.milestone,
+                            "backup prefix is not durable"
+                        );
+                        crate::kernel::reserve(conn, graph, &viewpoint)
+                    }
+                    crate::kernel::Operation::Commit { command, etags } => {
+                        ensure!(
+                            command.graph.milestone.parse::<BigUint>()? < upstream,
+                            "invalid backup prefix"
+                        );
+                        crate::kernel::commit(conn, command, etags, &upstream)
+                    }
+                },
+            )?;
+            if let crate::kernel::Operation::Commit { command, .. } = operation {
+                kernels.push(command);
+            }
+            let primary = state.writer.as_mut().unwrap().transaction(
+                &state.milestone,
+                state.head.as_deref(),
+                |_| Ok(()),
+            )?;
+            let bytes = event::FlowChunks::new(&[])?.finish_group(
+                BTreeMap::from([
+                    (crate::turso::ID.into(), primary),
+                    (crate::kernel::ID.into(), companion),
+                ]),
+                &kernels,
+                &state.coordinate,
+            )?;
+            let prepared = Prepared {
+                crc32c_base: state.crc32c,
+                crc32c: crate::checksum::event(state.crc32c, &bytes)?,
+                digest: event::entry_digest(&bytes)?,
+                bytes,
+                milestone: upstream,
+                parent: state.head.clone(),
+                view: state.writer.as_ref().unwrap().snapshot()?,
+                kernel_view: state.kernel_writer.as_ref().unwrap().snapshot()?,
+                activity: crate::kernel::activity(
+                    state.kernel_writer.as_ref().unwrap().connection(),
+                )?,
+            };
+            state.coordinate += event::coordinate_length(prepared.bytes())?;
+            state.milestone = prepared.milestone.clone();
+            state.crc32c = prepared.crc32c;
+            state.head = Some(prepared.digest.clone());
+            Ok((prepared, viewpoint))
+        })
     }
     pub fn inspect_heap(&mut self, request: &mut crate::heap::Request) -> Result<()> {
         self.state.enable_vfs()?;
@@ -281,6 +381,12 @@ impl Stager {
         &mut self,
         command: crate::promotion::Command,
     ) -> Result<Option<Prepared>> {
+        self.transaction(|this| this.prepare_promotion_inner(command))
+    }
+    fn prepare_promotion_inner(
+        &mut self,
+        command: crate::promotion::Command,
+    ) -> Result<Option<Prepared>> {
         self.state.enable_vfs()?;
         let Some(delta) = self.state.writer.as_mut().unwrap().prepare_promotion(
             &self.state.milestone,
@@ -290,7 +396,9 @@ impl Stager {
         else {
             return Ok(None);
         };
-        let bytes = event::encode_wal_at(vec![], delta, &self.state.coordinate)?;
+        let bytes = self
+            .state
+            .finish_group(event::FlowChunks::new(&[])?, delta, &[])?;
         let prepared = Prepared {
             crc32c_base: self.state.crc32c,
             crc32c: crate::checksum::event(self.state.crc32c, &bytes)?,
@@ -299,6 +407,10 @@ impl Stager {
             milestone: &self.state.milestone + 1u8,
             parent: self.state.head.clone(),
             view: self.state.writer.as_ref().unwrap().snapshot()?,
+            kernel_view: self.state.kernel_writer.as_ref().unwrap().snapshot()?,
+            activity: crate::kernel::activity(
+                self.state.kernel_writer.as_ref().unwrap().connection(),
+            )?,
         };
         self.state.coordinate += event::coordinate_length(&prepared.bytes)?;
         self.state.milestone = prepared.milestone.clone();
@@ -310,6 +422,12 @@ impl Stager {
         &mut self,
         request: &crate::heap::Request,
     ) -> Result<(Option<Prepared>, crate::heap::Outcome)> {
+        self.transaction(|this| this.prepare_heap_inner(request))
+    }
+    fn prepare_heap_inner(
+        &mut self,
+        request: &crate::heap::Request,
+    ) -> Result<(Option<Prepared>, crate::heap::Outcome)> {
         self.state.enable_vfs()?;
         let (captured, outcome) = self.state.writer.as_mut().unwrap().prepare_heap(
             &self.state.milestone,
@@ -317,7 +435,9 @@ impl Stager {
             request,
         )?;
         let prepared = if let Some((_command, delta)) = captured {
-            let bytes = event::encode_wal_at(vec![], delta, &self.state.coordinate)?;
+            let bytes = self
+                .state
+                .finish_group(event::FlowChunks::new(&[])?, delta, &[])?;
             let prepared = Prepared {
                 crc32c_base: self.state.crc32c,
                 crc32c: crate::checksum::event(self.state.crc32c, &bytes)?,
@@ -326,6 +446,10 @@ impl Stager {
                 milestone: &self.state.milestone + 1u8,
                 parent: self.state.head.clone(),
                 view: self.state.writer.as_ref().unwrap().snapshot()?,
+                kernel_view: self.state.kernel_writer.as_ref().unwrap().snapshot()?,
+                activity: crate::kernel::activity(
+                    self.state.kernel_writer.as_ref().unwrap().connection(),
+                )?,
             };
             self.state.coordinate += event::coordinate_length(&prepared.bytes)?;
             self.state.milestone = prepared.milestone.clone();
@@ -341,6 +465,12 @@ impl Stager {
         &mut self,
         command: crate::cleanup::Command,
     ) -> Result<Option<Prepared>> {
+        self.transaction(|this| this.prepare_cleanup_inner(command))
+    }
+    fn prepare_cleanup_inner(
+        &mut self,
+        command: crate::cleanup::Command,
+    ) -> Result<Option<Prepared>> {
         self.state.enable_vfs()?;
         let captured = self.state.writer.as_mut().unwrap().prepare_cleanup(
             &self.state.milestone,
@@ -350,7 +480,9 @@ impl Stager {
         let Some((_command, delta)) = captured else {
             return Ok(None);
         };
-        let bytes = event::encode_wal_at(vec![], delta, &self.state.coordinate)?;
+        let bytes = self
+            .state
+            .finish_group(event::FlowChunks::new(&[])?, delta, &[])?;
         let prepared = Prepared {
             crc32c_base: self.state.crc32c,
             crc32c: crate::checksum::event(self.state.crc32c, &bytes)?,
@@ -359,6 +491,10 @@ impl Stager {
             milestone: &self.state.milestone + 1u8,
             parent: self.state.head.clone(),
             view: self.state.writer.as_ref().unwrap().snapshot()?,
+            kernel_view: self.state.kernel_writer.as_ref().unwrap().snapshot()?,
+            activity: crate::kernel::activity(
+                self.state.kernel_writer.as_ref().unwrap().connection(),
+            )?,
         };
         self.state.coordinate += event::coordinate_length(&prepared.bytes)?;
         self.state.milestone = prepared.milestone.clone();
@@ -408,6 +544,8 @@ impl Prepared {
                 digest: Some(self.digest.clone()),
             },
             view: view.clone(),
+            kernel_view: self.kernel_view.clone(),
+            activity: self.activity.clone(),
         })
     }
     pub fn bytes(&self) -> &[u8] {
@@ -481,6 +619,19 @@ impl Datashed {
             self.writer = Some(crate::turso::wal::Writer::open_disk(image)?);
             self.database = None;
         }
+        if self.kernel_writer.is_none() {
+            let bootstrap = self.kernel_database.is_none();
+            let state = match self.kernel_database.take() {
+                Some(state) => state,
+                None => crate::turso::State::kernel_genesis(&self.milestone)?,
+            };
+            let mut writer =
+                crate::turso::wal::Writer::open_disk_named(&state.image, crate::kernel::ID)?;
+            if bootstrap {
+                writer.bootstrap(&state.image);
+            }
+            self.kernel_writer = Some(writer);
+        }
         Ok(())
     }
     pub fn snapshot(&mut self) -> Result<Option<Snapshot>> {
@@ -492,6 +643,8 @@ impl Datashed {
             self.writer.as_ref().unwrap().cursor() == &self.milestone,
             "cannot snapshot unpublished database state"
         );
+        let kernel_view = self.kernel_writer.as_ref().unwrap().snapshot()?;
+        let activity = crate::kernel::activity(self.kernel_writer.as_ref().unwrap().connection())?;
         Ok(self
             .writer
             .as_ref()
@@ -500,6 +653,8 @@ impl Datashed {
             .map(|view| Snapshot {
                 prefix: self.prefix(),
                 view,
+                kernel_view,
+                activity,
             }))
     }
     pub fn into_stager(self) -> Stager {
@@ -518,9 +673,54 @@ impl Datashed {
             };
             self.writer = None;
         }
+        if let Some(writer) = &self.kernel_writer {
+            ensure!(
+                writer.cursor() == &self.milestone,
+                "unpublished kernel state"
+            );
+            self.kernel_database = if writer.bootstrap_pending() {
+                None
+            } else {
+                Some(crate::turso::State::from_image(writer.image()?)?)
+            };
+            self.kernel_writer = None;
+        }
         Ok(())
     }
     pub fn prepare_wal(&mut self, commands: Vec<event::FlowCommand>) -> Result<Prepared> {
+        let state = std::mem::take(self);
+        let mut stager = Stager { state };
+        let result = stager.transaction(|this| this.state.prepare_wal_inner(commands));
+        *self = stager.state;
+        result
+    }
+    fn finish_group(
+        &mut self,
+        chunks: event::FlowChunks,
+        delta: crate::turso::wal::Delta,
+        kernels: &[crate::kernel::Commit],
+    ) -> Result<Vec<u8>> {
+        let activity = (&self.milestone + 1u8).to_string();
+        let companion = self.kernel_writer.as_mut().unwrap().transaction(
+            &self.milestone,
+            self.head.as_deref(),
+            |conn| {
+                conn.execute(format!(
+                    "UPDATE kernel_state SET activity='{activity}' WHERE id=1"
+                ))?;
+                Ok(())
+            },
+        )?;
+        chunks.finish_group(
+            BTreeMap::from([
+                (crate::turso::ID.into(), delta),
+                (crate::kernel::ID.into(), companion),
+            ]),
+            kernels,
+            &self.coordinate,
+        )
+    }
+    fn prepare_wal_inner(&mut self, commands: Vec<event::FlowCommand>) -> Result<Prepared> {
         let milestone = &self.milestone + 1u8;
         key(&milestone)?;
         ensure!(
@@ -535,7 +735,7 @@ impl Datashed {
             &commands,
             chunks.ranges(),
         )?;
-        let bytes = chunks.finish_at(delta, &self.coordinate)?;
+        let bytes = self.finish_group(chunks, delta, &[])?;
         let digest = event::entry_digest(&bytes)?;
         Ok(Prepared {
             crc32c_base: self.crc32c,
@@ -545,6 +745,8 @@ impl Datashed {
             parent: self.head.clone(),
             digest,
             view: self.writer.as_ref().unwrap().snapshot()?,
+            kernel_view: self.kernel_writer.as_ref().unwrap().snapshot()?,
+            activity: crate::kernel::activity(self.kernel_writer.as_ref().unwrap().connection())?,
         })
     }
     pub async fn publish(&mut self, bucket: &Bucket, prepared: Prepared) -> Result<()> {
@@ -573,7 +775,12 @@ impl Datashed {
                 self.database = Some(next);
                 self.milestone = milestone;
             }
-            event::Entry::Wal { commands, delta } => {
+            event::Entry::Wal {
+                commands,
+                delta,
+                kernel,
+                kernels,
+            } => {
                 delta.validate_version()?;
                 delta
                     .physical
@@ -622,7 +829,51 @@ impl Datashed {
                     );
                 }
                 validate_locations(&next, &milestone, &ranges, enveloped)?;
+                let kernel_next = if let Some(delta) = kernel {
+                    delta.validate_version()?;
+                    delta.logical.validated_bytes()?;
+                    let base = match (&self.kernel_database, &delta.logical.base) {
+                        (Some(state), None) => &state.image,
+                        (Some(state), Some(base)) if state.image == base.0 => &state.image,
+                        (None, Some(base)) => &base.0,
+                        _ => anyhow::bail!("unexpected kernel bootstrap"),
+                    };
+                    let image =
+                        delta
+                            .physical
+                            .ingest(base, &self.milestone, self.head.as_deref())?;
+                    let candidate = crate::turso::State::from_image(image)?;
+                    ensure!(
+                        candidate.milestone()? == milestone.to_string(),
+                        "kernel Milestone mismatch"
+                    );
+                    for command in &kernels {
+                        let vp = Viewpoint::parse(&command.viewpoint)?;
+                        let stored = crate::kernel::text(
+                            candidate.connection(),
+                            &format!(
+                                "SELECT hex(blob) FROM kernel_commits WHERE viewpoint='{}'",
+                                vp.lexidecimal()
+                            ),
+                        )?;
+                        let expected = command
+                            .graph
+                            .encode()?
+                            .iter()
+                            .map(|b| format!("{b:02X}"))
+                            .collect::<String>();
+                        ensure!(stored == expected, "recovered commitkernel mismatch");
+                    }
+                    Some(candidate)
+                } else {
+                    ensure!(
+                        self.kernel_database.is_none() && kernels.is_empty(),
+                        "missing companion database delta"
+                    );
+                    None
+                };
                 self.database = Some(next);
+                self.kernel_database = kernel_next;
                 self.writer = None;
                 self.milestone = milestone;
             }
@@ -910,6 +1161,9 @@ mod tests {
                 crc32c: snapshot.prefix.crc32c,
                 head: snapshot.prefix.digest.clone(),
                 database: Some(crate::turso::State::from_image(image)?),
+                kernel_database: Some(crate::turso::State::from_image(
+                    snapshot.kernel_view.as_ref().unwrap().image()?,
+                )?),
                 ..Default::default()
             };
             let start: usize = recovered.milestone.to_string().parse()?;
@@ -1019,5 +1273,267 @@ mod tests {
             .await
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+    fn command(viewpoint: &str) -> event::FlowCommand {
+        event::FlowCommand {
+            markers: BTreeMap::from([(
+                "group".into(),
+                event::Marker {
+                    context: Default::default(),
+                    edges: Default::default(),
+                    verified: Default::default(),
+                    viewpoint: viewpoint.into(),
+                    blob: vec![42],
+                    sha384: event::digest(&[42]),
+                },
+            )]),
+        }
+    }
+    #[test]
+    fn partial_local_commits_restore_every_database_without_object_storage() -> Result<()> {
+        for (phase, reverse) in (0..4).flat_map(|phase| [(phase, false), (phase, true)]) {
+            let mut stager = Datashed::default().into_stager();
+            let first = stager.prepare(vec![command("0")])?;
+            let prefix = stager.prefix();
+            let primary = stager.state.writer.as_ref().unwrap().snapshot()?.unwrap();
+            let kernel = stager
+                .state
+                .kernel_writer
+                .as_ref()
+                .unwrap()
+                .snapshot()?
+                .unwrap();
+            let a = primary.image()?;
+            let b = kernel.image()?;
+            let failure: Result<()> = stager.transaction(|this| {
+                let s = &mut this.state;
+                let (first, second) = if reverse {
+                    (
+                        s.kernel_writer.as_mut().unwrap(),
+                        s.writer.as_mut().unwrap(),
+                    )
+                } else {
+                    (
+                        s.writer.as_mut().unwrap(),
+                        s.kernel_writer.as_mut().unwrap(),
+                    )
+                };
+                if phase == 0 {
+                    first.transaction(&s.milestone, s.head.as_deref(), |conn| {
+                        conn.execute("UPDATE datashed SET milestone='2'; COMMIT")?;
+                        anyhow::bail!("after primary COMMIT, before checkpoint")
+                    })?;
+                } else {
+                    first.transaction(&s.milestone, s.head.as_deref(), |_| Ok(()))?;
+                    second.transaction(&s.milestone, s.head.as_deref(), |conn| {
+                        if phase == 1 {
+                            anyhow::bail!("second transaction rolls back");
+                        }
+                        if phase == 2 {
+                            conn.execute("UPDATE datashed SET milestone='2'; COMMIT")?;
+                            anyhow::bail!("after second COMMIT, before checkpoint");
+                        }
+                        Ok(())
+                    })?;
+                }
+                anyhow::bail!("after both checkpoints")
+            });
+            assert!(failure.is_err());
+            assert!(!stager.poisoned());
+            assert_eq!(stager.prefix(), prefix);
+            assert_eq!(stager.state.writer.as_ref().unwrap().image()?, a);
+            assert_eq!(stager.state.kernel_writer.as_ref().unwrap().image()?, b);
+            assert_eq!(primary.image()?, a);
+            assert_eq!(kernel.image()?, b);
+            // The earlier prepared group is preserved; the rejected group consumes no position.
+            let second = stager.prepare(vec![command("1")])?;
+            let mut recovered = Datashed::default();
+            recovered.apply_entry(1u8.into(), first.bytes())?;
+            recovered.apply_entry(2u8.into(), second.bytes())?;
+            assert_eq!(recovered.latest("group")?.unwrap().decimal(), "1");
+            assert_eq!(
+                recovered.kernel_database.as_ref().unwrap().image,
+                stager.state.kernel_writer.as_ref().unwrap().image()?
+            );
+        }
+        Ok(())
+    }
+    #[test]
+    fn checkpoint_io_failure_restores_the_pair_and_reopens_clean_sidecars() -> Result<()> {
+        let mut stager = Datashed::default().into_stager();
+        stager.prepare(vec![command("0")])?;
+        let prefix = stager.prefix();
+        let before = stager.state.writer.as_ref().unwrap().image()?;
+        let companion = stager.state.kernel_writer.as_ref().unwrap().image()?;
+        let failure:Result<()>=stager.transaction(|this| {
+            let state=&mut this.state;
+            state.writer.as_ref().unwrap().fail_checkpoint_after(1);
+            state.writer.as_mut().unwrap().transaction(&state.milestone,state.head.as_deref(),|conn|{
+                for n in 0..500 {conn.execute(format!("INSERT INTO flows VALUES ('growth-{n}-{}','1','00000000-0000-4000-8000-000000000000')","x".repeat(128)))?;}
+                Ok(())
+            })?;
+            Ok(())
+        });
+        assert!(failure.is_err());
+        assert_eq!(stager.prefix(), prefix);
+        assert!(!stager.poisoned());
+        assert_eq!(stager.state.writer.as_ref().unwrap().image()?, before);
+        assert_eq!(
+            stager.state.kernel_writer.as_ref().unwrap().image()?,
+            companion
+        );
+        stager.prepare(vec![command("1")])?;
+        Ok(())
+    }
+    #[test]
+    fn an_empty_live_observer_can_adopt_the_first_database_group() -> Result<()> {
+        let mut observer = Datashed::default();
+        observer.enable_vfs()?;
+        let first = Datashed::default()
+            .into_stager()
+            .prepare(vec![command("0")])?;
+        observer.apply_entry(1u8.into(), first.bytes())?;
+        assert_eq!(observer.latest("group")?.unwrap().decimal(), "0");
+        assert_eq!(observer.kernel_database.as_ref().unwrap().milestone()?, "1");
+        Ok(())
+    }
+    #[test]
+    fn replay_validates_the_group_before_publishing_either_candidate() -> Result<()> {
+        let mut stager = Datashed::default().into_stager();
+        let first = stager.prepare(vec![command("0")])?;
+        let second = stager.prepare(vec![command("1")])?;
+        let mut state = Datashed::default();
+        state.apply_entry(1u8.into(), first.bytes())?;
+        let prefix = state.prefix();
+        let image = state.database.as_ref().unwrap().image.clone();
+        let event::Entry::Wal {
+            commands,
+            delta,
+            kernel: Some(mut kernel),
+            ..
+        } = event::decode_entry(second.bytes())?
+        else {
+            panic!()
+        };
+        kernel.version = "invalid".into();
+        let bad = event::FlowChunks::new(&commands)?.finish_group(
+            BTreeMap::from([
+                (crate::turso::ID.into(), *delta),
+                (crate::kernel::ID.into(), *kernel),
+            ]),
+            &[],
+            &prefix.coordinate,
+        )?;
+        assert!(state.apply_entry(2u8.into(), &bad).is_err());
+        assert_eq!(state.prefix(), prefix);
+        assert_eq!(state.database.as_ref().unwrap().image, image);
+        state.apply_entry(2u8.into(), second.bytes())?;
+        Ok(())
+    }
+    #[test]
+    fn kernel_reservations_commits_and_both_change_feeds_recover() -> Result<()> {
+        let mut stager = Datashed::default().into_stager();
+        let first = stager.prepare(vec![command("0")])?;
+        let snapshot = first.snapshot().unwrap();
+        let graph = crate::kernel::Graph::new(
+            &snapshot.prefix,
+            BTreeMap::from([
+                (
+                    crate::turso::ID.into(),
+                    crate::kernel::Node::new(
+                        snapshot.view.image()?.len() as u64,
+                        event::digest(&snapshot.view.image()?),
+                    ),
+                ),
+                (
+                    crate::kernel::ID.into(),
+                    crate::kernel::Node::new(
+                        snapshot.kernel_view.as_ref().unwrap().image()?.len() as u64,
+                        event::digest(&snapshot.kernel_view.as_ref().unwrap().image()?),
+                    ),
+                ),
+            ]),
+        )?;
+        let (reserved, vp) =
+            stager.prepare_kernel(crate::kernel::Operation::Reserve(graph.clone()))?;
+        let command = crate::kernel::Commit {
+            viewpoint: vp.decimal(),
+            graph: graph.clone(),
+        };
+        let before = stager.prefix();
+        assert!(
+            stager
+                .prepare_kernel(crate::kernel::Operation::Commit {
+                    command: command.clone(),
+                    etags: Default::default()
+                })
+                .is_err()
+        );
+        assert_eq!(stager.prefix(), before);
+        let etags = graph
+            .databases
+            .values()
+            .map(|n| (n.id.clone(), "verified".into()))
+            .collect();
+        let (committed, _) =
+            stager.prepare_kernel(crate::kernel::Operation::Commit { command, etags })?;
+        assert_eq!(
+            committed.snapshot().unwrap().activity,
+            snapshot.activity,
+            "backup bookkeeping must not trigger itself"
+        );
+        let mut recovered = Datashed::default();
+        for (i, event) in [&first, &reserved, &committed].into_iter().enumerate() {
+            let event::Entry::Wal {
+                delta,
+                kernel: Some(kernel),
+                ..
+            } = event::decode_entry(event.bytes())?
+            else {
+                panic!()
+            };
+            for (id, delta) in [(crate::turso::ID, delta), (crate::kernel::ID, kernel)] {
+                let base = if i == 0 {
+                    delta.logical.base.as_ref().unwrap().0.clone()
+                } else if id == crate::turso::ID {
+                    recovered.database.as_ref().unwrap().image.clone()
+                } else {
+                    recovered.kernel_database.as_ref().unwrap().image.clone()
+                };
+                let logical = crate::turso::State::ingest_logical(&base, &delta.logical)?;
+                let physical = delta.physical.ingest(
+                    &base,
+                    &recovered.milestone,
+                    recovered.head.as_deref(),
+                )?;
+                assert_eq!(
+                    logical.image, physical,
+                    "{id}: logical and physical replay diverged"
+                );
+            }
+            recovered.apply_entry((i as u8 + 1).into(), event.bytes())?;
+        }
+        assert_eq!(
+            recovered.kernel_database.as_ref().unwrap().image,
+            stager.state.kernel_writer.as_ref().unwrap().image()?
+        );
+        let commits =
+            crate::kernel::committed(&committed.snapshot().unwrap().kernel_view.unwrap())?;
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].viewpoint, "0");
+        let prefix = stager.prefix();
+        assert!(
+            stager
+                .prepare_kernel(crate::kernel::Operation::Reserve(graph))
+                .is_err(),
+            "a delayed worker must not publish a non-advancing backup at a newer Viewpoint"
+        );
+        assert_eq!(stager.prefix(), prefix);
+        Ok(())
     }
 }

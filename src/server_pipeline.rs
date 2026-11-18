@@ -7,6 +7,10 @@ struct CommitReply {
     _admission: OwnedSemaphorePermit,
 }
 enum Reply {
+    Kernel {
+        channel: oneshot::Sender<Result<Viewpoint>>,
+        viewpoint: Viewpoint,
+    },
     Cleanup(oneshot::Sender<Result<()>>),
     Commit(CommitReply),
     Reserve {
@@ -25,6 +29,13 @@ impl Batch {
     fn finish(self, published: bool, prefix: &timeline::Prefix) {
         for reply in self.replies {
             match reply {
+                Reply::Kernel { channel, viewpoint } => {
+                    let _ = channel.send(if published {
+                        Ok(viewpoint)
+                    } else {
+                        Err(anyhow::anyhow!("publication stopped"))
+                    });
+                }
                 Reply::Cleanup(reply) => {
                     let _ = reply.send(if published {
                         Ok(())
@@ -261,6 +272,61 @@ impl Preparation {
                 return Ok(());
             };
             match message {
+                Message::BackupBarrier(reply) => {
+                    let (barrier, complete) = oneshot::channel();
+                    self.output
+                        .send(Publication::Barrier(barrier))
+                        .await
+                        .map_err(|_| anyhow::anyhow!("publication stopped"))?;
+                    let result = complete
+                        .await
+                        .context("backup barrier stopped")
+                        .and_then(|r| r)
+                        .map(|_| ());
+                    let _ = reply.send(result);
+                }
+                Message::Kernel(request) => {
+                    let permit = self
+                        .batches
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .context("publication stopped")?;
+                    let mut stager = self.write_stager().await?;
+                    let (stager, batch) = tokio::task::spawn_blocking(move || {
+                        match stager.prepare_kernel(request.operation) {
+                            Ok((prepared, viewpoint)) => {
+                                let batch = Batch {
+                                    prefix: stager.prefix(),
+                                    prepared: Some(prepared),
+                                    replies: vec![Reply::Kernel {
+                                        channel: request.reply,
+                                        viewpoint,
+                                    }],
+                                    _permit: permit,
+                                };
+                                Ok((stager, Some(batch)))
+                            }
+                            Err(error) => {
+                                let _ = request.reply.send(Err(error));
+                                anyhow::ensure!(
+                                    !stager.poisoned(),
+                                    "database group restoration failed"
+                                );
+                                Ok((stager, None))
+                            }
+                        }
+                    })
+                    .await
+                    .context("kernel preparation panicked")??;
+                    self.stager = Some(stager);
+                    if let Some(batch) = batch {
+                        self.output
+                            .send(Publication::Batch(batch))
+                            .await
+                            .map_err(|_| anyhow::anyhow!("publication stopped"))?;
+                    }
+                }
                 Message::InspectCommit { mut request, reply } => {
                     let mut stager = self.write_stager().await?;
                     let (stager, request) = tokio::task::spawn_blocking(move || {
@@ -281,14 +347,8 @@ impl Preparation {
                         .context("publication stopped")?;
                     let mut stager = self.write_stager().await?;
                     let (stager, batch) = tokio::task::spawn_blocking(move || {
-                        let prepared = stager.prepare_promotion(command)?;
-                        let batch = Batch {
-                            prefix: stager.prefix(),
-                            prepared,
-                            replies: vec![Reply::Cleanup(reply)],
-                            _permit: permit,
-                        };
-                        Ok::<_, anyhow::Error>((stager, batch))
+                        let result = stager.prepare_promotion(command);
+                        maintenance_batch(stager, result, reply, permit)
                     })
                     .await
                     .context("promotion preparation panicked")??;
@@ -318,14 +378,8 @@ impl Preparation {
                         .context("publication stopped")?;
                     let mut stager = self.write_stager().await?;
                     let (stager, batch) = tokio::task::spawn_blocking(move || {
-                        let prepared = stager.prepare_cleanup(command)?;
-                        let batch = Batch {
-                            prefix: stager.prefix(),
-                            prepared,
-                            replies: vec![Reply::Cleanup(reply)],
-                            _permit: permit,
-                        };
-                        Ok::<_, anyhow::Error>((stager, batch))
+                        let result = stager.prepare_cleanup(command);
+                        maintenance_batch(stager, result, reply, permit)
                     })
                     .await
                     .context("cleanup preparation panicked")??;
@@ -482,6 +536,29 @@ impl Preparation {
     }
 }
 
+fn maintenance_batch(
+    stager: timeline::Stager,
+    result: Result<Option<timeline::Prepared>>,
+    reply: oneshot::Sender<Result<()>>,
+    permit: OwnedSemaphorePermit,
+) -> Result<(timeline::Stager, Batch)> {
+    let (prepared, replies) = match result {
+        Ok(prepared) => (prepared, vec![Reply::Cleanup(reply)]),
+        Err(error) => {
+            let _ = reply.send(Err(error));
+            anyhow::ensure!(!stager.poisoned(), "database group restoration failed");
+            (None, vec![])
+        }
+    };
+    let batch = Batch {
+        prefix: stager.prefix(),
+        prepared,
+        replies,
+        _permit: permit,
+    };
+    Ok((stager, batch))
+}
+
 fn prepare(
     mut stager: timeline::Stager,
     requests: Vec<QueuedCommit>,
@@ -531,7 +608,24 @@ fn prepare(
     let prepared = if commands.is_empty() {
         None
     } else {
-        Some(stager.prepare(commands)?)
+        match stager.prepare(commands) {
+            Ok(prepared) => Some(prepared),
+            Err(error) => {
+                anyhow::ensure!(!stager.poisoned(), "database group restoration failed");
+                for reply in &mut replies {
+                    if let Reply::Commit(reply) = reply
+                        && reply.result.is_ok()
+                    {
+                        reply.result = Err(Failure::new(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "transaction_failed",
+                            &error,
+                        ));
+                    }
+                }
+                None
+            }
+        }
     };
     let prefix = stager.prefix();
     if prepared.is_some() {
@@ -566,8 +660,20 @@ fn prepare_reservation(
             })),
         )
     } else {
-        let (prepared, outcome) = stager.prepare_heap(&reservation.request)?;
-        (prepared, Ok(outcome))
+        match stager.prepare_heap(&reservation.request) {
+            Ok((prepared, outcome)) => (prepared, Ok(outcome)),
+            Err(error) => {
+                anyhow::ensure!(!stager.poisoned(), "database group restoration failed");
+                (
+                    None,
+                    Err(Failure::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "transaction_failed",
+                        error,
+                    )),
+                )
+            }
+        }
     };
     let prefix = stager.prefix();
     Ok((
@@ -604,13 +710,30 @@ impl Worker {
             ))
         });
         let (targets, snapshots) = watch::channel(self.state.snapshot()?);
+        let (kernel_queue, mut kernel_requests) = mpsc::channel::<basinsync::kernel::Request>(2);
+        let maintenance = self.maintenance.clone();
+        let kernel_bridge = tokio::spawn(async move {
+            while let Some(request) = kernel_requests.recv().await {
+                if let Err(error) = maintenance.send(Message::Kernel(request)).await
+                    && let Message::Kernel(request) = error.0
+                {
+                    let _ = request
+                        .reply
+                        .send(Err(anyhow::anyhow!("request handler closed")));
+                }
+            }
+        });
+        let (backup_stop, backup_shutdown) = watch::channel(false);
         let backup_job = if !self.backup_interval.is_zero() {
             Some(tokio::spawn(basinsync::backup::run(
                 self.bucket.clone(),
                 snapshots.clone(),
                 self.backup_interval,
+                kernel_queue,
+                backup_shutdown,
             )))
         } else {
+            drop(kernel_queue);
             None
         };
         let snapshots = (!self.cleanup.interval.is_zero()).then_some(snapshots);
@@ -632,6 +755,7 @@ impl Worker {
             backups,
             analogue_enabled.then_some(orders),
         ));
+        let coordination_queue = self.maintenance.clone();
         let cleanup_job = snapshots.map(|snapshots| {
             tokio::spawn(cleanup_loop(
                 self.bucket.clone(),
@@ -642,13 +766,40 @@ impl Worker {
                 shutdown.clone(),
             ))
         });
+        let (drain, preparation_shutdown) = watch::channel(false);
+        let mut external_shutdown = shutdown.clone();
+        let mut failed = halted.clone();
+        let maintenance = coordination_queue;
+        let coordinator = tokio::spawn(async move {
+            if !*external_shutdown.borrow() && !*failed.borrow() {
+                tokio::select! { _=external_shutdown.changed()=>{}, _=failed.changed()=>{} }
+            }
+            if backup_job.is_some() && !*failed.borrow() {
+                let (reply, complete) = oneshot::channel();
+                if maintenance
+                    .send(Message::BackupBarrier(reply))
+                    .await
+                    .is_ok()
+                {
+                    let _ = complete.await;
+                }
+            }
+            backup_stop.send_replace(true);
+            let backup = if let Some(job) = backup_job {
+                job.await.context("backup task panicked")
+            } else {
+                Ok(())
+            };
+            drain.send_replace(true);
+            backup
+        });
         let mut preparation = Preparation {
             bucket: self.bucket,
             stager: Some(self.state.into_stager()),
             output,
             published: published_rx,
             halted,
-            shutdown,
+            shutdown: preparation_shutdown,
             draining: false,
             batches,
             batch_max: self.batch_max,
@@ -675,13 +826,12 @@ impl Worker {
         } else {
             Ok(())
         };
-        let backup_result = if let Some(job) = backup_job {
-            job.await.context("backup task panicked")
-        } else {
-            Ok(())
-        };
+        let backup_result = coordinator.await.context("shutdown coordinator panicked")?;
         cleanup_result?;
         backup_result?;
+        kernel_bridge
+            .await
+            .context("kernel request bridge panicked")?;
         if let Some(job) = analogue_job {
             job.await.context("Analogue worker panicked")?;
         }

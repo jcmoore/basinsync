@@ -87,7 +87,7 @@ async fn main() -> Result<()> {
                 .collect();
             println!(
                 "{}",
-                serde_json::json!({"crc32c":basinsync::checksum::format(state.crc32c),"coordinate":state.coordinate.to_string(),"elapsed_ms":elapsed.as_secs_f64()*1000.,"milestone":state.milestone.to_string(),"sha384":basinsync::event::digest(&database.image),"flows":flows,"stats":state.recovery_stats})
+                serde_json::json!({"kernel_sha384":state.kernel_database.as_ref().map(|db|basinsync::event::digest(&db.image)),"crc32c":basinsync::checksum::format(state.crc32c),"coordinate":state.coordinate.to_string(),"elapsed_ms":elapsed.as_secs_f64()*1000.,"milestone":state.milestone.to_string(),"sha384":basinsync::event::digest(&database.image),"flows":flows,"stats":state.recovery_stats})
             );
         }
         _ => anyhow::bail!("expected --generate, --pack, --decode, or --recover"),
