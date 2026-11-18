@@ -2,8 +2,13 @@
 [bidirectional-tail]: <bidirectional-tail.json>
 [bulk-order]: <../../../../../../glossary/bulk-order.md>
 [byte-coordinate]: <../../../../../../glossary/byte-coordinate.md>
+[crc32c]: <../../../../../../glossary/crc32c.md>
 [differential-event]: <../../../../../../glossary/differential-event.md>
+[external-margins-full]: <external-margins-full.json>
+[external-margins-tail]: <external-margins-tail.json>
+[margin]: <../../../../../../glossary/margin.md>
 [margin-free]: <margin-free.json>
+[milestone]: <../../../../../../glossary/milestone.md>
 [timeline]: <../../../../../../glossary/timeline.md>
 [trimmed-events]: <trimmed-events.json>
 
@@ -53,3 +58,30 @@ After trimming event retry margins and restoring plain exclusive ends, the same
 two-round comparison gives 3133 ms Bulk ×2 versus 2007 ms bidirectional, with
 identical recovered images. Bidirectional uses four data Ranges and no manifest
 GETs, preserving the 36% latency reduction. See the *trimmed-event samples*[~][trimmed-events].
+
+## External event margins and CRC32C
+
+Repeat on `7b83f0e1`, with external *retry margins*[~][margin] and cumulative
+*CRC32C*[~][crc32c]: four alternating rounds per strategy, same machine,
+backend, 96-event workload, and genesis recovery. All 32 measured recoveries
+match the sequential reference database image and agree on final
+*Milestone*[~][milestone], *coordinate*[~][byte-coordinate], and checksum.
+
+Median milliseconds:
+
+| Archive coverage | Network | Bulk ×2 | Bidirectional |
+| --- | --- | ---: | ---: |
+| Complete | +100 ms | 1511 | 1506 |
+| Complete | +25 ms, shared 5 MiB/s | 5156 | 5030 |
+| First 80 events | +100 ms | 3169 | 1999 |
+| First 80 events | +25 ms, shared 5 MiB/s | 5654 | 5040 |
+
+With complete archives, bidirectional uses 28–29 total requests versus 20,
+and transfers 24.00–24.17 MiB versus 23.63 MiB. With the unarchived tail,
+it uses 36–37 requests versus 35 and 23.87 MiB versus 23.63 MiB,
+reducing recovery time by 37% and 11% respectively. No manifest GETs are needed.
+Keep Bulk ×2 as the default; bidirectional remains useful when archives lag.
+These small, simulated runs support that tradeoff without establishing a production ranking.
+
+Raw samples: *complete archives*[~][external-margins-full] and
+*unarchived tail*[~][external-margins-tail].
