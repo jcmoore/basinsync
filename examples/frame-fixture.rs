@@ -1,7 +1,7 @@
 use anyhow::Result;
 use basinsync::{
     event::{self, Marker},
-    timeline::Datashed,
+    timeline::Basin,
 };
 use std::{
     collections::BTreeMap,
@@ -116,7 +116,7 @@ fn main() -> Result<()> {
             },
         }
     } else {
-        Datashed::default().prepare(markers)?.1
+        Basin::default().prepare(markers)?.1
     };
     io::stdout().write_all(&event::encode(command)?)?;
     Ok(())

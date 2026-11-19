@@ -3,12 +3,12 @@ prerequisites:
   - 0zg0/261022-shallow-epilogue-commits
 ---
 
+[basin]: <../../../glossary/basin.md>
+[basin-timeline]: <../../../basin-timeline.md>
 [byte-coordinate]: <../../../glossary/byte-coordinate.md>
 [commit-marker]: <../../../glossary/commit-marker.md>
 [context]: <../../../glossary/context.md>
 [crc32c]: <../../../glossary/crc32c.md>
-[datashed]: <../../../glossary/datashed.md>
-[datashed-timeline]: <../../../datashed-timeline.md>
 [development]: <../../../development.md>
 [differential-event]: <../../../glossary/differential-event.md>
 [downstream]: <../../../glossary/downstream.md>
@@ -28,9 +28,9 @@ prerequisites:
 [upstream]: <../../../glossary/upstream.md>
 [viewpoint]: <../../../glossary/viewpoint.md>
 
-# Datashed Timeline race
+# Basin Timeline race
 
-Give the *Datashed*[~][datashed] a shared *Timeline*[~][timeline] for changes across
+Give the *Basin*[~][basin] a shared *Timeline*[~][timeline] for changes across
 *Flows*[~][flow], replacing *Epilogue*[~][epilogue] listings for state recovery
 and refresh.
 
@@ -45,16 +45,16 @@ and refresh.
 4. Refresh from subsequent *Timeline*[~][timeline] entries. In
    `GET /api/v0/epilogue/status?flow=<id>`, `latest` identifies the committed
    *marker*[~][commit-marker] and provides its *GET capability*[~][epilogue-protocol].
-   Include `timelines.datashed.milestone` in API responses so clients can detect an
+   Include `timelines.basin.milestone` in API responses so clients can detect an
    older materialized prefix when switching servers.
-   When the *probe freshness window*[~][datashed-timeline] expires, probe the next
+   When the *probe freshness window*[~][basin-timeline] expires, probe the next
    *Milestone*[~][milestone] before refreshing; absence confirms the materialized
    state is current.
 
 Wrap each *DifferentialEvent's*[~][differential-event] command feed in one nested
 *EnvBuf*[~][envbuf] (`100`) so complete events can concatenate. Start its message with one
 *EnvBuf-wrapped*[~][envbuf] *FlexBuffers*[~][flexbuffers]
-*commitflow tuple*[~][datashed-timeline]:
+*commitflow tuple*[~][basin-timeline]:
 
 ```ts
 [Symbol.species, "sync.memoremix.com", "sts/0/databasin/commitflow", {
@@ -90,11 +90,11 @@ Encode both positions as positive *Lexidecimal*[~][lexidecimal] text for indexin
 complement *Milestones*[~][milestone] before encoding their object keys.
 
 Return `latest`'s length and a signed *Range GET*[~][range-get] for its bytes in
-the *Datashed*[~][datashed] *Timeline*[~][timeline]. Every successful GET must expose
+the *Basin*[~][basin] *Timeline*[~][timeline]. Every successful GET must expose
 only that *marker*[~][commit-marker]; reject omitted or changed Range headers.
 For length zero, omit the URL and headers and use empty bytes without fetching.
 
-Use the *command and route contract*[~][datashed-timeline] and
+Use the *command and route contract*[~][basin-timeline] and
 *development checks*[~][development]. A separate thread will later copy
 *CommitMarkers*[~][commit-marker] from the *Timeline*[~][timeline] into
 *Flow*[~][flow] *Epilogues*[~][epilogue] and create recovery snapshots.

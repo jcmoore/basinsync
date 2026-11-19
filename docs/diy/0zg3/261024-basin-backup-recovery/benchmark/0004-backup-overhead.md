@@ -1,6 +1,6 @@
 [0004-backup-samples]: <data/0004-backup-samples.json>
+[basin]: <../../../../glossary/basin.md>
 [commit-marker]: <../../../../glossary/commit-marker.md>
-[datashed]: <../../../../glossary/datashed.md>
 [epilogue]: <../../../../glossary/epilogue.md>
 [flow]: <../../../../glossary/flow.md>
 [timeline]: <../../../../glossary/timeline.md>
@@ -44,6 +44,6 @@ I/O still competes for resources. With added snapshot-upload latency, coalescing
 reduced median backup submissions during the measured requests from 36 to 16.
 These are saturated closed-loop clients, not a fixed-arrival-rate latency test.
 
-The *Datashed*[~][datashed] publishes a *CommitMarker*[~][commit-marker] only after
+The *Basin*[~][basin] publishes a *CommitMarker*[~][commit-marker] only after
 all covered *Flow*[~][flow] copies reach their *Epilogues*[~][epilogue].
 Retain the *environment and run samples*[~][0004-backup-samples].

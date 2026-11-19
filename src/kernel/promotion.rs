@@ -1,4 +1,4 @@
-//! Bounded promotion of the shallow Datashed backup graphs.
+//! Bounded promotion of the shallow Basin backup graphs.
 use super::*;
 use std::{collections::BTreeSet, sync::Arc};
 use tracing::Instrument;
@@ -53,7 +53,7 @@ fn valid_task(conn: &Arc<Connection>, task: &Task) -> Result<()> {
     turso::rows(
         conn,
         &format!(
-            "SELECT 1 FROM marking_tasks WHERE flow='datashed' AND viewpoint={} AND upstream={}",
+            "SELECT 1 FROM marking_tasks WHERE flow='basin' AND viewpoint={} AND upstream={}",
             q(&task.index.viewpoint.lexidecimal()),
             q(&crate::promotion::upstream_key(&task.upstream))
         ),
@@ -117,7 +117,7 @@ fn pending(view: &Arc<turso::cow::View>, limits: Limits) -> Result<Vec<roots::In
     turso::rows(
         &conn,
         &format!(
-            "SELECT c.viewpoint,c.upstream,c.covered,c.sha384 FROM marking_tasks t JOIN kernel_commits c ON c.viewpoint=t.viewpoint AND c.upstream=t.upstream WHERE t.flow='datashed' ORDER BY t.prioritized,t.flow,t.viewpoint LIMIT {}",
+            "SELECT c.viewpoint,c.upstream,c.covered,c.sha384 FROM marking_tasks t JOIN kernel_commits c ON c.viewpoint=t.viewpoint AND c.upstream=t.upstream WHERE t.flow='basin' ORDER BY t.prioritized,t.flow,t.viewpoint LIMIT {}",
             limits.tasks
         ),
         |r| {
@@ -186,7 +186,7 @@ pub(crate) fn apply(conn: &Arc<Connection>, change: &Change) -> Result<()> {
                 );
             }
             conn.execute(format!(
-                "DELETE FROM marking_tasks WHERE flow='datashed' AND viewpoint={} AND upstream={}",
+                "DELETE FROM marking_tasks WHERE flow='basin' AND viewpoint={} AND upstream={}",
                 q(&Viewpoint::parse(&task.commit.viewpoint)?.lexidecimal()),
                 q(&crate::promotion::upstream_key(&task.upstream))
             ))?;
@@ -276,7 +276,7 @@ async fn confirm(bucket: &s3::Bucket, task: Task) -> Result<ConfirmedSign> {
     cp.verify_headers(&headers)?;
     crate::epilogue::confirm_promotion_sign(
         bucket,
-        &crate::epilogue::promotion_key(crate::epilogue::DATASHED_PREFIX, &vp)?,
+        &crate::epilogue::promotion_key(crate::epilogue::BASIN_PREFIX, &vp)?,
         &task.upstream,
     )
     .await?;
@@ -448,7 +448,7 @@ mod tests {
             .collect()
     }
     fn initial() -> Result<(timeline::Stager, Vec<timeline::Prepared>, Task)> {
-        let mut stager = timeline::Datashed::default().into_stager();
+        let mut stager = timeline::Basin::default().into_stager();
         let first = stager.prepare(vec![event::FlowCommand {
             markers: BTreeMap::from([(
                 "kernel-test".into(),
@@ -632,7 +632,7 @@ mod tests {
         let prefix = stager.prefix();
         assert!(stager.prepare_kernel(Operation::Promote(signed)).is_err());
         assert_eq!(stager.prefix(), prefix);
-        let mut replay = timeline::Datashed::default();
+        let mut replay = timeline::Basin::default();
         for (i, event) in events.iter().enumerate() {
             let event::Entry::Wal {
                 delta,

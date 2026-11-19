@@ -177,7 +177,7 @@ impl State {
         }
         execute(
             conn,
-            "UPDATE datashed SET milestone=?1 WHERE id=1",
+            "UPDATE basin SET milestone=?1 WHERE id=1",
             &[milestone],
         )?;
         conn.execute("COMMIT")?;
@@ -341,7 +341,7 @@ mod tests {
             viewpoint: viewpoint.into(),
         }
     }
-    fn apply(state: &mut timeline::Datashed, prepared: timeline::Prepared) -> Result<()> {
+    fn apply(state: &mut timeline::Basin, prepared: timeline::Prepared) -> Result<()> {
         let event::Entry::Wal { delta, .. } = event::decode_entry(prepared.bytes())? else {
             unreachable!()
         };
@@ -358,8 +358,8 @@ mod tests {
     }
     #[test]
     fn queued_sweeps_are_bounded_retain_shared_nodes_and_survive_replay() -> Result<()> {
-        let mut writer = timeline::Datashed::default().into_stager();
-        let mut replay = timeline::Datashed::default();
+        let mut writer = timeline::Basin::default().into_stager();
+        let mut replay = timeline::Basin::default();
         let request = reserve("f", &[1, 2, 3]);
         let (prepared, _) = writer.prepare_heap(&request)?;
         apply(&mut replay, prepared.unwrap())?;
@@ -447,8 +447,8 @@ mod tests {
     }
     #[test]
     fn cleanup_frames_match_internal_operation_and_preserve_snapshot() -> Result<()> {
-        let mut writer = timeline::Datashed::default().into_stager();
-        let mut replay = timeline::Datashed::default();
+        let mut writer = timeline::Basin::default().into_stager();
+        let mut replay = timeline::Basin::default();
         let (prepared, _) = writer.prepare_heap(&reserve("f", &[9]))?;
         apply(&mut replay, prepared.unwrap())?;
         let prepared = writer.prepare(vec![commit("f", "0")])?;

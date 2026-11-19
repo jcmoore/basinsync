@@ -357,15 +357,15 @@ fn application_feed(
     read: bool,
 ) -> Result<Feed> {
     let mut feed = Feed::default();
-    let datashed = schema.values().find(|t| t.name == "datashed").unwrap();
+    let basin = schema.values().find(|t| t.name == "basin").unwrap();
     let flows = schema.values().find(|t| t.name == "flows").unwrap();
     feed.add(
-        datashed,
+        basin,
         vec![Cell::Integer(1), Cell::Text(writer.cursor.to_string())],
         -1,
     );
     feed.add(
-        datashed,
+        basin,
         vec![
             Cell::Integer(1),
             Cell::Text((&writer.cursor + 1u8).to_string()),

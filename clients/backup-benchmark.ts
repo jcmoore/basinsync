@@ -24,8 +24,8 @@ const endpoint=`http://127.0.0.1:${await port()}`;
 const s3=new S3Client({endpoint,region:"us-east-1",forcePathStyle:true,credentials,maxAttempts:1});
 let delayMs=0,backupPuts=0;
 const relay=Bun.serve({hostname:"127.0.0.1",port:0,async fetch(request){
-  const url=new URL(request.url),datashedPut=request.method==="PUT"&&url.pathname.includes("/epilogue/")&&!url.pathname.includes("/userspace/flows/");
-  if(datashedPut){backupPuts++;if(delayMs)await Bun.sleep(delayMs);}
+  const url=new URL(request.url),basinPut=request.method==="PUT"&&url.pathname.includes("/epilogue/")&&!url.pathname.includes("/userspace/flows/");
+  if(basinPut){backupPuts++;if(delayMs)await Bun.sleep(delayMs);}
   return fetch(`${endpoint}${url.pathname}${url.search}`,{method:request.method,headers:request.headers,body:["GET","HEAD"].includes(request.method)?undefined:await request.arrayBuffer()});
 }});
 const configurations=[{name:"off",interval:0,delay:0},{name:"default",interval:1000,delay:0},{name:"backup",interval:20,delay:0},{name:"backup+100ms",interval:20,delay:100}].filter(c=>!process.env.BACKUP_MODES||process.env.BACKUP_MODES.split(",").includes(c.name));
@@ -47,8 +47,8 @@ try{
     const seed=await Promise.all(Array.from({length:32},async(_,lane)=>{
       for(let n=lane;n<seedFlows;n+=32){const r=await commit(url,`seed-${n.toString().padStart(5,"0")}-${"x".repeat(140)}`,new Uint8Array(),0n);assert.equal(r.status,201);await r.text();}
     }));void seed;
-    const seeded=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/timeline/"}));assert(!seeded.IsTruncated);const seedTail=BigInt(seeded.KeyCount!);
-    await until(async()=>{if(!config.interval)return true;const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));await r.Body!.transformToByteArray();return BigInt(r.Metadata!.milestone)>=seedTail;});
+    const seeded=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/basin/timeline/"}));assert(!seeded.IsTruncated);const seedTail=BigInt(seeded.KeyCount!);
+    await until(async()=>{if(!config.interval)return true;const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/basin/epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));await r.Body!.transformToByteArray();return BigInt(r.Metadata!.milestone)>=seedTail;});
     backupPuts=0;
     const latencies:number[]=[],start=performance.now();
     await Promise.all(Array.from({length:flows},async(_,flow)=>{
@@ -56,9 +56,9 @@ try{
       for(let n=0;n<perFlow;n++){const at=performance.now(),r=await commit(url,`live-${flow}`,payload,BigInt(n));assert.equal(r.status,201);await r.text();latencies.push(performance.now()-at);}
     }));
     const seconds=(performance.now()-start)/1000,putsDuringRequests=backupPuts;
-    const events=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/timeline/"}));assert(!events.IsTruncated,"raise listing bound for this workload");const tail=BigInt(events.KeyCount!);
+    const events=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/basin/timeline/"}));assert(!events.IsTruncated,"raise listing bound for this workload");const tail=BigInt(events.KeyCount!);
     if(config.interval){
-      await until(async()=>{const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));const bytes=await r.Body!.transformToByteArray();assert.equal(r.Metadata!.sha384,sha384(message(bytes)));return BigInt(r.Metadata!.milestone)>=tail;});
+      await until(async()=>{const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/basin/epilogue/",MaxKeys:1}));const k=list.Contents?.[0]?.Key;if(!k)return false;const r=await s3.send(new GetObjectCommand({Bucket:bucket,Key:k}));const bytes=await r.Body!.transformToByteArray();assert.equal(r.Metadata!.sha384,sha384(message(bytes)));return BigInt(r.Metadata!.milestone)>=tail;});
       for(let flow=0;flow<flows;flow++){
         const state=await epilogueStatus(url,`live-${flow}`);assert.equal(state.latest?.viewpoint,BigInt(perFlow-1));
         assert(state.latest?.url);assert(state.latest.headers?.Range,"copied marker capabilities select the envelope message");assert(new URL(state.latest.url).pathname.includes("/userspace/flows/"));

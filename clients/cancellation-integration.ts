@@ -67,7 +67,7 @@ try{
   // Disconnected requests still drain, including a prepared successor batch.
   for(const signal of (process.platform==="win32"?["SIGINT"]:["SIGINT","SIGTERM"]) as ("SIGINT"|"SIGTERM")[]){
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let puts=0;
-    const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/datashed/timeline/")){if(++puts===1){entered.resolve();await release.promise;}}});
+    const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")){if(++puts===1){entered.resolve();await release.promise;}}});
     const server=await app(b,p),abort=new AbortController();
     const request=fetch(`${server.url}/api/v0/epilogue`,{method:"PUT",body:form("disconnect",bytes("marker"),0n),signal:abort.signal}).then(()=>"response",()=>"disconnected");
     await deadline(entered.promise);abort.abort();assert.equal(await request,"disconnected");
@@ -83,21 +83,21 @@ try{
     const b=await bucket(),options:Record<string,string>={BASINSYNC_BACKUP_INTERVAL_MS:"3600000"};
     if(option!==undefined)options.BASINSYNC_BACKUP_ON_SHUTDOWN=option;
     let timelinePuts=0;
-    const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/datashed/timeline/"))timelinePuts++;});
+    const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/"))timelinePuts++;});
     const server=await app(b,p,options);
     assert.equal((await commit(server.url,"no-final-backup",bytes("marker"),0n)).status,201);
     const keys=async(prefix:string)=>(await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:prefix}))).Contents?.map(o=>o.Key)??[];
-    const before=await keys("kernelspace/datashed/timeline/");assert.equal(before.length,1);
+    const before=await keys("kernelspace/basin/timeline/");assert.equal(before.length,1);
     server.process.kill("SIGINT");assert.equal(await deadline(server.process.exited),0);
-    assert.deepEqual(await keys("kernelspace/datashed/timeline/"),before);assert.deepEqual(await keys("kernelspace/datashed/epilogue/"),[]);assert.deepEqual(await keys("kernelspace/datashed/heap/"),[]);assert.equal(timelinePuts,1);
+    assert.deepEqual(await keys("kernelspace/basin/timeline/"),before);assert.deepEqual(await keys("kernelspace/basin/epilogue/"),[]);assert.deepEqual(await keys("kernelspace/basin/heap/"),[]);assert.equal(timelinePuts,1);
     const replica=await app(b,p,options);assert.equal((await epilogueStatus(replica.url,"no-final-backup")).latest!.viewpoint,0n);
-    replica.process.kill("SIGINT");assert.equal(await deadline(replica.process.exited),0);assert.deepEqual(await keys("kernelspace/datashed/timeline/"),before);assert.equal(timelinePuts,1);
+    replica.process.kill("SIGINT");assert.equal(await deadline(replica.process.exited),0);assert.deepEqual(await keys("kernelspace/basin/timeline/"),before);assert.equal(timelinePuts,1);
   }
   console.log("put of success: default and explicit-false shutdowns leave Timeline/Epilogue state unchanged across replica restart");
   // An explicit opt-in wakes the worker for a final backup, even without a periodic schedule.
   for(const interval of ["3600000","0"]){
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let backups=0;
-    const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${b}/kernelspace/datashed/epilogue/`)&&request.headers.has("x-amz-meta-milestone")){backups++;entered.resolve();await release.promise;}});
+    const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${b}/kernelspace/basin/epilogue/`)&&request.headers.has("x-amz-meta-milestone")){backups++;entered.resolve();await release.promise;}});
     const server=await app(b,p,{BASINSYNC_BACKUP_INTERVAL_MS:interval,BASINSYNC_BACKUP_ON_SHUTDOWN:"true"});
     assert.equal((await commit(server.url,"backup",bytes("marker"),0n)).status,201);assert.equal(backups,0);
     server.process.kill("SIGINT");await deadline(entered.promise);await Bun.sleep(50);assert.equal(server.process.exitCode,null);
@@ -107,7 +107,7 @@ try{
   // The drain deadline is explicit and exits unsuccessfully rather than claiming completion.
   {
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
-    const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/datashed/timeline/")){entered.resolve();await release.promise;return new Response("not stored",{status:503});}});
+    const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")){entered.resolve();await release.promise;return new Response("not stored",{status:503});}});
     const server=await app(b,p,{BASINSYNC_SHUTDOWN_TIMEOUT_MS:"100"}),abort=new AbortController();
     const request=fetch(`${server.url}/api/v0/epilogue`,{method:"PUT",body:form("timeout",bytes("marker"),0n),signal:abort.signal}).catch(()=>null);
     await deadline(entered.promise);abort.abort();await request;server.process.kill("SIGINT");

@@ -4,10 +4,10 @@ prerequisites:
 ---
 
 [access-token]: <../../../glossary/access-token.md>
+[basin]: <../../../glossary/basin.md>
 [commit-marker]: <../../../glossary/commit-marker.md>
 [context]: <../../../glossary/context.md>
 [dag]: <../../../glossary/dag.md>
-[datashed]: <../../../glossary/datashed.md>
 [development]: <../../../development.md>
 [flow]: <../../../glossary/flow.md>
 [heap-protocol]: <../../../heap-protocol.md>
@@ -28,7 +28,7 @@ prerequisites:
 
 Prepare for *Viewpoints*[~][viewpoint] rooted at a *CommitMarker*[~][commit-marker]
 with a *DAG*[~][dag] of opaque *nodes*[~][node]. Introduce *Heap reservations*[~][heap-reservation]
-so clients can upload before publication, while the *Datashed*[~][datashed]
+so clients can upload before publication, while the *Basin*[~][basin]
 counts incoming edges for eventual collection in *UserSpace*[~][userspace].
 
 Implement the *staging endpoint*[~][heap-protocol]. Require the *Flow's*[~][flow]
@@ -85,4 +85,4 @@ the *old generation*[~][old-generation], references to promoted *nodes*[~][node]
 and higher *nodes*[~][node] with targets in either generation.
 
 *KernelSpace's*[~][kernelspace] `kernelspace_nodes` and `kernelspace_edges` for
-server-driven *Datashed*[~][datashed] and *Jet*[~][jet] graphs come later.
+server-driven *Basin*[~][basin] and *Jet*[~][jet] graphs come later.

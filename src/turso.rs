@@ -30,7 +30,7 @@ use cleanup::enqueue_sweeping;
 pub const ID: &str = "default.turso";
 pub const VERSION: &str = "0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88";
 pub const PAGE_SIZE: usize = 16384;
-pub const SCHEMA: &str = "CREATE TABLE datashed (id INTEGER PRIMARY KEY CHECK (id = 1), milestone TEXT NOT NULL); CREATE TABLE flows (id TEXT PRIMARY KEY NOT NULL, viewpoint TEXT NOT NULL, revision TEXT NOT NULL); CREATE TABLE marker_ranges (flow TEXT NOT NULL, downstream TEXT NOT NULL, upstream TEXT NOT NULL, blob_offset INTEGER NOT NULL CHECK(blob_offset>=0), content_length INTEGER NOT NULL CHECK(content_length>=0), sha384 TEXT NOT NULL, PRIMARY KEY(flow, downstream)); CREATE INDEX marker_ranges_upstream ON marker_ranges(upstream); CREATE TABLE userspace_nodes (id TEXT PRIMARY KEY NOT NULL, content_length INTEGER NOT NULL CHECK(content_length>=0), reserved DATETIME NOT NULL, etag TEXT NOT NULL, promoted DATETIME NOT NULL, revision TEXT NOT NULL, freed DATETIME NOT NULL DEFAULT '', marked DATETIME NOT NULL DEFAULT '', context TEXT NOT NULL DEFAULT '{}'); CREATE INDEX userspace_nodes_promotion ON userspace_nodes(promoted,marked); CREATE INDEX userspace_nodes_freed ON userspace_nodes(freed,id); CREATE TABLE sweeping_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX sweeping_tasks_prioritized ON sweeping_tasks(prioritized,flow,viewpoint); CREATE TABLE marking_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, upstream TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX marking_tasks_prioritized ON marking_tasks(prioritized,flow,viewpoint); CREATE TABLE userspace_edges (node TEXT NOT NULL, retainer TEXT NOT NULL, PRIMARY KEY(node, retainer), CHECK(retainer<node)); CREATE INDEX userspace_edges_retainer ON userspace_edges(retainer, node); INSERT INTO datashed VALUES (1, '0');";
+pub const SCHEMA: &str = "CREATE TABLE basin (id INTEGER PRIMARY KEY CHECK (id = 1), milestone TEXT NOT NULL); CREATE TABLE flows (id TEXT PRIMARY KEY NOT NULL, viewpoint TEXT NOT NULL, revision TEXT NOT NULL); CREATE TABLE marker_ranges (flow TEXT NOT NULL, downstream TEXT NOT NULL, upstream TEXT NOT NULL, blob_offset INTEGER NOT NULL CHECK(blob_offset>=0), content_length INTEGER NOT NULL CHECK(content_length>=0), sha384 TEXT NOT NULL, PRIMARY KEY(flow, downstream)); CREATE INDEX marker_ranges_upstream ON marker_ranges(upstream); CREATE TABLE userspace_nodes (id TEXT PRIMARY KEY NOT NULL, content_length INTEGER NOT NULL CHECK(content_length>=0), reserved DATETIME NOT NULL, etag TEXT NOT NULL, promoted DATETIME NOT NULL, revision TEXT NOT NULL, freed DATETIME NOT NULL DEFAULT '', marked DATETIME NOT NULL DEFAULT '', context TEXT NOT NULL DEFAULT '{}'); CREATE INDEX userspace_nodes_promotion ON userspace_nodes(promoted,marked); CREATE INDEX userspace_nodes_freed ON userspace_nodes(freed,id); CREATE TABLE sweeping_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX sweeping_tasks_prioritized ON sweeping_tasks(prioritized,flow,viewpoint); CREATE TABLE marking_tasks (flow TEXT NOT NULL, viewpoint TEXT NOT NULL, upstream TEXT NOT NULL, prioritized DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(flow,viewpoint)); CREATE INDEX marking_tasks_prioritized ON marking_tasks(prioritized,flow,viewpoint); CREATE TABLE userspace_edges (node TEXT NOT NULL, retainer TEXT NOT NULL, PRIMARY KEY(node, retainer), CHECK(retainer<node)); CREATE INDEX userspace_edges_retainer ON userspace_edges(retainer, node); INSERT INTO basin VALUES (1, '0');";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Blob(#[serde(with = "serde_bytes")] pub Vec<u8>);
@@ -270,7 +270,7 @@ impl State {
     }
     pub(crate) fn kernel_genesis(milestone: &num_bigint::BigUint) -> Result<Self> {
         let mut state = Self::genesis_schema(crate::kernel::SCHEMA)?;
-        state.native.conn.execute(format!("UPDATE datashed SET milestone='{milestone}'; UPDATE kernel_state SET activity='{milestone}'"))?;
+        state.native.conn.execute(format!("UPDATE basin SET milestone='{milestone}'; UPDATE kernel_state SET activity='{milestone}'"))?;
         state.native.checkpoint()?;
         state.image = state.native.image()?;
         Ok(state)
@@ -369,14 +369,14 @@ impl State {
         let mut query = self
             .native
             .conn
-            .query("SELECT milestone FROM datashed WHERE id = 1")?
+            .query("SELECT milestone FROM basin WHERE id = 1")?
             .unwrap();
         ensure!(
             matches!(
                 ready_step(&*self.native.io, || query.step())?,
                 StepResult::Row
             ),
-            "missing Datashed cursor"
+            "missing Basin cursor"
         );
         let value = query.row().unwrap().get::<String>(0)?;
         ensure!(
@@ -384,7 +384,7 @@ impl State {
                 ready_step(&*self.native.io, || query.step())?,
                 StepResult::Done
             ),
-            "duplicate Datashed cursor"
+            "duplicate Basin cursor"
         );
         Ok(value)
     }
@@ -489,7 +489,7 @@ impl State {
             }
             stmt.run_ignore_rows()?;
         }
-        let mut stmt = conn.prepare("UPDATE datashed SET milestone = ?1 WHERE id = 1")?;
+        let mut stmt = conn.prepare("UPDATE basin SET milestone = ?1 WHERE id = 1")?;
         stmt.bind_at(
             NonZeroUsize::new(1).unwrap(),
             Value::build_text(milestone.to_owned()),
@@ -935,10 +935,10 @@ mod tests {
             .collect();
         let (mut state, _) = initial.stage("1", &markers, true)?;
         for sql in [
-            "DELETE FROM flows WHERE rowid % 2 = 0; UPDATE datashed SET milestone = '2'",
-            "UPDATE flows SET viewpoint = '340282366920938463463374607431768211456'; UPDATE datashed SET milestone = '3'",
-            "DELETE FROM flows; UPDATE datashed SET milestone = '4'",
-            "INSERT INTO flows VALUES ('reused', '0', '00000000-0000-4000-8000-000000000001'); UPDATE datashed SET milestone = '5'",
+            "DELETE FROM flows WHERE rowid % 2 = 0; UPDATE basin SET milestone = '2'",
+            "UPDATE flows SET viewpoint = '340282366920938463463374607431768211456'; UPDATE basin SET milestone = '3'",
+            "DELETE FROM flows; UPDATE basin SET milestone = '4'",
+            "INSERT INTO flows VALUES ('reused', '0', '00000000-0000-4000-8000-000000000001'); UPDATE basin SET milestone = '5'",
         ] {
             let native = Native::open(&state.image, None)?;
             native.conn.set_portable_logical_changes_enabled(true);

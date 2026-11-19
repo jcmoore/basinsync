@@ -56,7 +56,7 @@ try {
   assert.equal(result.samples.length,count/batch);
   assert(result.samples.every(s=>s.cpu_us>0 && s.event_bytes>0 && Number.isFinite(s.cpu_us)));
   const prior=runs.find(r=>r.flows===flows && (r.variant==="cdc")===(variant==="cdc"));if(prior)assert.equal(prior.initial_sha384,result.initial_sha384);
-  if(mode==="s3"){let count=0,token:string|undefined;do{const page=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/timeline/",ContinuationToken:token}));count+=(page.Contents??[]).length;token=page.NextContinuationToken;}while(token);assert.equal(count,(result.count+result.warmup)/batch);}
+  if(mode==="s3"){let count=0,token:string|undefined;do{const page=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/basin/timeline/",ContinuationToken:token}));count+=(page.Contents??[]).length;token=page.NextContinuationToken;}while(token);assert.equal(count,(result.count+result.warmup)/batch);}
   runs.push(result);
   writeFileSync(`${artifacts}/samples.json`,JSON.stringify(runs));
   console.log(`${name}: CPU p50 ${quantile(result.samples.map(s=>s.cpu_us),.5).toFixed(1)} us; ${result.requests_per_second.toFixed(1)} requests/s; ${quantile(result.samples.map(s=>s.event_bytes),.5)} bytes/event`);

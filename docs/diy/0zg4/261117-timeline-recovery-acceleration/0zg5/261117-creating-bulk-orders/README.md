@@ -4,13 +4,13 @@ prerequisites:
 ---
 
 [analogue]: <../../../../../glossary/analogue.md>
+[basin]: <../../../../../glossary/basin.md>
 [benchmark]: <benchmark/benchmark.md>
 [bulk-manifest]: <../../../../../glossary/bulk-manifest.md>
 [bulk-order]: <../../../../../glossary/bulk-order.md>
 [byte-coordinate]: <../../../../../glossary/byte-coordinate.md>
 [conditional-write]: <../../../../../glossary/conditional-write.md>
 [crc32c]: <../../../../../glossary/crc32c.md>
-[datashed]: <../../../../../glossary/datashed.md>
 [development]: <../../../../../development.md>
 [differential-event]: <../../../../../glossary/differential-event.md>
 [envbuf]: <../../../../../glossary/envbuf.md>
@@ -28,7 +28,7 @@ concatenate complete *DifferentialEvents*[~][differential-event] from the
 the *key layout*[~][object-keys]: complemented lower bounds sort descending,
 then complemented exclusive upper bounds sort descending.
 
-For the *Datashed*[~][datashed], hand durably published bytes to a background
+For the *Basin*[~][basin], hand durably published bytes to a background
 worker through a bounded, nonblocking queue. Include the bytes actually accepted
 after any *margin retry*[~][margin]. Omit each *event's*[~][differential-event] separate
 storage *margins*[~][margin] and copy its outer *EnvBuf*[~][envbuf] unchanged before

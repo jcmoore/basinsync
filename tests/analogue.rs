@@ -3,13 +3,13 @@ use basinsync::{
     analogue::{self, Builder, Order},
     event::{self, FlowCommand, Marker},
     recovery::{Candidate, Coverage},
-    timeline::Datashed,
+    timeline::Basin,
 };
 use num_bigint::BigUint;
 use std::collections::BTreeMap;
 
 fn events() -> Result<Vec<Vec<u8>>> {
-    let mut state = Datashed::default().into_stager();
+    let mut state = Basin::default().into_stager();
     (0..4)
         .map(|n| {
             let blob = vec![n as u8; n * 100 + 1];
@@ -47,8 +47,8 @@ fn bulk_orders_trim_margins_and_preserve_messages_digests_ranges_and_recovery() 
     assert_eq!(order.highest, 5u8.into());
     assert_eq!(index.ends.last(), Some(&range.start));
     assert_eq!(analogue::footer(&bytes)?.1, range);
-    let mut actual = Datashed::default();
-    let mut expected = Datashed::default();
+    let mut actual = Basin::default();
+    let mut expected = Basin::default();
     for (n, original) in events.iter().enumerate() {
         let m: BigUint = (n + 1).into();
         let selected = index.range(&m, &(&m + 1u8))?;
@@ -211,7 +211,7 @@ fn retry_margins_are_trimmed_and_ends_share_logical_and_physical_spans() -> Resu
     let mut logical = 0;
     let mut physical = 0;
     let mut expected_ends = vec![];
-    let mut expected = Datashed::default();
+    let mut expected = Basin::default();
     for (i, original) in originals.iter().enumerate() {
         let mut changed = event::coordinate_bytes(original)?.to_vec();
         for n in 0..i {
@@ -272,7 +272,7 @@ fn retry_margins_are_trimmed_and_ends_share_logical_and_physical_spans() -> Resu
     assert_eq!(range, same_range);
     assert_eq!(index.ends, expected_ends);
     assert_eq!(index.ends.len(), originals.len());
-    let mut recovered = Datashed::default();
+    let mut recovered = Basin::default();
     for (i, variant) in variants.iter().enumerate() {
         let selected = index.range(&(i + 1).into(), &(i + 2).into())?;
         assert_eq!(
@@ -302,7 +302,7 @@ fn crc32c_accumulates_exactly_the_margin_free_coordinate_run() -> Result<()> {
     let originals = events()?;
     let mut accumulated = vec![];
     let mut before = 0;
-    let mut state = Datashed::default();
+    let mut state = Basin::default();
     for (i, original) in originals.iter().enumerate() {
         let trimmed = event::trim_retry_margins(original)?;
         accumulated.extend_from_slice(&trimmed);

@@ -4,6 +4,8 @@ prerequisites:
 ---
 
 [analogue]: <../../../../../glossary/analogue.md>
+[basin]: <../../../../../glossary/basin.md>
+[basin-backup]: <../../../../../basin-backup.md>
 [benchmark]: <benchmark/benchmark.md>
 [bidirectional]: <benchmark/bidirectional.md>
 [bulk-manifest]: <../../../../../glossary/bulk-manifest.md>
@@ -11,8 +13,6 @@ prerequisites:
 [byte-coordinate]: <../../../../../glossary/byte-coordinate.md>
 [commit-marker]: <../../../../../glossary/commit-marker.md>
 [conditional-read]: <../../../../../glossary/conditional-read.md>
-[datashed]: <../../../../../glossary/datashed.md>
-[datashed-backup]: <../../../../../datashed-backup.md>
 [differential-event]: <../../../../../glossary/differential-event.md>
 [jet]: <../../../../../glossary/jet.md>
 [lexidecimal]: <../../../../../glossary/lexidecimal.md>
@@ -24,12 +24,12 @@ prerequisites:
 # Recovering from BulkOrders
 
 Load the latest *CommitMarker*[~][commit-marker] through the existing
-*snapshot recovery*[~][datashed-backup], then apply subsequent
+*snapshot recovery*[~][basin-backup], then apply subsequent
 *DifferentialEvents*[~][differential-event] in *Milestone*[~][milestone] order.
 
 Fetch the next *Timeline*[~][timeline] *event*[~][differential-event] immediately while a separate worker
 LISTs eligible *BulkOrders*[~][bulk-order]. For next position `c`, seek after
-`kernelspace/datashed/analogue/${lex(~c)}/`; retain intervals satisfying `lowest <= c < highest`.
+`kernelspace/basin/analogue/${lex(~c)}/`; retain intervals satisfying `lowest <= c < highest`.
 Prefer the greatest exclusive upper bound, retaining weaker candidates as fallbacks.
 Let discovery search ahead of ingestion; LIST newly eligible lower-bound bands
 and stop at previously examined bands. Keep useful orders ending behind that
@@ -45,7 +45,7 @@ cursor; advertised candidate endpoints never do. A failed or invalid order falls
 back to the *Timeline*[~][timeline]. Discovery must not hold up direct progress.
 Use *conditional reads*[~][conditional-read].
 
-Keep `bulk-parallel` for *Datasheds*[~][datashed]; plan to use `bidirectional`
+Keep `bulk-parallel` for *Basins*[~][basin]; plan to use `bidirectional`
 for *Jets*[~][jet] when introduced.
 
 `BASINSYNC_RECOVERY_MODE` defaults to `bulk-parallel`; alternatives are `sequential`,

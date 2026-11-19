@@ -11,7 +11,7 @@ async fn main() -> Result<()> {
         Some("--generate") => {
             let count: usize = args.get(2).context("missing count")?.parse()?;
             let length: usize = args.get(3).context("missing blob length")?.parse()?;
-            let mut state = timeline::Datashed::default().into_stager();
+            let mut state = timeline::Basin::default().into_stager();
             let mut output = std::io::BufWriter::new(std::io::stdout());
             for n in 0..count {
                 let blob = vec![(n % 251) as u8; length];

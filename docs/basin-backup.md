@@ -1,8 +1,8 @@
+[basin]: <glossary/basin.md>
 [commit-marker]: <glossary/commit-marker.md>
 [conditional-write]: <glossary/conditional-write.md>
 [context]: <glossary/context.md>
 [crc32c]: <glossary/crc32c.md>
-[datashed]: <glossary/datashed.md>
 [envbuf]: <glossary/envbuf.md>
 [epilogue]: <glossary/epilogue.md>
 [epilogue-compaction]: <glossary/epilogue-compaction.md>
@@ -25,16 +25,16 @@
 [turso]: <glossary/turso.md>
 [viewpoint]: <glossary/viewpoint.md>
 
-# Datashed backup and recovery
+# Basin backup and recovery
 
 Keep *Reservoir*[~][reservoir] keyspaces separate using the shared
 *object-key patterns*[~][object-keys].
 
 Use *complemented Lexidecimal*[~][lexidecimal] positions for *markers*[~][commit-marker]
 in both *Epilogues*[~][epilogue]; their *PromotionSigns*[~][promotion-sign] use
-uncomplemented positions in those same namespaces. *Datashed*[~][datashed]
+uncomplemented positions in those same namespaces. *Basin*[~][basin]
 *Viewpoints*[~][viewpoint] count backups independently of *Milestones*[~][milestone].
-A *Datashed*[~][datashed] root is a *FlexBuffers*[~][flexbuffers] message:
+A *Basin*[~][basin] root is a *FlexBuffers*[~][flexbuffers] message:
 
 ```ts
 {
@@ -71,7 +71,7 @@ Retain the *CRC32C*[~][crc32c] as the recovered prefix's accumulator.
 Other digests are hexadecimal *SHA-384*[~][sha384]. Unwrap the raw *EnvBuf message*[~][envbuf], validate metadata and its checksum,
 then validate the root's *Turso*[~][turso] version and recovery prefix.
 
-Before publishing a *Datashed*[~][datashed] *CommitMarker*[~][commit-marker], replicate
+Before publishing a *Basin*[~][basin] *CommitMarker*[~][commit-marker], replicate
 all *Flow*[~][flow] *markers*[~][commit-marker] through its
 *Milestone*[~][milestone] into their *Epilogues*[~][epilogue]. Use
 *conditional creation*[~][conditional-write]; preserve *context*[~][context] metadata and verify existing bytes and context on retry.
@@ -87,7 +87,7 @@ the root's covered prefix `M`.
 Plan future *Epilogue compaction*[~][epilogue-compaction] around a contiguous
 available prefix of stored *CommitMarker*[~][commit-marker]/*PromotionSign*[~][promotion-sign]
 pairs. *Markers*[~][commit-marker] must have reached their *Epilogues*[~][epilogue]
-from the *Datashed*[~][datashed] *Timeline*[~][timeline]; a recovery anchor alone
+from the *Basin*[~][basin] *Timeline*[~][timeline]; a recovery anchor alone
 is insufficient. Compact up to, but not through, the retained *Viewpoint*[~][viewpoint].
 Replace compacted *markers*[~][commit-marker] with bucket-proven
 *tombstones*[~][tombstone],
@@ -96,8 +96,8 @@ retaining their keys and metadata, and DELETE their
 *marker*[~][commit-marker] metadata, deleting and skipping stale signs on demand
 before selecting the oldest available snapshot; see *compaction*[~][epilogue-compaction].
 
-A stored *Datashed*[~][datashed] recovery anchor permits *Timeline eviction*[~][timeline-eviction]
+A stored *Basin*[~][basin] recovery anchor permits *Timeline eviction*[~][timeline-eviction]
 through its *Milestone*[~][milestone] once the corresponding *Flow*[~][flow]
 *markers*[~][commit-marker] are replicated. Serialize cleanup requests through the
-*Datashed*[~][datashed] *Timeline*[~][timeline]. *Prologue vacuuming*[~][prologue-vacuuming]
+*Basin*[~][basin] *Timeline*[~][timeline]. *Prologue vacuuming*[~][prologue-vacuuming]
 is a separate process.

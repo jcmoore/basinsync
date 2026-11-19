@@ -383,7 +383,7 @@ impl Writer {
         let result = (|| {
             change(conn)?;
             conn.execute(format!(
-                "UPDATE datashed SET milestone='{milestone}' WHERE id=1"
+                "UPDATE basin SET milestone='{milestone}' WHERE id=1"
             ))?;
             conn.execute("COMMIT")?;
             Ok(())

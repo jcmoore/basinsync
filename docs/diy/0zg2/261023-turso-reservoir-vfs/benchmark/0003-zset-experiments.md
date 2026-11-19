@@ -1,7 +1,7 @@
 [0003-zset-samples]: <data/0003-zset-samples.gz>
 [0003-zset-summary]: <data/0003-zset-summary.json>
+[basin]: <../../../../glossary/basin.md>
 [change-data-capture]: <../../../../glossary/change-data-capture.md>
-[datashed]: <../../../../glossary/datashed.md>
 [differential-dataflow]: <https://docs.rs/differential-dataflow/latest/differential_dataflow/input/struct.InputSession.html>
 [feldera-grammar]: <https://docs.feldera.com/sql/grammar/#materialized-tables>
 [feldera-json]: <https://docs.feldera.com/formats/json/>
@@ -33,7 +33,7 @@ schema-specific comparison and does not meet that requirement.
 Compare the existing persistent *WAL*[~][wal] path with:
 
 - **Cursor reuse:** derive prior rows from validated *Viewpoints*[~][viewpoint]
-  and the *Datashed*[~][datashed] cursor. Specific to today's two-table schema.
+  and the *Basin*[~][basin] cursor. Specific to today's two-table schema.
 - **Indexed reads:** read each affected *Flow*[~][flow] before writing it.
 - **Hook plus row cache:** observe `serialize_row_version`, retaining prior
   rows by table/rowid. Send native records or decoded *FlexBuffers*[~][flexbuffers]

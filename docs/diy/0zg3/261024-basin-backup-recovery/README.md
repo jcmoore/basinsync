@@ -4,11 +4,11 @@ prerequisites:
 ---
 
 [0004-backup-overhead]: <benchmark/0004-backup-overhead.md>
+[basin]: <../../../glossary/basin.md>
+[basin-backup]: <../../../basin-backup.md>
+[basin-timeline]: <../../../basin-timeline.md>
 [commit-marker]: <../../../glossary/commit-marker.md>
 [conditional-write]: <../../../glossary/conditional-write.md>
-[datashed]: <../../../glossary/datashed.md>
-[datashed-backup]: <../../../datashed-backup.md>
-[datashed-timeline]: <../../../datashed-timeline.md>
 [development]: <../../../development.md>
 [differential-event]: <../../../glossary/differential-event.md>
 [diy/0zg0/261022-shallow-epilogue-commits]: <../../0zg0/261022-shallow-epilogue-commits/README.md>
@@ -29,11 +29,11 @@ prerequisites:
 [viewpoint]: <../../../glossary/viewpoint.md>
 [virtual-file-system]: <../../../glossary/virtual-file-system.md>
 
-# Datashed backup and recovery
+# Basin backup and recovery
 
-*Datasheds*[~][datashed] and *Flows*[~][flow] are *Reservoirs*[~][reservoir], each with
+*Basins*[~][basin] and *Flows*[~][flow] are *Reservoirs*[~][reservoir], each with
 an *Epilogue*[~][epilogue], *Timeline (Chronologue)*[~][timeline], and
-*Prologue*[~][prologue]. Give the *Datashed*[~][datashed] its own
+*Prologue*[~][prologue]. Give the *Basin*[~][basin] its own
 *Epilogue*[~][epilogue]. Revisit *Prologues*[~][prologue] and the third
 *Reservoir*[~][reservoir] type, the *Jet*[~][jet], later.
 
@@ -41,14 +41,14 @@ Promote *Turso Reservoir VFS's*[~][diy/0zg2/261023-turso-reservoir-vfs] file-bac
 *VFS*[~][virtual-file-system] into the server. Pin a consistent, checkpointed
 *Milestone*[~][milestone] through backup publication while request preparation
 continues. Use the entire `default.turso` database file as the raw
-*EnvBuf message*[~][envbuf] of the *Datashed*[~][datashed]
+*EnvBuf message*[~][envbuf] of the *Basin*[~][basin]
 *CommitMarker*[~][commit-marker]; follow the
-*key and metadata contract*[~][datashed-backup].
+*key and metadata contract*[~][basin-backup].
 
 A separate worker first copies every *Flow*[~][flow] *CommitMarker*[~][commit-marker]
 through that durable *Milestone*[~][milestone] into its
 *Epilogue*[~][epilogue], as in *Shallow epilogue commits*[~][diy/0zg0/261022-shallow-epilogue-commits]. Only then
-publish the pinned backup at the next *Datashed*[~][datashed]
+publish the pinned backup at the next *Basin*[~][basin]
 *Viewpoint*[~][viewpoint] using a single streamed *conditional PUT*[~][conditional-write]
 with the complete enveloped object's content length. The raw database remains
 one *message*[~][envbuf]; `u64` message-length support is pending work for the format.
@@ -62,14 +62,14 @@ message-range URL; otherwise retain the *Timeline*[~][timeline]
 *Range GET*[~][range-get]. Test URL selection and copied contents directly.
 
 Before writing the *Timeline*[~][timeline], read the latest
-*Datashed*[~][datashed] *Viewpoint*[~][viewpoint] and corresponding
+*Basin*[~][basin] *Viewpoint*[~][viewpoint] and corresponding
 *Milestone*[~][milestone]. Load its snapshot when needed and successfully ingest
 all subsequent *DifferentialEvents*[~][differential-event]. Use that
 *Milestone*[~][milestone] as the exponential-search seed. With no backup, recover
 from the beginning. Preserve ordered publication across the two-batch pipeline.
-For status, honor the *probe freshness window*[~][datashed-timeline]; when due,
+For status, honor the *probe freshness window*[~][basin-timeline]; when due,
 probe the next *Milestone*[~][milestone] first. Discover a newer
-*Datashed*[~][datashed] backup and refresh only when that successor exists.
+*Basin*[~][basin] backup and refresh only when that successor exists.
 
 Test pinned-image equality against full frame replay, snapshot-plus-suffix
 recovery, large and delayed uploads, concurrent backup workers, interrupted copies, lost

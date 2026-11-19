@@ -83,7 +83,7 @@ struct TimelinePosition {
 
 #[derive(Clone, Serialize)]
 struct Timelines {
-    datashed: TimelinePosition,
+    basin: TimelinePosition,
 }
 
 #[derive(Serialize)]
@@ -101,7 +101,7 @@ type ApiReply<T> = Result<ApiResponse<T>, ApiFailure>;
 
 fn observed<T>(result: Result<T, Failure>, prefix: &timeline::Prefix) -> ApiReply<T> {
     let timelines = Timelines {
-        datashed: TimelinePosition {
+        basin: TimelinePosition {
             milestone: prefix.milestone().clone(),
         },
     };
@@ -134,8 +134,8 @@ impl App {
         let result =
             result.unwrap_or_else(|failure| observed(Err(failure), &self.published.borrow()));
         let milestone = match &result {
-            Ok(body) => &body.timelines.datashed.milestone,
-            Err(failure) => &failure.timelines.datashed.milestone,
+            Ok(body) => &body.timelines.basin.milestone,
+            Err(failure) => &failure.timelines.basin.milestone,
         };
         tracing::Span::current().record("milestone", tracing::field::display(milestone));
         match result {
@@ -379,7 +379,7 @@ struct Worker {
     maintenance: mpsc::Sender<Message>,
     cleanup: server_pipeline::CleanupConfig,
     bucket: Box<Bucket>,
-    state: timeline::Datashed,
+    state: timeline::Basin,
     batch_max: usize,
     batch_wait: Duration,
     backup_interval: Duration,
@@ -528,11 +528,11 @@ async fn main() -> Result<()> {
         .with_request_timeout(Duration::from_secs(10))?;
     let state = obs::measured(
         "recovery",
-        "datashed",
+        "basin",
         timeline::recover_with(&bucket, basinsync::recovery::Config::from_env()?),
     )
     .await
-    .context("recover Datashed Timeline")?;
+    .context("recover Basin Timeline")?;
     let (published, published_rx) = watch::channel(state.prefix());
     let next = &state.milestone + 1u8;
     timeline::key(&next)?;
@@ -741,7 +741,7 @@ mod tests {
     #[test]
     fn responses_use_json0_bigints_and_escape_literal_strings() {
         let viewpoint = Viewpoint::parse("340282366920938463463374607431768211456").unwrap();
-        let prefix = timeline::Datashed {
+        let prefix = timeline::Basin {
             milestone: "340282366920938463463374607431768211457".parse().unwrap(),
             ..Default::default()
         }
@@ -762,7 +762,7 @@ mod tests {
             serde_json::to_value(status).unwrap(),
             serde_json::json!({
                 "latest": {"viewpoint": "0x100000000000000000000000000000000", "length": 0},
-                "timelines": {"datashed": {"milestone": "0x100000000000000000000000000000001"}},
+                "timelines": {"basin": {"milestone": "0x100000000000000000000000000000001"}},
             })
         );
         assert_eq!(
@@ -778,7 +778,7 @@ mod tests {
                 .unwrap()
             )
             .unwrap(),
-            serde_json::json!({"error": "00x_literal", "message": "00$message", "timelines": {"datashed": {"milestone": "0x100000000000000000000000000000001"}}})
+            serde_json::json!({"error": "00x_literal", "message": "00$message", "timelines": {"basin": {"milestone": "0x100000000000000000000000000000001"}}})
         );
     }
 }

@@ -1,6 +1,6 @@
 ---
 prerequisites:
-  - 0zg3/261024-datashed-backup-recovery
+  - 0zg3/261024-basin-backup-recovery
   - 0zg5/261112-deep-heap-support
 ---
 

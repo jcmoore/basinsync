@@ -5,11 +5,11 @@ prerequisites:
 ---
 
 [access-token]: <../../../glossary/access-token.md>
+[basin]: <../../../glossary/basin.md>
+[basin-backup]: <../../../basin-backup.md>
+[basin-timeline]: <../../../basin-timeline.md>
 [commit-marker]: <../../../glossary/commit-marker.md>
 [conditional-write]: <../../../glossary/conditional-write.md>
-[datashed]: <../../../glossary/datashed.md>
-[datashed-backup]: <../../../datashed-backup.md>
-[datashed-timeline]: <../../../datashed-timeline.md>
 [development]: <../../../development.md>
 [epilogue]: <../../../glossary/epilogue.md>
 [etag]: <../../../glossary/etag.md>
@@ -34,7 +34,7 @@ prerequisites:
 [virtual-file-system]: <../../../glossary/virtual-file-system.md>
 [young-generation]: <../../../glossary/young-generation.md>
 
-# Shallow Datashed backup nodes
+# Shallow Basin backup nodes
 
 Add `kernel.turso` alongside `default.turso`, using the same *Turso*[~][turso]
 settings and *Reservoir VFS*[~][virtual-file-system]. Keep client-driven
@@ -70,7 +70,7 @@ CREATE TABLE kernel_commits (
 ```
 
 `next_viewpoint` and `activity` are decimal; `viewpoint`, `upstream`, and `covered` use
-positive *Lexidecimal*[~][lexidecimal]. `kernel_state` tracks the next *Datashed*[~][datashed] *Viewpoint*[~][viewpoint]
+positive *Lexidecimal*[~][lexidecimal]. `kernel_state` tracks the next *Basin*[~][basin] *Viewpoint*[~][viewpoint]
 and the last non-backup mutation's *Milestone*[~][milestone] (`activity`), so
 backup bookkeeping cannot continually trigger new backups. `kernel_commits`
 indexes each *Viewpoint*[~][viewpoint] by its committing *Milestone*[~][milestone],
@@ -92,16 +92,16 @@ and single *conditional PUTs*[~][conditional-write]. HEAD the uploaded revisions
 then request `commitkernel`: recheck their descriptors and staging edges,
 require the covered prefix to advance, cache *ETags*[~][etag], replace staging edges with `_m_` *retainers*[~][retainer], advance
 the *Viewpoint*[~][viewpoint], and index the root in one transaction.
-Journal both database changes and the command through the *Datashed Timeline*[~][datashed-timeline].
+Journal both database changes and the command through the *Basin Timeline*[~][basin-timeline].
 
 Publish the acknowledged root in the *Epilogue*[~][epilogue]; repair interrupted
-publication using `kernel_commits` to locate the durable command on restart. The *backup root*[~][datashed-backup]
+publication using `kernel_commits` to locate the durable command on restart. The *backup root*[~][basin-backup]
 identifies both images and prefix `M`. Restore that pair and replay from `M + 1`,
 including its own reservations and `commitkernel`. Backup bookkeeping must not
 trigger another backup while otherwise idle.
 
 Queue a *marking task*[~][marking-task] for every `commitkernel` in the same
-transaction, using the internal `datashed` owner:
+transaction, using the internal `basin` owner:
 
 ```sql
 CREATE TABLE marking_tasks (

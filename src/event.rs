@@ -107,7 +107,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommitFlow> {
     let command = tuple.index(2)?.get_str()?;
     ensure!(
         namespace == NAMESPACE && command == COMMIT_FLOW,
-        "unknown Datashed command"
+        "unknown Basin command"
     );
     let payload = CommitFlow::deserialize(tuple.index(3)?)?;
     ensure!(
@@ -149,7 +149,7 @@ mod tests {
             sha384: format!("{:x}", Sha384::digest(&blob)),
             blob: blob.clone(),
         };
-        let state = crate::timeline::Datashed::default();
+        let state = crate::timeline::Basin::default();
         let (_, command) = state
             .prepare(BTreeMap::from([("snow-flow".into(), marker)]))
             .unwrap();
@@ -816,7 +816,7 @@ mod envelope_tests {
         append_margin(&mut padded, &[1, 2, 3])?;
         assert_eq!(manifest_range(&padded)?, Some(expected_manifest));
         assert_eq!(blob_ranges(&padded)?, locations);
-        let mut recovered = crate::timeline::Datashed::default();
+        let mut recovered = crate::timeline::Basin::default();
         recovered.apply_entry(1u8.into(), &padded)?;
         assert_eq!(recovered.database.unwrap().image, writer.image()?);
         let mut bad = padded.clone();
@@ -895,7 +895,7 @@ mod envelope_tests {
             assert_eq!(&bytes[start..start + location.length as usize], original);
             assert_eq!(digest(original), location.sha384);
         }
-        let mut recovered = crate::timeline::Datashed::default();
+        let mut recovered = crate::timeline::Basin::default();
         recovered.apply_entry(1u8.into(), &bytes)?;
         assert_eq!(recovered.database.unwrap().image, writer.image()?);
         Ok(())
@@ -938,7 +938,7 @@ mod envelope_tests {
                 crate::turso::wal::Writer::open(&crate::turso::State::genesis()?.image)?;
             let delta = writer.prepare_with_ranges(&0u8.into(), None, &commands, &locations)?;
             let bytes = encode_wal(commands, delta)?;
-            let mut recovered = crate::timeline::Datashed::default();
+            let mut recovered = crate::timeline::Basin::default();
             let error = recovered.apply_entry(1u8.into(), &bytes).err().unwrap();
             assert!(error.to_string().contains("marker location"), "{error:?}");
             assert_eq!(recovered.milestone, num_bigint::BigUint::from(0u8));

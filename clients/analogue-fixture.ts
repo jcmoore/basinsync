@@ -58,11 +58,11 @@ export async function fixture(label="analogue"){
     const databases:Record<string,{id:string;revision:string;length:number;sha384:string}>={};
     for(const [name,image] of Object.entries(images)){
       const token=crypto.getRandomValues(new Uint8Array(16)),node={id:`n-${lex(-1n)}/v.${lex(0n)}/t.${lex(16n)}/d_${sha384(token)}`,revision:crypto.randomUUID(),length:image.length,sha384:sha384(image)};databases[name]=node;
-      await s3.send(new PutObjectCommand({Bucket,Key:`kernelspace/datashed/heap/young/${node.id}/${node.revision}`,Body:image,Metadata:{sha384:node.sha384}}));
+      await s3.send(new PutObjectCommand({Bucket,Key:`kernelspace/basin/heap/young/${node.id}/${node.revision}`,Body:image,Metadata:{sha384:node.sha384}}));
     }
     assert.deepEqual(Object.keys(databases).sort(),["default.turso","kernel.turso"]);
     const graph={version:deltasAt(events.at(-1)!).turso["default.turso"].version,milestone:String(events.length),coordinate:String(coordinate),crc32c:crcHex(crc32c),parent:entryDigest(events.at(-1)!),databases};
-    const blob=new Uint8Array(flexEncode(graph)),Key=`kernelspace/datashed/epilogue/${lex(-1n)}`;
+    const blob=new Uint8Array(flexEncode(graph)),Key=`kernelspace/basin/epilogue/${lex(-1n)}`;
     await s3.send(new PutObjectCommand({Bucket,Key,Body:concat([wrap(blob,0),wrap(new Uint8Array(8),MARGIN)]),Metadata:{milestone:graph.milestone,coordinate:graph.coordinate,crc32c:graph.crc32c,"event-sha384":graph.parent,sha384:sha384(blob),"turso-version":graph.version}}));
     return s3.send(new HeadObjectCommand({Bucket,Key}));
   }

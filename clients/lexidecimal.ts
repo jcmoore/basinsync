@@ -36,5 +36,5 @@ export function decode(wire: string): bigint {
 
 export const key = (viewpoint: bigint): string => {
   if (viewpoint < 0n) throw new Error("negative viewpoint");
-  return `kernelspace/datashed/epilogue/${encode(~viewpoint)}`;
+  return `kernelspace/basin/epilogue/${encode(~viewpoint)}`;
 };

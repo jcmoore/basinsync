@@ -6,5 +6,5 @@
 
 # KernelSpace
 
-A *Basin's*[~][basin] server-driven *Datashed*[~][datashed] and *Jet*[~][jet]
+A *Datashed's*[~][datashed] server-driven *Basin*[~][basin] and *Jet*[~][jet]
 state and its *Heap*[~][heap] graphs, separate from client-driven *UserSpace*[~][userspace].

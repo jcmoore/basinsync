@@ -89,7 +89,7 @@ try {
    assert.equal(result.samples.length,result.count/config.batch);
    assert(result.samples.every(s=>s.latency_us>0 && Number.isFinite(s.latency_us)));
    const prior=runs.find(r=>r.flows===flows);if(prior)assert.equal(result.initial_sha384,prior.initial_sha384);
-   if(!isCpu){let count=0,token:string|undefined;do{const page=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/timeline/",ContinuationToken:token}));count+=(page.Contents??[]).length;token=page.NextContinuationToken}while(token);assert.equal(count,(result.count+result.warmup)/config.batch+1)}
+   if(!isCpu){let count=0,token:string|undefined;do{const page=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/basin/timeline/",ContinuationToken:token}));count+=(page.Contents??[]).length;token=page.NextContinuationToken}while(token);assert.equal(count,(result.count+result.warmup)/config.batch+1)}
    runs.push(result);
    const rate=isCpu?1e6/stats(result.samples.map(s=>s.latency_us)).mean:result.requests_per_second!;
    console.log(`${name}: ${rate.toFixed(1)} requests/s; p50 ${(quantile(result.samples.map(s=>s.latency_us),.5)/1000).toFixed(3)} ms`);

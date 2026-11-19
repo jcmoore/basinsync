@@ -1,4 +1,4 @@
-[basin]: <basin.md>
+[datashed]: <datashed.md>
 [object-keys]: <../object-keys.md>
 [reservoir]: <reservoir.md>
 [revision]: <revision.md>
@@ -7,7 +7,7 @@
 
 # Flow
 
-A client-driven, string-identified *Reservoir*[~][reservoir] in a *Basin's*[~][basin]
+A client-driven, string-identified *Reservoir*[~][reservoir] in a *Datashed's*[~][datashed]
 *UserSpace*[~][userspace]. Its
 *Viewpoints*[~][viewpoint] begin at zero independently of other *Flows*.
 

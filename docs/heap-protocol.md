@@ -48,7 +48,7 @@ type Action = { url: string; headers: Record<string, string> };
   results: Record<number, { actions: {
     write: Action | null; preview: Action | null; read: Action;
   } }> | null;
-  timelines: { datashed: { milestone: bigint } };
+  timelines: { basin: { milestone: bigint } };
 }
 ```
 

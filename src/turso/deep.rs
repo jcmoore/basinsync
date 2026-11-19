@@ -4,14 +4,14 @@ use std::collections::BTreeSet;
 
 struct World {
     writer: timeline::Stager,
-    replay: timeline::Datashed,
+    replay: timeline::Basin,
     snapshot: Option<timeline::Snapshot>,
 }
 impl World {
     fn new() -> Self {
         Self {
-            writer: timeline::Datashed::default().into_stager(),
-            replay: timeline::Datashed::default(),
+            writer: timeline::Basin::default().into_stager(),
+            replay: timeline::Basin::default(),
             snapshot: None,
         }
     }

@@ -1,4 +1,4 @@
-//! A coalescing background consumer: replicate Flow markers before backing up a Datashed.
+//! A coalescing background consumer: replicate Flow markers before backing up a Basin.
 use crate::{
     epilogue, event,
     lexidecimal::Viewpoint,
@@ -126,19 +126,19 @@ async fn publish_roots(
                 ensure!(
                     existing.status_code() == 200
                         && crate::envbuf::message(existing.as_slice())? == blob,
-                    "conflicting Datashed graph marker: {result:?}"
+                    "conflicting Basin graph marker: {result:?}"
                 );
                 cp.verify_headers(&existing.headers())?;
             }
         }
         metrics::gauge!("basinsync_last_success_timestamp_seconds", "operation"=>"backup")
             .set(time::OffsetDateTime::now_utc().unix_timestamp() as f64);
-        tracing::info!(viewpoint=%cp.viewpoint.decimal(),milestone=%cp.milestone,"Datashed backup graph published");
+        tracing::info!(viewpoint=%cp.viewpoint.decimal(),milestone=%cp.milestone,"Basin backup graph published");
     }
     Ok(())
 }
 
-#[tracing::instrument(skip_all, name = "datashed.backup")]
+#[tracing::instrument(skip_all, name = "basin.backup")]
 async fn backup_graph(
     bucket: &Bucket,
     snapshot: &Snapshot,
@@ -248,7 +248,7 @@ pub async fn run(
         if let Some(snapshot) = target.filter(|s| s.activity > completed) {
             match crate::observability::measured(
                 "backup",
-                "datashed",
+                "basin",
                 backup_graph(&bucket, &snapshot, &queue, &mut cache),
             )
             .await
@@ -260,12 +260,12 @@ pub async fn run(
                         && let Err(error) = publish_roots(&bucket, &target, &mut cache).await
                     {
                         completed = 0u8.into();
-                        tracing::warn!(%error,"Datashed graph publication will retry");
+                        tracing::warn!(%error,"Basin graph publication will retry");
                     }
                 }
                 Err(error) => {
                     failed = true;
-                    tracing::warn!(%error, "Datashed backup will retry");
+                    tracing::warn!(%error, "Basin backup will retry");
                 }
             }
         }

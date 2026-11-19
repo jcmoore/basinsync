@@ -2,7 +2,7 @@
 use crate::{
     analogue::{self, Order},
     envbuf,
-    timeline::{self, Datashed},
+    timeline::{self, Basin},
 };
 use anyhow::{Context, Result, ensure};
 use num_bigint::BigUint;
@@ -588,7 +588,7 @@ fn next_probe(
 
 pub async fn replay(
     bucket: &Bucket,
-    state: &mut Datashed,
+    state: &mut Basin,
     tail: BigUint,
     config: &Config,
 ) -> Result<Stats> {

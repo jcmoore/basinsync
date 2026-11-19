@@ -1,10 +1,10 @@
 ---
 prerequisites:
-  - 0zg7/261118-shallow-datashed-backup-nodes
+  - 0zg7/261118-shallow-basin-backup-nodes
 ---
 
 [access-token]: <../../../glossary/access-token.md>
-[datashed]: <../../../glossary/datashed.md>
+[basin]: <../../../glossary/basin.md>
 [development]: <../../../development.md>
 [flow]: <../../../glossary/flow.md>
 [metric]: <../../../glossary/metric.md>
@@ -27,7 +27,7 @@ acknowledgement separately. Add *metrics*[~][metric] for in-flight work,
 failures, recovery, backups, cleanup, promotion, and archive publication.
 Sample durable queue counts and oldest ages from pinned database views outside
 the request handler. Scraping must require neither SQL nor S3 and must not
-advance the *Datashed*[~][datashed] *Timeline*[~][timeline].
+advance the *Basin*[~][basin] *Timeline*[~][timeline].
 
 Keep *metric labels*[~][metric] bounded. Exclude *access tokens*[~][access-token],
 credentials, signed URLs, payloads, and client context values from telemetry.

@@ -1,6 +1,6 @@
 ---
 prerequisites:
-  - 0zg1/261023-datashed-timeline-race
+  - 0zg1/261023-basin-timeline-race
 ---
 
 [0003-commit-baseline]: <benchmark/0003-commit-baseline.md>
@@ -9,13 +9,13 @@ prerequisites:
 [0003-snapshot-readers]: <benchmark/0003-snapshot-readers.md>
 [0003-wal-experiments]: <benchmark/0003-wal-experiments.md>
 [0003-zset-experiments]: <benchmark/0003-zset-experiments.md>
+[basin]: <../../../glossary/basin.md>
+[basin-timeline]: <../../../basin-timeline.md>
 [commit-marker]: <../../../glossary/commit-marker.md>
 [conditional-write]: <../../../glossary/conditional-write.md>
-[datashed]: <../../../glossary/datashed.md>
-[datashed-timeline]: <../../../datashed-timeline.md>
 [development]: <../../../development.md>
 [differential-event]: <../../../glossary/differential-event.md>
-[diy/0zg1/261023-datashed-timeline-race]: <../../0zg1/261023-datashed-timeline-race/README.md>
+[diy/0zg1/261023-basin-timeline-race]: <../../0zg1/261023-basin-timeline-race/README.md>
 [downstream]: <../../../glossary/downstream.md>
 [durable-storage]: <../../../glossary/durable-storage.md>
 [envbuf]: <../../../glossary/envbuf.md>
@@ -42,7 +42,7 @@ prerequisites:
 
 # Turso Reservoir VFS
 
-Materialize the *Datashed's*[~][datashed] *Timeline*[~][timeline] in *Turso*[~][turso]
+Materialize the *Basin's*[~][basin] *Timeline*[~][timeline] in *Turso*[~][turso]
 with 16 KiB pages, *MVCC*[~][mvcc], and portable logical changes. Store the applied
 *Milestone*[~][milestone] and each *Flow's*[~][flow] latest
 *Viewpoint*[~][viewpoint] as decimal text:
@@ -50,7 +50,7 @@ with 16 KiB pages, *MVCC*[~][mvcc], and portable logical changes. Store the appl
 ```sql
 PRAGMA page_size = 16384;
 PRAGMA journal_mode = mvcc;
-CREATE TABLE datashed (
+CREATE TABLE basin (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   milestone TEXT NOT NULL
 );
@@ -69,14 +69,14 @@ CREATE TABLE marker_ranges (
   PRIMARY KEY (flow, downstream)
 );
 CREATE INDEX marker_ranges_upstream ON marker_ranges(upstream);
-INSERT INTO datashed VALUES (1, '0');
+INSERT INTO basin VALUES (1, '0');
 ```
 
 Assign each new *Flow*[~][flow] a UUIDv4 *revision*[~][revision] in its first commit
 transaction; retain it on later commits and recover it from captured frames.
 Include it in the *Flow object-key patterns*[~][object-keys].
 
-Materialize *Datashed Timeline race's*[~][diy/0zg1/261023-datashed-timeline-race] blob locations in `marker_ranges`
+Materialize *Basin Timeline race's*[~][diy/0zg1/261023-basin-timeline-race] blob locations in `marker_ranges`
 in the commit transaction. Its *upstream*[~][upstream] *Milestones*[~][milestone]
 and *downstream*[~][downstream] *Viewpoints*[~][viewpoint] use positive
 *Lexidecimal*[~][lexidecimal] text. Preserve locations for intermediate
@@ -118,7 +118,7 @@ Use the *frame contract*[~][turso-state] and version
 `0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88`.
 One *DifferentialEvent*[~][differential-event] occupies one
 *Milestone*[~][milestone], regardless of request count. Increasing in-flight
-limits must preserve *causal publication order*[~][datashed-timeline];
+limits must preserve *causal publication order*[~][basin-timeline];
 acknowledge all successful requests only after their event's
 *conditional PUT*[~][conditional-write] succeeds. On failure or an ambiguous
 reply, reject queued work and terminate. Status requests wait behind outstanding
@@ -131,7 +131,7 @@ request data per batch. A larger individual request forms its own batch.
 admission and the queue remain bounded, with room for two full batches
 (64 requests at the default size).
 
-Recover the complete history as in *Datashed Timeline race*[~][diy/0zg1/261023-datashed-timeline-race], ingesting
+Recover the complete history as in *Basin Timeline race*[~][diy/0zg1/261023-basin-timeline-race], ingesting
 *physical frames*[~][physical-frame] instead of rerunning commit SQL. Check
 versions, native framing, initial-image identity, predecessor linkage, and
 cursors; verify affected rows. Earlier image-delta entries remain readable, and

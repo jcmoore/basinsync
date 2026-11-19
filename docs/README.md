@@ -1,13 +1,13 @@
 [diy/0zg0/261022-shallow-epilogue-commits]: <diy/0zg0/261022-shallow-epilogue-commits/README.md>
-[diy/0zg1/261023-datashed-timeline-race]: <diy/0zg1/261023-datashed-timeline-race/README.md>
+[diy/0zg1/261023-basin-timeline-race]: <diy/0zg1/261023-basin-timeline-race/README.md>
 [diy/0zg2/261023-turso-reservoir-vfs]: <diy/0zg2/261023-turso-reservoir-vfs/README.md>
-[diy/0zg3/261024-datashed-backup-recovery]: <diy/0zg3/261024-datashed-backup-recovery/README.md>
+[diy/0zg3/261024-basin-backup-recovery]: <diy/0zg3/261024-basin-backup-recovery/README.md>
 [diy/0zg3/261111-shallow-heap-management]: <diy/0zg3/261111-shallow-heap-management/README.md>
 [diy/0zg4/261112-async-shallow-cleanup]: <diy/0zg4/261112-async-shallow-cleanup/README.md>
 [diy/0zg4/261117-timeline-recovery-acceleration]: <diy/0zg4/261117-timeline-recovery-acceleration/README.md>
 [diy/0zg5/261112-deep-heap-support]: <diy/0zg5/261112-deep-heap-support/README.md>
 [diy/0zg6/261112-commit-marker-edges-with-node-promotion]: <diy/0zg6/261112-commit-marker-edges-with-node-promotion/README.md>
-[diy/0zg7/261118-shallow-datashed-backup-nodes]: <diy/0zg7/261118-shallow-datashed-backup-nodes/README.md>
+[diy/0zg7/261118-shallow-basin-backup-nodes]: <diy/0zg7/261118-shallow-basin-backup-nodes/README.md>
 [diy/0zg8/261119-observability]: <diy/0zg8/261119-observability/README.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [object-keys]: <object-keys.md>
@@ -26,11 +26,11 @@ unique throughout `diy/`. Tutorials at the same height are parallel branches, no
 *Shallow epilogue commits*[~][diy/0zg0/261022-shallow-epilogue-commits].
 
 Coordinate writes and locate payloads with
-*Datashed Timeline race*[~][diy/0zg1/261023-datashed-timeline-race].
+*Basin Timeline race*[~][diy/0zg1/261023-basin-timeline-race].
 
 Then materialize *Turso Reservoir VFS*[~][diy/0zg2/261023-turso-reservoir-vfs].
 
-Recover from snapshots with *Datashed backup and recovery*[~][diy/0zg3/261024-datashed-backup-recovery].
+Recover from snapshots with *Basin backup and recovery*[~][diy/0zg3/261024-basin-backup-recovery].
 
 Independently of backup support, stage uploads with *Shallow Heap management*[~][diy/0zg3/261111-shallow-heap-management].
 
@@ -44,7 +44,7 @@ Retain and promote committed graphs with
 Coalesce and retrieve history with *Timeline recovery acceleration*[~][diy/0zg4/261117-timeline-recovery-acceleration].
 
 Back up paired database graphs with
-*Shallow Datashed backup nodes*[~][diy/0zg7/261118-shallow-datashed-backup-nodes].
+*Shallow Basin backup nodes*[~][diy/0zg7/261118-shallow-basin-backup-nodes].
 
 Inspect request publication and background progress with
 *Observability*[~][diy/0zg8/261119-observability].

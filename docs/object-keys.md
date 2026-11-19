@@ -1,10 +1,10 @@
 [access-token]: <glossary/access-token.md>
 [analogue]: <glossary/analogue.md>
+[basin]: <glossary/basin.md>
 [bulk-manifest]: <glossary/bulk-manifest.md>
 [bulk-order]: <glossary/bulk-order.md>
 [byte-coordinate]: <glossary/byte-coordinate.md>
 [commit-marker]: <glossary/commit-marker.md>
-[datashed]: <glossary/datashed.md>
 [derived-subkey]: <glossary/derived-subkey.md>
 [differential-event]: <glossary/differential-event.md>
 [empty-sentinel]: <glossary/empty-sentinel.md>
@@ -36,14 +36,14 @@ All implemented S3 key patterns, relative to the configured bucket:
 | Empty-validator reference | `kernelspace/sentinel/empty` |
 | *Tombstone*[~][tombstone] probes | `kernelspace/sentinel/tombstone/${length}` |
 | *Margin*[~][margin] probes | `kernelspace/sentinel/margin/${counter}` |
-| *Datashed*[~][datashed] *DifferentialEvent*[~][differential-event] | `kernelspace/datashed/timeline/${lex(~milestone)}` |
-| *Datashed*[~][datashed] *Analogue*[~][analogue] *BulkOrder*[~][bulk-order] | `kernelspace/datashed/analogue/${lex(~lowest)}/${lex(~highest)}/v0/${bulkmanifest_start}/${coordinate}` |
-| *Datashed*[~][datashed] backup *CommitMarker*[~][commit-marker] | `kernelspace/datashed/epilogue/${lex(~viewpoint)}` |
-| *Datashed*[~][datashed] *PromotionSign*[~][promotion-sign] | `kernelspace/datashed/epilogue/${lex(viewpoint)}` |
+| *Basin*[~][basin] *DifferentialEvent*[~][differential-event] | `kernelspace/basin/timeline/${lex(~milestone)}` |
+| *Basin*[~][basin] *Analogue*[~][analogue] *BulkOrder*[~][bulk-order] | `kernelspace/basin/analogue/${lex(~lowest)}/${lex(~highest)}/v0/${bulkmanifest_start}/${coordinate}` |
+| *Basin*[~][basin] backup *CommitMarker*[~][commit-marker] | `kernelspace/basin/epilogue/${lex(~viewpoint)}` |
+| *Basin*[~][basin] *PromotionSign*[~][promotion-sign] | `kernelspace/basin/epilogue/${lex(viewpoint)}` |
 | *Flow*[~][flow] *CommitMarker*[~][commit-marker] | `userspace/flows/${flow}/${flow_revision}/epilogue/${lex(~viewpoint)}` |
 | *Flow*[~][flow] *PromotionSign*[~][promotion-sign] | `userspace/flows/${flow}/${flow_revision}/epilogue/${lex(viewpoint)}` |
-| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *young-generation*[~][young-generation] *node*[~][node] | `kernelspace/datashed/heap/young/${node_id}/${node_revision}` |
-| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *old-generation*[~][old-generation] *node*[~][node] | `kernelspace/datashed/heap/old/${node_id}/${node_revision}` |
+| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *young-generation*[~][young-generation] *node*[~][node] | `kernelspace/basin/heap/young/${node_id}/${node_revision}` |
+| *KernelSpace*[~][kernelspace] *Heap*[~][heap] *old-generation*[~][old-generation] *node*[~][node] | `kernelspace/basin/heap/old/${node_id}/${node_revision}` |
 | *UserSpace*[~][userspace] *Heap*[~][heap] *young-generation*[~][young-generation] *node*[~][node] | `userspace/heap/young/${node_id}/${node_revision}` |
 | *UserSpace*[~][userspace] *Heap*[~][heap] *old-generation*[~][old-generation] *node*[~][node] | `userspace/heap/old/${node_id}/${node_revision}` |
 
@@ -82,7 +82,7 @@ _a_${flow}/v.${lex(version)}/e.${lex(viewpoint)}   # staging area
 _m_${flow}/v.${lex(version)}/e.${lex(viewpoint)}   # CommitMarker
 ```
 
-For *KernelSpace*[~][kernelspace], replace `${flow}` with the internal owner `datashed`.
+For *KernelSpace*[~][kernelspace], replace `${flow}` with the internal owner `basin`.
 
 An outgoing *node*[~][node] edge uses the parent's `node_id` as its
 *retainer*[~][retainer]. Require `retainer < node`; `_a_`/`_m_` precede `n-`,

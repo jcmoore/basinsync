@@ -14,7 +14,7 @@ function value(text:string,name:string,labels:Record<string,string>={}):number {
 async function scrape(url:string){const response=await fetch(`${url}/metrics`,{signal:AbortSignal.timeout(5000)});assert.equal(response.status,200);assert(response.headers.get("content-type")?.includes("version=0.0.4"));return response.text();}
 try {
   const bucket=await f.bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let puts=0,s3Requests=0;
-  const proxy=f.relay(async(request,next)=>{s3Requests++;if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/datashed/timeline/")&&++puts===1){entered.resolve();await release.promise;}return next();});
+  const proxy=f.relay(async(request,next)=>{s3Requests++;if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")&&++puts===1){entered.resolve();await release.promise;}return next();});
   const app=await f.server(bucket,{RUST_LOG:"basinsync=debug",BASINSYNC_BATCH_MAX:"2",BASINSYNC_BATCH_WAIT_MS:"100"},proxy);
   const body=new TextEncoder().encode("opaque-observability-secret"),context={secret:"private-context-value"};
   const first=commit(app.url,"observed-a",body,0n,undefined,[],context),abort=new AbortController();
@@ -48,7 +48,7 @@ try {
   assert(value(sampled,"basinsync_background_sample_timestamp_seconds")>0);
   const initialAge=value(sampled,"basinsync_background_oldest_age_seconds",{space:"userspace",queue:"sweeping"});
   await eventually(()=>scrape(app.url),text=>value(text,"basinsync_background_oldest_age_seconds",{space:"userspace",queue:"sweeping"})>initialAge);
-  assert.equal((await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/datashed/timeline/"}))).KeyCount,1,"sampling must not advance durable state");
+  assert.equal((await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/basin/timeline/"}))).KeyCount,1,"sampling must not advance durable state");
   const token=new TextEncoder().encode("secret-access-token"),reserved=await parseResponse<HeapResponse>(await reserveHeap(app.url,"observed-a",1n,[{auth:[0,0,token],length:0,edges:[],context}]));
   assert(reserved.results?.[0].actions.write);
   for(let i=0;i<16;i++)assert.equal((await fetch(`${app.url}/unknown-${i}?credential=private-query-value`,{headers:{authorization:"Bearer private-auth-value"}})).status,404);
@@ -63,7 +63,7 @@ try {
   await eventually(()=>scrape(restarted.url),text=>value(text,"basinsync_background_pending",{space:"userspace",queue:"sweeping"})===2&&value(text,"basinsync_background_sample_timestamp_seconds")>0);
   assert.equal((await epilogueStatus(restarted.url,"observed-a")).latest!.viewpoint,0n);await f.stop(restarted.process);
   // Failed publication must never emit a successful durable result.
-  const failedBucket=await f.bucket(),failedProxy=f.relay(async(request,next)=>request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/datashed/timeline/")?new Response("not stored",{status:503}):next());
+  const failedBucket=await f.bucket(),failedProxy=f.relay(async(request,next)=>request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")?new Response("not stored",{status:503}):next());
   const failed=await f.server(failedBucket,{BASINSYNC_LOG_FORMAT:"json",RUST_LOG:"basinsync=debug"},failedProxy);
   assert.equal((await commit(failed.url,"failure",body,0n)).status,503);assert.equal(await failed.process.exited,1);
   const failures=events(failed.log).filter(e=>e.fields.message==="submission completed");assert.equal(failures.length,1);assert.equal(failures[0].fields.outcome,"failed");

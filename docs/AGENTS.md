@@ -23,9 +23,9 @@ Keep milestone scope, temporary limitations, and deferred work in the relevant
 concepts and interfaces. Keep benchmark reports and measurements in the corresponding
 tutorial's `benchmark/` folder.
 
-Use `Basin` for the tenancy domain and `Datashed` for the data-state `Reservoir`.
+Use `Datashed` for the tenancy domain and `Basin` for the data-state `Reservoir`.
 Use *UserSpace*[~][userspace] for client-driven `Flow` state and *KernelSpace*[~][kernelspace]
-for server-driven `Datashed`/`Jet` state; *Heap*[~][heap] is their common node-storage concept.
+for server-driven `Basin`/`Jet` state; *Heap*[~][heap] is their common node-storage concept.
 Call concatenated *EnvBufs*[~][envbuf] a feed and their enclosed
 bytes a message (`message_length`), distinguishing that count from S3 `Content-Length`.
 Call skippable format `110` envelopes *margins*[~][margin]; reserve padding for alignment filler inside envelopes.

@@ -1,8 +1,8 @@
+[basin]: <glossary/basin.md>
 [causal-consistency]: <glossary/causal-consistency.md>
 [commit-marker]: <glossary/commit-marker.md>
 [conditional-read]: <glossary/conditional-read.md>
 [context]: <glossary/context.md>
-[datashed]: <glossary/datashed.md>
 [differential-event]: <glossary/differential-event.md>
 [envbuf]: <glossary/envbuf.md>
 [heap-protocol]: <heap-protocol.md>
@@ -34,8 +34,8 @@ Verify each referenced *node*[~][node] before accepting its edge. Require the ex
 commit. Rejection must not advance the sequence.
 
 Responses use *JSON0*[~][json0] with bigint *viewpoints*[~][viewpoint].
-All `/api/v0` responses include `timelines.datashed.milestone`, a bigint identifying
-their known durable *datashed*[~][datashed] *Milestone*[~][milestone] (zero before the first
+All `/api/v0` responses include `timelines.basin.milestone`, a bigint identifying
+their known durable *basin*[~][basin] *Milestone*[~][milestone] (zero before the first
 *DifferentialEvent*[~][differential-event]).
 Successful commits report their published batch; status reports its materialized
 prefix, including when cached. A lower value than a client has already observed
@@ -43,14 +43,14 @@ reveals a *causal reverse*[~][causal-consistency] across server instances.
 A *viewpoint*[~][viewpoint] mismatch returns HTTP 409:
 
 ```json
-{"next":{"viewpoint":"0x1"},"timelines":{"datashed":{"milestone":"0x2"}}}
+{"next":{"viewpoint":"0x1"},"timelines":{"basin":{"milestone":"0x2"}}}
 ```
 
 `GET /api/v0/epilogue/status` reports the latest committed
 *CommitMarker*[~][commit-marker]:
 
 ```json
-{"latest":{"viewpoint":"0x1","length":10,"url":"<presigned GET>","headers":{"If-Match":"*","Range":"bytes=128-137"}},"timelines":{"datashed":{"milestone":"0x2"}}}
+{"latest":{"viewpoint":"0x1","length":10,"url":"<presigned GET>","headers":{"If-Match":"*","Range":"bytes=128-137"}},"timelines":{"basin":{"milestone":"0x2"}}}
 ```
 
 For `latest`, send the returned `headers` with its URL, including the signed

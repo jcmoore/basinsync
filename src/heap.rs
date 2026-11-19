@@ -528,7 +528,7 @@ mod tests {
         );
         assert!(event::blob_ranges(&bytes)?.is_empty());
         assert!(!bytes.windows(secret.len()).any(|w| w == secret));
-        let mut recovered = crate::timeline::Datashed::default();
+        let mut recovered = crate::timeline::Basin::default();
         recovered.apply_entry(1u8.into(), &bytes)?;
         let state = recovered.database.as_ref().unwrap();
         assert!(!state.image.windows(secret.len()).any(|w| w == secret));
@@ -561,7 +561,7 @@ mod tests {
     fn repeated_heap_histories_have_identical_logical_and_physical_images() -> Result<()> {
         let mut image = crate::turso::State::genesis()?.image;
         let mut writer = crate::turso::wal::Writer::open(&image)?;
-        let mut recovered = crate::timeline::Datashed::default();
+        let mut recovered = crate::timeline::Basin::default();
         let mut parent = None::<String>;
         for step in 0..40u32 {
             let n = step % 11;

@@ -1,7 +1,7 @@
 [0003-portable-prior-rows]: <0003-portable-prior-rows.md>
 [0003-snapshot-readers-samples]: <data/0003-snapshot-readers-samples.gz>
 [0003-snapshot-readers-summary]: <data/0003-snapshot-readers-summary.json>
-[datashed]: <../../../../glossary/datashed.md>
+[basin]: <../../../../glossary/basin.md>
 [flow]: <../../../../glossary/flow.md>
 [logical-frame]: <../../../../glossary/logical-frame.md>
 [mvcc]: <../../../../glossary/mvcc.md>
@@ -40,7 +40,7 @@ this drain interval. Keeping a rolling reader continuously would prevent normal
 
 ## Measurements
 
-Median *Flow*[~][flow] updates/s; 32 per batch plus the *Datashed*[~][datashed] cursor:
+Median *Flow*[~][flow] updates/s; 32 per batch plus the *Basin*[~][basin] cursor:
 
 | Stored row | Admission limit | Copy-on-write *VFS*[~][virtual-file-system] | Rolling transactions |
 | --- | ---: | ---: | ---: |

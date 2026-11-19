@@ -1,10 +1,10 @@
+[basin]: <glossary/basin.md>
+[basin-backup]: <basin-backup.md>
 [causal-consistency]: <glossary/causal-consistency.md>
 [commit-marker]: <glossary/commit-marker.md>
 [conditional-read]: <glossary/conditional-read.md>
 [conditional-write]: <glossary/conditional-write.md>
 [context]: <glossary/context.md>
-[datashed]: <glossary/datashed.md>
-[datashed-backup]: <datashed-backup.md>
 [differential-event]: <glossary/differential-event.md>
 [empty-sentinel]: <glossary/empty-sentinel.md>
 [envbuf]: <glossary/envbuf.md>
@@ -24,11 +24,11 @@
 [turso-state]: <turso-state.md>
 [viewpoint]: <glossary/viewpoint.md>
 
-# Datashed Timeline
+# Basin Timeline
 
-The *Datashed's*[~][datashed] shared *Timeline*[~][timeline] records state changes using the
+The *Basin's*[~][basin] shared *Timeline*[~][timeline] records state changes using the
 *Timeline object-key pattern*[~][object-keys]. *Milestones*[~][milestone] start at one and increase
-without gaps. Before writing, read the latest *Datashed*[~][datashed] *recovery anchor*[~][datashed-backup]
+without gaps. Before writing, read the latest *Basin*[~][basin] *recovery anchor*[~][basin-backup]
 and ingest every subsequent *DifferentialEvent*[~][differential-event]. Its
 recorded *Milestone*[~][milestone] seeds exponential search for the tail.
 Encode complemented *Milestones*[~][milestone] as *Lexidecimal*[~][lexidecimal],
@@ -55,7 +55,7 @@ commitflow or `sts/0/databasin/commitkernel` tuples, one `sts/0/databasin/ingest
 that materialize the recorded state; all requests wait for durable publication.
 
 `commitkernel` carries `{ viewpoint: string, graph }` for the server-driven
-*Datashed backup graph*[~][datashed-backup]; reservations use only ingestion frames.
+*Basin backup graph*[~][basin-backup]; reservations use only ingestion frames.
 
 Regardless of in-flight limits, durable publication must follow
 *Milestone*[~][milestone] order to preserve *causal consistency*[~][causal-consistency].

@@ -7,7 +7,7 @@ use num_bigint::{BigInt, BigUint};
 use s3::Bucket;
 use std::{collections::BTreeMap, future::Future};
 
-pub const PREFIX: &str = "kernelspace/datashed/timeline/";
+pub const PREFIX: &str = "kernelspace/basin/timeline/";
 
 pub fn key(milestone: &BigUint) -> Result<String> {
     ensure!(
@@ -34,7 +34,7 @@ pub fn from_key(key: &str) -> Result<BigUint> {
 }
 
 #[derive(Default)]
-pub struct Datashed {
+pub struct Basin {
     pub recovery: crate::recovery::Config,
     pub recovery_stats: crate::recovery::Stats,
     pub milestone: BigUint,
@@ -48,7 +48,7 @@ pub struct Datashed {
     pub head: Option<String>,
 }
 
-impl Datashed {
+impl Basin {
     pub fn flow_revision(&self, flow: &str) -> Result<Option<uuid::Uuid>> {
         if let Some(writer) = &self.writer {
             ensure!(
@@ -238,7 +238,7 @@ pub struct Snapshot {
 }
 
 pub struct Stager {
-    state: Datashed,
+    state: Basin,
 }
 impl Stager {
     pub fn prefix(&self) -> Prefix {
@@ -505,7 +505,7 @@ impl Stager {
         self.state.head = Some(prepared.digest.clone());
         Ok(Some(prepared))
     }
-    pub fn into_settled(self, published: &Prefix) -> Result<Datashed> {
+    pub fn into_settled(self, published: &Prefix) -> Result<Basin> {
         ensure!(
             self.prefix() == *published,
             "unpublished preparation remains"
@@ -601,7 +601,7 @@ impl Prepared {
         ))
     }
 }
-impl Datashed {
+impl Basin {
     pub fn prefix(&self) -> Prefix {
         Prefix {
             milestone: self.milestone.clone(),
@@ -936,7 +936,7 @@ pub async fn exists(bucket: &Bucket, milestone: &BigUint) -> Result<bool> {
     crate::object_read::exists(bucket, &key(milestone)?).await
 }
 
-async fn replay(bucket: &Bucket, state: &mut Datashed, tail: BigUint) -> Result<()> {
+async fn replay(bucket: &Bucket, state: &mut Basin, tail: BigUint) -> Result<()> {
     let config = state.recovery.clone();
     let stats = crate::recovery::replay(bucket, state, tail, &config).await?;
     tracing::debug!(?stats, "Timeline recovery downloads complete");
@@ -950,7 +950,7 @@ pub async fn check_write_base(bucket: &Bucket, prefix: &Prefix) -> Result<()> {
     if let Some(checkpoint) = crate::epilogue::latest_checkpoint(bucket).await? {
         ensure!(
             checkpoint.milestone <= prefix.milestone,
-            "Datashed backup advanced beyond writer"
+            "Basin backup advanced beyond writer"
         );
         if checkpoint.milestone == prefix.milestone {
             ensure!(
@@ -968,13 +968,13 @@ pub async fn check_write_base(bucket: &Bucket, prefix: &Prefix) -> Result<()> {
     Ok(())
 }
 
-pub async fn recover(bucket: &Bucket) -> Result<Datashed> {
+pub async fn recover(bucket: &Bucket) -> Result<Basin> {
     recover_with(bucket, crate::recovery::Config::default()).await
 }
 
-pub async fn recover_with(bucket: &Bucket, config: crate::recovery::Config) -> Result<Datashed> {
+pub async fn recover_with(bucket: &Bucket, config: crate::recovery::Config) -> Result<Basin> {
     crate::sequence::initialize(bucket).await?;
-    let mut state = Datashed {
+    let mut state = Basin {
         recovery: config,
         ..Default::default()
     };
@@ -983,7 +983,7 @@ pub async fn recover_with(bucket: &Bucket, config: crate::recovery::Config) -> R
 }
 
 /// Avoid snapshot discovery when a read's settled prefix is still current.
-pub async fn refresh_if_advanced(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
+pub async fn refresh_if_advanced(bucket: &Bucket, state: &mut Basin) -> Result<()> {
     let next = &state.milestone + 1u8;
     if exists(bucket, &next).await? {
         refresh(bucket, state).await?;
@@ -991,7 +991,7 @@ pub async fn refresh_if_advanced(bucket: &Bucket, state: &mut Datashed) -> Resul
     Ok(())
 }
 
-pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
+pub async fn refresh(bucket: &Bucket, state: &mut Basin) -> Result<()> {
     if let Some(checkpoint) = crate::epilogue::latest_checkpoint(bucket).await? {
         if checkpoint.milestone > state.milestone {
             let config = state.recovery.clone();
@@ -1029,7 +1029,7 @@ pub async fn refresh(bucket: &Bucket, state: &mut Datashed) -> Result<()> {
             after = Some(object.key.clone());
         }
     } else {
-        // A Datashed Epilogue supplies the seed; no Timeline listing is needed.
+        // A Basin Epilogue supplies the seed; no Timeline listing is needed.
         last_existing(state.milestone.clone(), |m| async move {
             exists(bucket, &m).await
         })
@@ -1050,7 +1050,7 @@ mod tests {
             let milestone = BigUint::from(n);
             assert_eq!(
                 key(&milestone)?,
-                format!("kernelspace/datashed/timeline/{encoded}")
+                format!("kernelspace/basin/timeline/{encoded}")
             );
             assert_eq!(from_key(&key(&milestone)?)?, milestone);
         }
@@ -1065,12 +1065,12 @@ mod tests {
         assert!(key(&0u8.into()).is_err());
         assert!(key(&(BigUint::from(1u8) << 4096usize)).is_err());
         for bad in [
-            "kernelspace/datashed/timeline/0yvf",
-            "kernelspace/datashed/timeline/0zg1",
-            "kernelspace/datashed/timeline/0w1z",
-            "kernelspace/datashed/timeline/0yFFE",
-            "kernelspace/datashed/timeline/0yve/extra",
-            "kernelspace/datashed/epilogue/0yve",
+            "kernelspace/basin/timeline/0yvf",
+            "kernelspace/basin/timeline/0zg1",
+            "kernelspace/basin/timeline/0w1z",
+            "kernelspace/basin/timeline/0yFFE",
+            "kernelspace/basin/timeline/0yve/extra",
+            "kernelspace/basin/epilogue/0yve",
         ] {
             assert!(from_key(bad).is_err(), "{bad}");
         }
@@ -1103,24 +1103,24 @@ mod tests {
 
     #[test]
     fn snapshots_reject_unpublished_preparation() -> Result<()> {
-        let mut datashed = Datashed::default();
-        let first = datashed.prepare_wal(vec![event::FlowCommand {
+        let mut basin = Basin::default();
+        let first = basin.prepare_wal(vec![event::FlowCommand {
             markers: BTreeMap::from([("flow".into(), marker("0"))]),
         }])?;
-        datashed.milestone = first.milestone.clone();
-        datashed.head = Some(first.digest.clone());
-        assert!(datashed.snapshot()?.is_some());
-        let _unpublished = datashed.prepare_wal(vec![event::FlowCommand {
+        basin.milestone = first.milestone.clone();
+        basin.head = Some(first.digest.clone());
+        assert!(basin.snapshot()?.is_some());
+        let _unpublished = basin.prepare_wal(vec![event::FlowCommand {
             markers: BTreeMap::from([("flow".into(), marker("1"))]),
         }])?;
-        assert!(datashed.snapshot().is_err());
+        assert!(basin.snapshot().is_err());
         Ok(())
     }
 
     #[test]
     fn pinned_backup_prefixes_recover_the_same_physical_state_as_genesis_replay() -> Result<()> {
-        let mut producer = Datashed::default().into_stager();
-        let mut full = Datashed::default();
+        let mut producer = Basin::default().into_stager();
+        let mut full = Basin::default();
         let mut entries = Vec::new();
         let mut checkpoints = Vec::new();
         for n in 0..48u32 {
@@ -1150,7 +1150,7 @@ mod tests {
             let (file, digest) = snapshot.view.export()?;
             assert_eq!(std::fs::read(file.path())?, image);
             assert_eq!(digest, event::digest(&image));
-            let mut recovered = Datashed {
+            let mut recovered = Basin {
                 milestone: snapshot.prefix.milestone.clone(),
                 coordinate: snapshot.prefix.coordinate.clone(),
                 crc32c: snapshot.prefix.crc32c,
@@ -1176,8 +1176,8 @@ mod tests {
 
     #[test]
     fn staged_batches_link_before_publication_and_settle_only_at_the_same_prefix() -> Result<()> {
-        let committed = Datashed::default().prefix();
-        let mut stager = Datashed::default().into_stager();
+        let committed = Basin::default().prefix();
+        let mut stager = Basin::default().into_stager();
         let first = stager.prepare(vec![event::FlowCommand {
             markers: BTreeMap::from([("flow".into(), marker("0"))]),
         }])?;
@@ -1187,7 +1187,7 @@ mod tests {
         }])?;
         assert_eq!(second.parent, Some(event::entry_digest(first.bytes())?));
         assert_eq!(second.milestone(), &BigUint::from(2u8));
-        let mut recovered = Datashed::default();
+        let mut recovered = Basin::default();
         recovered.apply_entry(1u8.into(), first.bytes())?;
         assert_ne!(stager.prefix(), recovered.prefix());
         recovered.apply_entry(2u8.into(), second.bytes())?;
@@ -1199,7 +1199,7 @@ mod tests {
 
     #[test]
     fn replay_applies_frames_atomically_and_preserves_big_counters() -> Result<()> {
-        let mut state = Datashed::default();
+        let mut state = Basin::default();
         assert!(
             state
                 .prepare(BTreeMap::from([
@@ -1292,7 +1292,7 @@ mod group_tests {
     #[test]
     fn partial_local_commits_restore_every_database_without_object_storage() -> Result<()> {
         for (phase, reverse) in (0..4).flat_map(|phase| [(phase, false), (phase, true)]) {
-            let mut stager = Datashed::default().into_stager();
+            let mut stager = Basin::default().into_stager();
             let first = stager.prepare(vec![command("0")])?;
             let prefix = stager.prefix();
             let primary = stager.state.writer.as_ref().unwrap().snapshot()?.unwrap();
@@ -1320,7 +1320,7 @@ mod group_tests {
                 };
                 if phase == 0 {
                     first.transaction(&s.milestone, s.head.as_deref(), |conn| {
-                        conn.execute("UPDATE datashed SET milestone='2'; COMMIT")?;
+                        conn.execute("UPDATE basin SET milestone='2'; COMMIT")?;
                         anyhow::bail!("after primary COMMIT, before checkpoint")
                     })?;
                 } else {
@@ -1330,7 +1330,7 @@ mod group_tests {
                             anyhow::bail!("second transaction rolls back");
                         }
                         if phase == 2 {
-                            conn.execute("UPDATE datashed SET milestone='2'; COMMIT")?;
+                            conn.execute("UPDATE basin SET milestone='2'; COMMIT")?;
                             anyhow::bail!("after second COMMIT, before checkpoint");
                         }
                         Ok(())
@@ -1347,7 +1347,7 @@ mod group_tests {
             assert_eq!(kernel.image()?, b);
             // The earlier prepared group is preserved; the rejected group consumes no position.
             let second = stager.prepare(vec![command("1")])?;
-            let mut recovered = Datashed::default();
+            let mut recovered = Basin::default();
             recovered.apply_entry(1u8.into(), first.bytes())?;
             recovered.apply_entry(2u8.into(), second.bytes())?;
             assert_eq!(recovered.latest("group")?.unwrap().decimal(), "1");
@@ -1360,7 +1360,7 @@ mod group_tests {
     }
     #[test]
     fn checkpoint_io_failure_restores_the_pair_and_reopens_clean_sidecars() -> Result<()> {
-        let mut stager = Datashed::default().into_stager();
+        let mut stager = Basin::default().into_stager();
         stager.prepare(vec![command("0")])?;
         let prefix = stager.prefix();
         let before = stager.state.writer.as_ref().unwrap().image()?;
@@ -1387,11 +1387,9 @@ mod group_tests {
     }
     #[test]
     fn an_empty_live_observer_can_adopt_the_first_database_group() -> Result<()> {
-        let mut observer = Datashed::default();
+        let mut observer = Basin::default();
         observer.enable_vfs()?;
-        let first = Datashed::default()
-            .into_stager()
-            .prepare(vec![command("0")])?;
+        let first = Basin::default().into_stager().prepare(vec![command("0")])?;
         observer.apply_entry(1u8.into(), first.bytes())?;
         assert_eq!(observer.latest("group")?.unwrap().decimal(), "0");
         assert_eq!(observer.kernel_database.as_ref().unwrap().milestone()?, "1");
@@ -1399,10 +1397,10 @@ mod group_tests {
     }
     #[test]
     fn replay_validates_the_group_before_publishing_either_candidate() -> Result<()> {
-        let mut stager = Datashed::default().into_stager();
+        let mut stager = Basin::default().into_stager();
         let first = stager.prepare(vec![command("0")])?;
         let second = stager.prepare(vec![command("1")])?;
-        let mut state = Datashed::default();
+        let mut state = Basin::default();
         state.apply_entry(1u8.into(), first.bytes())?;
         let prefix = state.prefix();
         let image = state.database.as_ref().unwrap().image.clone();
@@ -1432,7 +1430,7 @@ mod group_tests {
     }
     #[test]
     fn kernel_reservations_commits_and_both_change_feeds_recover() -> Result<()> {
-        let mut stager = Datashed::default().into_stager();
+        let mut stager = Basin::default().into_stager();
         let first = stager.prepare(vec![command("0")])?;
         let snapshot = first.snapshot().unwrap();
         let graph = crate::kernel::Graph::new(
@@ -1482,7 +1480,7 @@ mod group_tests {
             snapshot.activity,
             "backup bookkeeping must not trigger itself"
         );
-        let mut recovered = Datashed::default();
+        let mut recovered = Basin::default();
         for (i, event) in [&first, &reserved, &committed].into_iter().enumerate() {
             let event::Entry::Wal {
                 delta,

@@ -241,14 +241,14 @@ impl Preparation {
             }
         }
     }
-    async fn refreshed(&mut self, before_write: bool) -> Result<timeline::Datashed> {
+    async fn refreshed(&mut self, before_write: bool) -> Result<timeline::Basin> {
         let (reply, complete) = oneshot::channel();
         self.output
             .send(Publication::Barrier(reply))
             .await
             .map_err(|_| anyhow::anyhow!("publication stopped"))?;
         let prefix = complete.await.context("publication barrier stopped")??;
-        let mut datashed = self
+        let mut basin = self
             .stager
             .take()
             .context("missing preparation state")?
@@ -256,26 +256,26 @@ impl Preparation {
         // Count freshness from before the IO, so a slow probe cannot extend it.
         let started = tokio::time::Instant::now();
         if before_write {
-            timeline::refresh(&self.bucket, &mut datashed).await?;
+            timeline::refresh(&self.bucket, &mut basin).await?;
             self.last_probe = Some(started);
         } else if self
             .last_probe
             .is_none_or(|last| started.duration_since(last) >= self.status_probe_max_age)
         {
-            timeline::refresh_if_advanced(&self.bucket, &mut datashed).await?;
+            timeline::refresh_if_advanced(&self.bucket, &mut basin).await?;
             self.last_probe = Some(started);
         }
         let (reply, complete) = oneshot::channel();
-        let snapshot = datashed.snapshot()?;
+        let snapshot = basin.snapshot()?;
         self.output
-            .send(Publication::Refresh(datashed.prefix(), snapshot, reply))
+            .send(Publication::Refresh(basin.prefix(), snapshot, reply))
             .await
             .map_err(|_| anyhow::anyhow!("publication stopped"))?;
         anyhow::ensure!(
-            complete.await.context("publication refresh stopped")?? == datashed.prefix(),
+            complete.await.context("publication refresh stopped")?? == basin.prefix(),
             "refresh acknowledgement mismatch"
         );
-        Ok(datashed)
+        Ok(basin)
     }
     async fn write_stager(&mut self) -> Result<timeline::Stager> {
         let settled = self
@@ -285,8 +285,8 @@ impl Preparation {
             .prefix()
             == *self.published.borrow();
         if settled {
-            let datashed = self.refreshed(true).await?;
-            self.stager = Some(datashed.into_stager());
+            let basin = self.refreshed(true).await?;
+            self.stager = Some(basin.into_stager());
         }
         self.stager.take().context("missing preparation state")
     }
@@ -462,15 +462,15 @@ impl Preparation {
                             .map_err(|_| anyhow::anyhow!("publication stopped"))?;
                     }
                     Message::Status { flow, reply, .. } => {
-                        let datashed = self.refreshed(false).await?;
-                        let latest = if let Some(viewpoint) = datashed.latest(&flow)? {
-                            let revision = datashed
+                        let basin = self.refreshed(false).await?;
+                        let latest = if let Some(viewpoint) = basin.latest(&flow)? {
+                            let revision = basin
                                 .flow_revision(&flow)?
                                 .context("missing Flow revision")?;
-                            let mut location = datashed.location(&flow, &viewpoint)?;
+                            let mut location = basin.location(&flow, &viewpoint)?;
                             // Only retained image-delta fixtures lack an indexed location.
                             if location.is_none() {
-                                let mut milestone = datashed.milestone.clone();
+                                let mut milestone = basin.milestone.clone();
                                 while milestone > 0u8.into() {
                                     let bytes = basinsync::object_read::if_present(&self.bucket)?
                                         .get_object(timeline::key(&milestone)?)
@@ -536,8 +536,8 @@ impl Preparation {
                         } else {
                             None
                         };
-                        let response = observed(Ok(EpilogueStatus { latest }), &datashed.prefix());
-                        self.stager = Some(datashed.into_stager());
+                        let response = observed(Ok(EpilogueStatus { latest }), &basin.prefix());
+                        self.stager = Some(basin.into_stager());
                         let _ = reply.send(response);
                     }
                     Message::Commit(first) => {

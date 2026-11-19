@@ -144,7 +144,7 @@ impl State {
         }
         execute(
             conn,
-            "UPDATE datashed SET milestone=?1 WHERE id=1",
+            "UPDATE basin SET milestone=?1 WHERE id=1",
             &[milestone],
         )?;
         conn.execute("COMMIT")?;

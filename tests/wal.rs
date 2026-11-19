@@ -2,7 +2,7 @@ use anyhow::Result;
 use basinsync::{
     event::{self, FlowCommand, Marker},
     lexidecimal::Viewpoint,
-    timeline::Datashed,
+    timeline::Basin,
     turso::{State, wal::Writer},
 };
 use num_bigint::BigUint;
@@ -25,12 +25,12 @@ fn command(flow: &str, vp: &str) -> FlowCommand {
 
 #[test]
 fn unpublished_state_is_not_readable_and_bootstrap_is_verified() -> Result<()> {
-    let mut state = Datashed::default();
+    let mut state = Basin::default();
     let prepared = state.prepare_wal(vec![command("f", "0")])?;
     assert!(state.latest("f").is_err());
     assert!(state.prepare_wal(vec![command("f", "1")]).is_err());
     let bytes = prepared.bytes().to_vec();
-    let mut recovered = Datashed::default();
+    let mut recovered = Basin::default();
     recovered.apply_entry(1u8.into(), &bytes)?;
     assert_eq!(recovered.latest("f")?.unwrap().decimal(), "0");
     let event::Entry::Wal {
@@ -42,7 +42,7 @@ fn unpublished_state_is_not_readable_and_bootstrap_is_verified() -> Result<()> {
         panic!()
     };
     delta.logical.base.as_mut().unwrap().0[0] ^= 1;
-    let mut empty = Datashed::default();
+    let mut empty = Basin::default();
     assert!(
         empty
             .apply_entry(1u8.into(), &event::encode_wal(commands, *delta)?)
@@ -54,7 +54,7 @@ fn unpublished_state_is_not_readable_and_bootstrap_is_verified() -> Result<()> {
 
 #[test]
 fn concatenated_events_keep_boundaries_alignment_ranges_and_recovery() -> Result<()> {
-    let mut stager = Datashed::default().into_stager();
+    let mut stager = Basin::default().into_stager();
     let mut events = Vec::new();
     for n in 0..3 {
         events.push(
@@ -69,7 +69,7 @@ fn concatenated_events_keep_boundaries_alignment_ranges_and_recovery() -> Result
     for bytes in &events {
         feed.extend_from_slice(bytes);
     }
-    let mut recovered = Datashed::default();
+    let mut recovered = Basin::default();
     let frames = basinsync::envbuf::all(&feed)?;
     assert_eq!(frames.len(), 7);
     let mut end = feed.len();
@@ -110,7 +110,7 @@ fn concatenated_events_keep_boundaries_alignment_ranges_and_recovery() -> Result
 
 #[test]
 fn retry_margin_preserves_prepared_successors_and_locations() -> Result<()> {
-    let mut stager = Datashed::default().into_stager();
+    let mut stager = Basin::default().into_stager();
     let first = stager.prepare(vec![command("f", "0")])?;
     let second = stager.prepare(vec![command("f", "1")])?;
     let digest = event::entry_digest(first.bytes())?;
@@ -132,7 +132,7 @@ fn retry_margin_preserves_prepared_successors_and_locations() -> Result<()> {
         assert_eq!(event::blob_ranges(&retried)?, locations);
         assert_eq!(event::manifest_range(&retried)?, manifest);
     }
-    let mut recovered = Datashed::default();
+    let mut recovered = Basin::default();
     recovered.apply_entry(1u8.into(), &retried)?;
     recovered.apply_entry(2u8.into(), second.bytes())?;
     assert_eq!(recovered.prefix(), stager.prefix());
@@ -142,7 +142,7 @@ fn retry_margin_preserves_prepared_successors_and_locations() -> Result<()> {
 
 #[test]
 fn legacy_history_can_be_extended_with_wal_batches() -> Result<()> {
-    let mut reader = Datashed::default();
+    let mut reader = Basin::default();
     let (_, legacy) = reader.prepare(command("f", "0").markers)?;
     let bytes = event::encode(legacy)?;
     reader.apply_entry(1u8.into(), &bytes)?;
@@ -151,7 +151,7 @@ fn legacy_history_can_be_extended_with_wal_batches() -> Result<()> {
         command("f", "2"),
         command("g", "0"),
     ])?;
-    let mut recovered = Datashed::default();
+    let mut recovered = Basin::default();
     recovered.apply_entry(1u8.into(), &bytes)?;
     recovered.apply_entry(2u8.into(), prepared.bytes())?;
     assert_eq!(recovered.latest("f")?.unwrap().decimal(), "2");
@@ -166,7 +166,7 @@ fn corrupt_frames_lineage_order_and_versions_fail_atomically() -> Result<()> {
     let commands = vec![command("f", "0")];
     let delta = writer.prepare(&0u8.into(), None, &commands)?;
     let first = event::encode_wal(commands, delta)?;
-    let mut reader = Datashed::default();
+    let mut reader = Basin::default();
     reader.apply_entry(1u8.into(), &first)?;
     let commands = vec![command("f", "1"), command("f", "2")];
     let delta = writer.prepare(&1u8.into(), Some(&event::entry_digest(&first)?), &commands)?;
@@ -232,7 +232,7 @@ proptest::proptest! {
     #[test]
     fn persistent_wal_batches_reconstruct_at_every_prefix(batches in proptest::collection::vec(proptest::collection::vec(0u16..64,1..20),2..30)){
         let mut before=State::genesis().unwrap().image;
-        let mut writer=Writer::open(&before).unwrap();let mut reader=Datashed::default();
+        let mut writer=Writer::open(&before).unwrap();let mut reader=Basin::default();
         let mut latest:BTreeMap<String,Viewpoint>=BTreeMap::new();
         for (index,batch) in batches.into_iter().enumerate(){
             let mut commands=Vec::new();
@@ -251,7 +251,7 @@ proptest::proptest! {
 
 #[test]
 fn byte_coordinates_are_digest_bound_contiguous_and_ignore_retry_margins() -> Result<()> {
-    let mut stager = Datashed::default().into_stager();
+    let mut stager = Basin::default().into_stager();
     let first = stager.prepare(vec![command("f", "0")])?;
     let second = stager.prepare(vec![command("f", "1")])?;
     assert_eq!(event::coordinate(first.bytes())?, Some(0u8.into()));
@@ -261,7 +261,7 @@ fn byte_coordinates_are_digest_bound_contiguous_and_ignore_retry_margins() -> Re
         event::entry_digest(&reframed)?,
         event::entry_digest(first.bytes())?
     );
-    let mut unmodified = Datashed::default();
+    let mut unmodified = Basin::default();
     unmodified.apply_entry(1u8.into(), &reframed)?;
     unmodified.apply_entry(2u8.into(), second.bytes())?;
     assert_eq!(unmodified.prefix(), stager.prefix());
@@ -288,7 +288,7 @@ fn byte_coordinates_are_digest_bound_contiguous_and_ignore_retry_margins() -> Re
             event::entry_digest(&bad)?,
             event::entry_digest(first.bytes())?
         );
-        let mut recovered = Datashed::default();
+        let mut recovered = Basin::default();
         assert!(recovered.apply_entry(1u8.into(), &bad).is_err());
         assert_eq!(recovered.milestone, 0u8.into());
         assert!(recovered.database.is_none());
@@ -299,7 +299,7 @@ fn byte_coordinates_are_digest_bound_contiguous_and_ignore_retry_margins() -> Re
 #[test]
 fn external_retry_margins_leave_the_entire_event_unchanged_and_reject_other_suffixes() -> Result<()>
 {
-    let mut stager = Datashed::default().into_stager();
+    let mut stager = Basin::default().into_stager();
     let first = stager.prepare(vec![command("f", "0")])?;
     let second = stager.prepare(vec![command("f", "1")])?;
     let original = first.bytes();
@@ -336,7 +336,7 @@ fn external_retry_margins_leave_the_entire_event_unchanged_and_reject_other_suff
             event::entry_digest(&stored)?,
             event::entry_digest(original)?
         );
-        let mut recovered = Datashed::default();
+        let mut recovered = Basin::default();
         recovered.apply_entry(1u8.into(), &stored)?;
         recovered.apply_entry(2u8.into(), second.bytes())?;
         assert_eq!(recovered.prefix(), stager.prefix());
