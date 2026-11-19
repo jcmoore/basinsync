@@ -179,12 +179,12 @@ fn keys_seek_descending_bounds_and_coverage_detects_contained_intervals() -> Res
             .all(|o| o.key(16, &0u8.into()).unwrap() > analogue::seek(&3u8.into()))
     );
     for bad in [
-        "analogue/0yfff/0yffe",
-        "analogue/0yffe/0yffe",
-        "analogue/0z001/0z002",
-        "analogue/0yffe/0yffd/extra",
+        "0yvf/0yve/v0/16/0",
+        "0yve/0yve/v0/16/0",
+        "0zg1/0zg2/v0/16/0",
+        "0yve/0yvd/v0/16/0/extra",
     ] {
-        assert!(Order::from_key(bad).is_err());
+        assert!(Order::from_key(&format!("{}{bad}", analogue::PREFIX)).is_err());
     }
     for suffix in [
         "v0/016",
@@ -194,7 +194,7 @@ fn keys_seek_descending_bounds_and_coverage_detects_contained_intervals() -> Res
         "v1/16",
         "v0/18446744073709551616",
     ] {
-        assert!(Order::from_key(&format!("analogue/0yffe/0yffd/{suffix}/0")).is_err());
+        assert!(Order::from_key(&format!("{}0yve/0yvd/{suffix}/0", analogue::PREFIX)).is_err());
     }
     assert!(Builder::new(0u8.into()).is_err());
     assert!(Builder::new(1u8.into())?.finish().is_err());

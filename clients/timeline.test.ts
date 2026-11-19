@@ -17,12 +17,12 @@ test("Timeline keys complement positive Milestones and list newest first", () =>
     expect(fromKey(key(m))).toBe(m);
   }
   expect(ordered.map(key).sort()).toEqual(ordered.map(key).reverse());
-  for (const [n, wire] of [[1n, "0yffe"], [15n, "0yff0"], [16n, "0yfeef"], [256n, "0yfdeff"]] as const)
+  for (const [n, wire] of [[1n, "0yve"], [15n, "0yv0"], [16n, "0yuef"], [256n, "0yteff"]] as const)
     expect(key(n)).toBe(`kernelspace/datashed/timeline/${wire}`);
 });
 
 test("Timeline rejects zero, wrong signs/prefixes, noncanonical and oversized keys", () => {
   for (const m of [0n, -1n, 1n << 4096n]) expect(() => key(m)).toThrow();
-  for (const k of ["kernelspace/datashed/timeline/0yfff", "kernelspace/datashed/timeline/0z001", "kernelspace/datashed/timeline/0w1z", "kernelspace/datashed/timeline/0yFFE", "kernelspace/datashed/timeline/0yffe/extra", "kernelspace/datashed/epilogue/0yffe", `kernelspace/datashed/timeline/${encode(~(1n << 4096n))}`])
+  for (const k of ["kernelspace/datashed/timeline/0yvf", "kernelspace/datashed/timeline/0zg1", "kernelspace/datashed/timeline/0w1z", "kernelspace/datashed/timeline/0yFFE", "kernelspace/datashed/timeline/0yve/extra", "kernelspace/datashed/epilogue/0yve", `kernelspace/datashed/timeline/${encode(~(1n << 4096n))}`])
     expect(() => fromKey(k)).toThrow();
 });

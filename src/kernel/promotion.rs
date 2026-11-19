@@ -530,7 +530,7 @@ mod tests {
         task.blob.insert(0, 0);
         assert!(valid_task(conn, &task).is_err());
         task.blob.remove(0);
-        conn.execute("UPDATE kernel_commits SET covered='0z002'")?;
+        conn.execute("UPDATE kernel_commits SET covered='0zg2'")?;
         assert!(valid_task(conn, &task).is_err());
         Ok(())
     }

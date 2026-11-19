@@ -1046,12 +1046,7 @@ mod tests {
 
     #[test]
     fn keys_complement_positive_milestones_and_descend_across_width_boundaries() -> Result<()> {
-        for (n, encoded) in [
-            (1u16, "0yffe"),
-            (15, "0yff0"),
-            (16, "0yfeef"),
-            (256, "0yfdeff"),
-        ] {
+        for (n, encoded) in [(1u16, "0yve"), (15, "0yv0"), (16, "0yuef"), (256, "0yteff")] {
             let milestone = BigUint::from(n);
             assert_eq!(
                 key(&milestone)?,
@@ -1070,12 +1065,12 @@ mod tests {
         assert!(key(&0u8.into()).is_err());
         assert!(key(&(BigUint::from(1u8) << 4096usize)).is_err());
         for bad in [
-            "kernelspace/datashed/timeline/0yfff",
-            "kernelspace/datashed/timeline/0z001",
+            "kernelspace/datashed/timeline/0yvf",
+            "kernelspace/datashed/timeline/0zg1",
             "kernelspace/datashed/timeline/0w1z",
             "kernelspace/datashed/timeline/0yFFE",
-            "kernelspace/datashed/timeline/0yffe/extra",
-            "kernelspace/datashed/epilogue/0yffe",
+            "kernelspace/datashed/timeline/0yve/extra",
+            "kernelspace/datashed/epilogue/0yve",
         ] {
             assert!(from_key(bad).is_err(), "{bad}");
         }

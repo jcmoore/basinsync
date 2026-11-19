@@ -3,36 +3,58 @@
 import os
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 DEFAULT_DIRECTORY = Path(__file__).resolve().parents[3] / "diy"
-SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
-TUTORIAL = rf"0z[0-9a-f]+/{SLUG}(?:/0z[0-9a-f]+/{SLUG})*"
+SLUG = r"[0-9]{6}-[a-z0-9]+(?:-[a-z0-9]+)*"
+HEIGHT = r"0z(?:[w-z])?[g-v]+[0-9a-f]+"
+TUTORIAL = rf"{HEIGHT}/{SLUG}(?:/{HEIGHT}/{SLUG})*"
+
+
+def size_prefix(size):
+    digits = format(size, "x")
+    width = 1 << (len(digits) - 1).bit_length()
+    if width > 16:
+        raise ValueError("height allocation is too large")
+    magnitude = "" if width == 1 else "wxyz"[width.bit_length() - 2]
+    return magnitude + "".join(chr(ord("g") + int(d, 16)) for d in digits.zfill(width))
 
 
 def encode_height(height):
     if type(height) is not int or height < 0:
         raise ValueError("height must be a nonnegative integer")
     digits = format(height, "x")
-    size = format(len(digits) - 1, "x")
-    width = format(len(size) - 1, "x")
-    if len(width) != 1:
-        raise ValueError("height allocation is too large")
-    return f"0z{width}{size}{digits}"
+    return f"0z{size_prefix(len(digits) - 1)}{digits}"
 
 
 def decode_height(encoded):
-    if not re.fullmatch(r"0z[0-9a-f]{3,}", encoded):
+    if not re.fullmatch(HEIGHT, encoded):
         raise ValueError("height must be unsigned Lexidecimal")
     body = encoded[2:]
-    end = 2 + int(body[0], 16)
-    size, digits = body[1:end], body[end:]
-    if not size or not digits or int(size, 16) != len(digits) - 1:
+    start = 1 if body[0] in "wxyz" else 0
+    width = 1 << (1 + "wxyz".index(body[0])) if start else 1
+    size, digits = body[start:start + width], body[start + width:]
+    if len(size) != width or not re.fullmatch(r"[g-v]+", size) or not re.fullmatch(r"[0-9a-f]+", digits):
+        raise ValueError("incorrect Lexidecimal size")
+    count = int("".join(format(ord(d) - ord("g"), "x") for d in size), 16)
+    if count != len(digits) - 1:
         raise ValueError("incorrect Lexidecimal size")
     height = int(digits, 16)
     if encode_height(height) != encoded:
         raise ValueError("noncanonical Lexidecimal height")
     return height
+
+
+def topic(slug):
+    if not re.fullmatch(SLUG, slug):
+        raise ValueError("expected a <YYMMDD-lowercase-slug> folder")
+    stamp, name = slug[:6], slug[7:]
+    try:
+        date(2000 + int(stamp[:2]), int(stamp[2:4]), int(stamp[4:6]))
+    except ValueError:
+        raise ValueError("invalid YYMMDD introduction date") from None
+    return name
 
 
 def prerequisites(text):
@@ -83,12 +105,15 @@ def lint_tutorials(directory):
         if folder.is_symlink() or not folder.is_dir():
             errors.append(f"{name}: expected a tutorial folder, not a file or symlink")
             return
-        if not re.fullmatch(SLUG, folder.name):
-            errors.append(f"{name}: expected a <lowercase-slug> folder")
-        if folder.name in names:
-            errors.append(f'{name}: duplicate tutorial slug "{folder.name}" (also {names[folder.name]})')
+        try:
+            slug = topic(folder.name)
+        except ValueError as error:
+            errors.append(f"{name}: {error}")
+            slug = folder.name
+        if slug in names:
+            errors.append(f'{name}: duplicate tutorial slug "{slug}" (also {names[slug]})')
         else:
-            names[folder.name] = name
+            names[slug] = name
         # Check the actual spelling even on case-insensitive filesystems.
         readme = next((path for path in folder.iterdir() if path.name == "README.md"), None)
         if readme is None:
@@ -112,10 +137,10 @@ def lint_tutorials(directory):
                 continue
             if not folder.is_dir():
                 if parent == directory and folder.suffix.lower() == ".md":
-                    errors.append(f"{folder.name}: expected <unsigned-Lexidecimal-height>/<lowercase-slug>/README.md")
+                    errors.append(f"{folder.name}: expected <unsigned-Lexidecimal-height>/<YYMMDD-lowercase-slug>/README.md")
                 continue
             # Other subfolders can hold supporting material and may share names.
-            if parent != directory and not re.fullmatch(r"0[zZyY][0-9a-fA-F]+", folder.name):
+            if parent != directory and not re.fullmatch(r"0[zZyY][0-9A-Za-z]*", folder.name):
                 continue
             height = None
             try:

@@ -1,14 +1,14 @@
-[diy/0z000/shallow-epilogue-commits]: <diy/0z000/shallow-epilogue-commits/README.md>
-[diy/0z001/datashed-timeline-race]: <diy/0z001/datashed-timeline-race/README.md>
-[diy/0z002/turso-reservoir-vfs]: <diy/0z002/turso-reservoir-vfs/README.md>
-[diy/0z003/datashed-backup-recovery]: <diy/0z003/datashed-backup-recovery/README.md>
-[diy/0z003/shallow-heap-management]: <diy/0z003/shallow-heap-management/README.md>
-[diy/0z004/async-shallow-cleanup]: <diy/0z004/async-shallow-cleanup/README.md>
-[diy/0z004/timeline-recovery-acceleration]: <diy/0z004/timeline-recovery-acceleration/README.md>
-[diy/0z005/deep-heap-support]: <diy/0z005/deep-heap-support/README.md>
-[diy/0z006/commit-marker-edges-with-node-promotion]: <diy/0z006/commit-marker-edges-with-node-promotion/README.md>
-[diy/0z007/shallow-datashed-backup-nodes]: <diy/0z007/shallow-datashed-backup-nodes/README.md>
-[diy/0z008/observability]: <diy/0z008/observability/README.md>
+[diy/0zg0/261022-shallow-epilogue-commits]: <diy/0zg0/261022-shallow-epilogue-commits/README.md>
+[diy/0zg1/261023-datashed-timeline-race]: <diy/0zg1/261023-datashed-timeline-race/README.md>
+[diy/0zg2/261023-turso-reservoir-vfs]: <diy/0zg2/261023-turso-reservoir-vfs/README.md>
+[diy/0zg3/261024-datashed-backup-recovery]: <diy/0zg3/261024-datashed-backup-recovery/README.md>
+[diy/0zg3/261111-shallow-heap-management]: <diy/0zg3/261111-shallow-heap-management/README.md>
+[diy/0zg4/261112-async-shallow-cleanup]: <diy/0zg4/261112-async-shallow-cleanup/README.md>
+[diy/0zg4/261117-timeline-recovery-acceleration]: <diy/0zg4/261117-timeline-recovery-acceleration/README.md>
+[diy/0zg5/261112-deep-heap-support]: <diy/0zg5/261112-deep-heap-support/README.md>
+[diy/0zg6/261112-commit-marker-edges-with-node-promotion]: <diy/0zg6/261112-commit-marker-edges-with-node-promotion/README.md>
+[diy/0zg7/261118-shallow-datashed-backup-nodes]: <diy/0zg7/261118-shallow-datashed-backup-nodes/README.md>
+[diy/0zg8/261119-observability]: <diy/0zg8/261119-observability/README.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [object-keys]: <object-keys.md>
 
@@ -21,32 +21,32 @@ object storage.
 Build it incrementally, recording milestones as concise tutorials with linked
 reference and glossary entries. Height folders encode dependency height in
 *Lexidecimal*[~][lexidecimal]; frontmatter lists prerequisite folders relative to `diy/`.
-Tutorial folders may nest by repeating height/name pairs; tutorial slugs must be
+Tutorial folders may nest by repeating height/name pairs; tutorial slugs carry their introduction date as `YYMMDD-`; their topics must be
 unique throughout `diy/`. Tutorials at the same height are parallel branches, not a reading sequence. Begin with
-*Shallow epilogue commits*[~][diy/0z000/shallow-epilogue-commits].
+*Shallow epilogue commits*[~][diy/0zg0/261022-shallow-epilogue-commits].
 
 Coordinate writes and locate payloads with
-*Datashed Timeline race*[~][diy/0z001/datashed-timeline-race].
+*Datashed Timeline race*[~][diy/0zg1/261023-datashed-timeline-race].
 
-Then materialize *Turso Reservoir VFS*[~][diy/0z002/turso-reservoir-vfs].
+Then materialize *Turso Reservoir VFS*[~][diy/0zg2/261023-turso-reservoir-vfs].
 
-Recover from snapshots with *Datashed backup and recovery*[~][diy/0z003/datashed-backup-recovery].
+Recover from snapshots with *Datashed backup and recovery*[~][diy/0zg3/261024-datashed-backup-recovery].
 
-Independently of backup support, stage uploads with *Shallow Heap management*[~][diy/0z003/shallow-heap-management].
+Independently of backup support, stage uploads with *Shallow Heap management*[~][diy/0zg3/261111-shallow-heap-management].
 
-Reclaim staged objects with *Async shallow cleanup*[~][diy/0z004/async-shallow-cleanup].
+Reclaim staged objects with *Async shallow cleanup*[~][diy/0zg4/261112-async-shallow-cleanup].
 
-Build deeper graphs with *Deep Heap support*[~][diy/0z005/deep-heap-support].
+Build deeper graphs with *Deep Heap support*[~][diy/0zg5/261112-deep-heap-support].
 
 Retain and promote committed graphs with
-*CommitMarker edges with node promotion*[~][diy/0z006/commit-marker-edges-with-node-promotion].
+*CommitMarker edges with node promotion*[~][diy/0zg6/261112-commit-marker-edges-with-node-promotion].
 
-Coalesce and retrieve history with *Timeline recovery acceleration*[~][diy/0z004/timeline-recovery-acceleration].
+Coalesce and retrieve history with *Timeline recovery acceleration*[~][diy/0zg4/261117-timeline-recovery-acceleration].
 
 Back up paired database graphs with
-*Shallow Datashed backup nodes*[~][diy/0z007/shallow-datashed-backup-nodes].
+*Shallow Datashed backup nodes*[~][diy/0zg7/261118-shallow-datashed-backup-nodes].
 
 Inspect request publication and background progress with
-*Observability*[~][diy/0z008/observability].
+*Observability*[~][diy/0zg8/261119-observability].
 
 Audit storage layouts in the *object-key reference*[~][object-keys].
