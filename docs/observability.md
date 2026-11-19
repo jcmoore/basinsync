@@ -5,7 +5,7 @@
 
 Use `RUST_LOG` to filter *tracing*[~][tracing] output; the default is
 `basinsync=info`. `BASINSYNC_LOG_FORMAT=text|json` selects the representation,
-defaulting to `text`. API responses include a generated `x-request-id`.
+defaulting to `json`. API responses include a generated `x-request-id`.
 Correlate it with `request_id`, `batch_id`, and the recorded positions.
 
 `GET /metrics` on the server listener exposes process-local *Prometheus

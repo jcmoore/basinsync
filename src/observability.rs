@@ -11,7 +11,7 @@ pub fn init() -> Result<PrometheusHandle> {
         .unwrap_or_else(|_| "basinsync=info".into());
     match std::env::var("BASINSYNC_LOG_FORMAT")
         .as_deref()
-        .unwrap_or("text")
+        .unwrap_or("json")
     {
         "text" => tracing_subscriber::fmt().with_env_filter(filter).init(),
         "json" => tracing_subscriber::fmt()

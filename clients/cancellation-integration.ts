@@ -22,7 +22,7 @@ let seq=0;
 async function bucket(){const Bucket=`audit-${++seq}`;await s3.send(new CreateBucketCommand({Bucket}));return Bucket;}
 async function app(Bucket:string,s3Endpoint:string,options:Record<string,string>={}){
   const address=`127.0.0.1:${await port()}`;
-  const p=launch([`${root}target/debug/basinsync`],{S3_ENDPOINT:s3Endpoint,S3_BUCKET:Bucket,AWS_REGION:"us-east-1",AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,AWS_SESSION_TOKEN:"",BASINSYNC_LISTEN:address,BASINSYNC_CLEANUP_INTERVAL_MS:"0",BASINSYNC_BULK_MAX_AGE_MS:"0",BASINSYNC_BACKUP_INTERVAL_MS:"0",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug",...options});
+  const p=launch([`${root}target/debug/basinsync`],{BASINSYNC_LOG_FORMAT:"json",S3_ENDPOINT:s3Endpoint,S3_BUCKET:Bucket,AWS_REGION:"us-east-1",AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,AWS_SESSION_TOKEN:"",BASINSYNC_LISTEN:address,BASINSYNC_CLEANUP_INTERVAL_MS:"0",BASINSYNC_BULK_MAX_AGE_MS:"0",BASINSYNC_BACKUP_INTERVAL_MS:"0",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug",...options});
   const url=`http://${address}`;await until(async()=>{if(p.process.exitCode!==null)throw Error(readFileSync(p.path,"utf8"));return (await fetch(`${url}/ready`)).status;},s=>s===404);return {...p,url};
 }
 function proxy(before:(request:Request)=>Promise<Response|void>,after:((request:Request,response:Response)=>Promise<void>)=async()=>{}){
@@ -72,7 +72,7 @@ try{
     const request=fetch(`${server.url}/api/v0/epilogue`,{method:"PUT",body:form("disconnect",bytes("marker"),0n),signal:abort.signal}).then(()=>"response",()=>"disconnected");
     await deadline(entered.promise);abort.abort();assert.equal(await request,"disconnected");
     const successor=commit(server.url,"disconnect",bytes("next marker"),1n);
-    await until(async()=>readFileSync(server.path,"utf8"),s=>s.includes("milestone=2")&&s.includes("batch prepared"));
+    await until(async()=>readFileSync(server.path,"utf8"),s=>s.split("\n").some(line=>{try{const e=JSON.parse(line);return e.fields?.message==="batch prepared"&&(e.fields?.milestone??e.span?.milestone)==="2";}catch{return false;}}));
     server.process.kill(signal);await Bun.sleep(100);assert.equal(server.process.exitCode,null,"shutdown waits for admitted work");
     release.resolve();assert.equal((await successor).status,201);assert.equal(await deadline(server.process.exited),0);assert.equal(puts,2);
     const restored=await app(b,endpoint);assert.equal((await epilogueStatus(restored.url,"disconnect")).latest?.viewpoint,1n);await stop(restored.process);

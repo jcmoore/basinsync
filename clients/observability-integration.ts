@@ -4,6 +4,7 @@ import {ListObjectsV2Command} from "@aws-sdk/client-s3";
 import {fixture,eventually} from "./analogue-fixture";
 import {commit,form,epilogueStatus,reserveHeap,parseResponse,type HeapResponse} from "./client";
 
+delete Bun.env.BASINSYNC_LOG_FORMAT; // Exercise the server default independently of the invoking shell.
 const f=await fixture("observability");
 type Event={fields:Record<string,unknown>;span?:Record<string,unknown>;spans?:Record<string,unknown>[]};
 const events=(path:string)=>readFileSync(path,"utf8").split("\n").filter(l=>l.startsWith("{")).map(l=>JSON.parse(l) as Event);
@@ -14,7 +15,7 @@ async function scrape(url:string){const response=await fetch(`${url}/metrics`,{s
 try {
   const bucket=await f.bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let puts=0,s3Requests=0;
   const proxy=f.relay(async(request,next)=>{s3Requests++;if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/datashed/timeline/")&&++puts===1){entered.resolve();await release.promise;}return next();});
-  const app=await f.server(bucket,{BASINSYNC_LOG_FORMAT:"json",RUST_LOG:"basinsync=debug",BASINSYNC_BATCH_MAX:"2",BASINSYNC_BATCH_WAIT_MS:"100"},proxy);
+  const app=await f.server(bucket,{RUST_LOG:"basinsync=debug",BASINSYNC_BATCH_MAX:"2",BASINSYNC_BATCH_WAIT_MS:"100"},proxy);
   const body=new TextEncoder().encode("opaque-observability-secret"),context={secret:"private-context-value"};
   const first=commit(app.url,"observed-a",body,0n,undefined,[],context),abort=new AbortController();
   const disconnected=fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("observed-b",body,0n),signal:abort.signal}).then(()=>"response",()=>"disconnected");
@@ -56,7 +57,8 @@ try {
   for(const secret of ["opaque-observability-secret","private-context-value","secret-access-token",Buffer.from(token).toString("base64"),Buffer.from(token).toString("hex"),"private-query-value","private-auth-value","X-Amz-Signature",reserved.results![0].actions.write!.url])assert(!log.includes(secret),`sensitive data leaked: ${secret}`);
   const telemetry=after+sampled;
   for(const identifier of ["observed-a","observed-b",requestId,String(completed[0].fields.batch_id)])assert(!telemetry.includes(identifier),"identifiers belong in traces, not metric labels");
-  const restarted=await f.server(bucket,{BASINSYNC_LOG_FORMAT:"json",RUST_LOG:"basinsync=debug"});
+  const restarted=await f.server(bucket,{BASINSYNC_LOG_FORMAT:"text",RUST_LOG:"basinsync=debug"});
+  const readyLine=readFileSync(restarted.log,"utf8").split("\n").find(line=>line.includes("ready"));assert(readyLine&&!readyLine.startsWith("{"),"explicit text logging remains supported");
   assert.equal(value(await scrape(restarted.url),"basinsync_submissions_total",{operation:"commit",outcome:"ok"}),0,"counters are process-local");
   await eventually(()=>scrape(restarted.url),text=>value(text,"basinsync_background_pending",{space:"userspace",queue:"sweeping"})===2&&value(text,"basinsync_background_sample_timestamp_seconds")>0);
   assert.equal((await epilogueStatus(restarted.url,"observed-a")).latest!.viewpoint,0n);await f.stop(restarted.process);

@@ -31,7 +31,7 @@ advance the *Datashed*[~][datashed] *Timeline*[~][timeline].
 
 Keep *metric labels*[~][metric] bounded. Exclude *access tokens*[~][access-token],
 credentials, signed URLs, payloads, and client context values from telemetry.
-Preserve text logging; offer JSON logs and Prometheus exposition through the
+Default to JSON logs, retain optional text logging, and offer Prometheus exposition through the
 *operational interface*[~][observability].
 
 Gate publication to prove successful acknowledgements are counted only after

@@ -74,7 +74,7 @@ async function bucket() {
 }
 function serverProcess(bucket: string, s3Endpoint: string, address: string, options:Record<string,string>={}) {
   return launch([`${root}/target/debug/basinsync`],{
-    S3_ENDPOINT:s3Endpoint,S3_BUCKET:bucket,AWS_REGION:"us-east-1",
+    BASINSYNC_LOG_FORMAT:"json",S3_ENDPOINT:s3Endpoint,S3_BUCKET:bucket,AWS_REGION:"us-east-1",
     AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,
     AWS_SESSION_TOKEN:"",BASINSYNC_LISTEN:address,BASINSYNC_CLEANUP_INTERVAL_MS:"0",BASINSYNC_BULK_MAX_AGE_MS:"0",BASINSYNC_BACKUP_INTERVAL_MS:"0",BASINSYNC_STATUS_PROBE_MAX_AGE_MS:"0",...options,
   });
@@ -101,18 +101,21 @@ function relay(after: (request: Request, response: Response) => Promise<Response
   relays.push(service);
   return {service,url:`http://127.0.0.1:${service.port}`};
 }
+function logged(log:string,event:string,fields:Record<string,string>){
+  return readFileSync(log,"utf8").split("\n").some(line=>{
+    try {const entry=JSON.parse(line);const values={...entry.span,...entry.fields};return values.message===event&&Object.entries(fields).every(([key,value])=>String(values[key])===value);}
+    catch {return false;} // A concurrent writer may leave a partial final line.
+  });
+}
 async function queued(log:string,flow:string,viewpoint:number){
   const deadline=Date.now()+15000;
-  for(;;){
-    const text=readFileSync(log,"utf8").replace(/\u001b\[[0-9;]*m/g,"");
-    if(text.split("\n").some(line=>line.includes("commit queued") && line.includes(`flow=${flow}`) && line.includes(`viewpoint=${viewpoint}`)))return;
+  while(!logged(log,"commit queued",{flow,viewpoint:String(viewpoint)})){
     assert(Date.now()<deadline,`request never queued: ${flow}/${viewpoint}; ${log}`);await Bun.sleep(2);
   }
 }
 async function batchLogged(log:string,milestone:number,event="batch prepared"){
   const deadline=Date.now()+15000;
-  for(;;){
-    if(readFileSync(log,"utf8").replace(/\u001b\[[0-9;]*m/g,"").split("\n").some(line=>line.includes(event)&&line.includes(`milestone=${milestone}`)))return;
+  while(!logged(log,event,{milestone:String(milestone)})){
     assert(Date.now()<deadline,`batch ${milestone} never reached ${event}; ${log}`);await Bun.sleep(2);
   }
 }
