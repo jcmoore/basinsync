@@ -1,5 +1,5 @@
 [diy/0z000/shallow-epilogue-commits]: <docs/diy/0z000/shallow-epilogue-commits/README.md>
-[diy/0z006/commit-marker-edges-with-node-promotion]: <docs/diy/0z006/commit-marker-edges-with-node-promotion/README.md>
+[diy/0z008/observability]: <docs/diy/0z008/observability/README.md>
 
 # basinsync
 
@@ -9,7 +9,6 @@ a first-writer-wins Epilogue, a server, and TypeScript stress clients.
 
 [Run and verify](docs/development.md) · [Protocol and invariant](docs/epilogue-protocol.md)
 
-The current milestone is *CommitMarker edges with node promotion*[~][diy/0z006/commit-marker-edges-with-node-promotion]:
-authenticated marker edges, bounded depth-first marking, and restartable promotion
-of retained graphs from young to old storage outside the request path, with
-PromotionSigns certifying completion.
+The current milestone is *Observability*[~][diy/0z008/observability]:
+correlated request and batch traces, durable-publication latency, and Prometheus
+metrics for foreground pressure and background progress.

@@ -23,3 +23,5 @@ pub mod turso;
 pub mod checksum;
 
 pub mod kernel;
+
+pub mod observability;

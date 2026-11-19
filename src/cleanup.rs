@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use tracing::Instrument;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Task {
@@ -120,20 +121,33 @@ pub async fn erase(bucket: &s3::Bucket, nodes: Vec<Freed>, concurrency: usize) -
                 break;
             };
             let bucket = bucket.clone();
-            running.spawn(async move {
-                let key = crate::heap::key(crate::heap::YOUNG, &node.id, &node.revision);
-                match bucket.delete_object(key).await {
-                    Ok(r) if matches!(r.status_code(), 200..=299 | 404) => Some(node),
-                    Ok(r) => {
-                        tracing::warn!(status = r.status_code(), "young heap deletion deferred");
-                        None
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "young heap deletion deferred");
-                        None
+            running.spawn(
+                async move {
+                    let key = crate::heap::key(crate::heap::YOUNG, &node.id, &node.revision);
+                    let timer = crate::observability::Timer::new("delete", "userspace");
+                    let response = bucket.delete_object(key).await;
+                    timer.finish(
+                        response
+                            .as_ref()
+                            .is_ok_and(|r| matches!(r.status_code(), 200..=299 | 404)),
+                    );
+                    match response {
+                        Ok(r) if matches!(r.status_code(), 200..=299 | 404) => Some(node),
+                        Ok(r) => {
+                            tracing::warn!(
+                                status = r.status_code(),
+                                "young heap deletion deferred"
+                            );
+                            None
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "young heap deletion deferred");
+                            None
+                        }
                     }
                 }
-            });
+                .in_current_span(),
+            );
         }
         let Some(result) = running.join_next().await else {
             break;

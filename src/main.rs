@@ -16,13 +16,14 @@ use basinsync::{
     event::{self, Marker},
     heap,
     lexidecimal::Viewpoint,
-    timeline,
+    observability as obs, timeline,
 };
 use s3::{Bucket, Region, creds::Credentials};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha384};
 use std::{env, future::IntoFuture, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
+use tracing::Instrument;
 
 const MAX_BODY: usize = 8 * 1024 * 1024;
 const PIPELINE_BATCHES: usize = 2;
@@ -36,6 +37,7 @@ struct App {
     bucket: Box<Bucket>,
     heap_limits: heap::Limits,
     heap_heads: Arc<Semaphore>,
+    metrics: metrics_exporter_prometheus::PrometheusHandle,
 }
 
 type Shared = Arc<App>;
@@ -129,7 +131,14 @@ impl App {
         status: StatusCode,
         result: Result<ApiReply<T>, Failure>,
     ) -> Response {
-        match result.unwrap_or_else(|failure| observed(Err(failure), &self.published.borrow())) {
+        let result =
+            result.unwrap_or_else(|failure| observed(Err(failure), &self.published.borrow()));
+        let milestone = match &result {
+            Ok(body) => &body.timelines.datashed.milestone,
+            Err(failure) => &failure.timelines.datashed.milestone,
+        };
+        tracing::Span::current().record("milestone", tracing::field::display(milestone));
+        match result {
             Ok(body) => (status, Json(body)).into_response(),
             Err(failure) => failure.into_response(),
         }
@@ -233,10 +242,7 @@ async fn commit(
     let result = async {
         let form =
             form.map_err(|error| Failure::new(error.status(), "invalid_multipart", error))?;
-        let admission = app
-            .admission
-            .clone()
-            .acquire_owned()
+        let admission = obs::measured("admission", "commit", app.admission.clone().acquire_owned())
             .await
             .map_err(|_| stopped())?;
         let mut request = Commit::read(form, &app.heap_limits).await?;
@@ -252,6 +258,9 @@ async fn commit(
                 .map_err(|_| stopped())?;
             heap::verify_children(&mut request.proofs, &app.bucket, app.heap_heads.clone()).await;
         }
+        tracing::Span::current()
+            .record("flow", &request.flow)
+            .record("viewpoint", request.viewpoint.decimal());
         let (reply, result) = oneshot::channel();
         let queued = tracing::enabled!(tracing::Level::DEBUG)
             .then(|| (request.flow.clone(), request.viewpoint.decimal()));
@@ -260,6 +269,7 @@ async fn commit(
                 request,
                 reply,
                 admission,
+                trace: obs::Submission::new("commit"),
             }))
             .await
             .map_err(|_| stopped())?;
@@ -280,11 +290,13 @@ fn stopped() -> Failure {
     )
 }
 struct QueuedCommit {
+    trace: obs::Submission,
     request: Commit,
     admission: OwnedSemaphorePermit,
     reply: oneshot::Sender<ApiReply<Position>>,
 }
 struct QueuedReservation {
+    trace: obs::Submission,
     request: heap::Request,
     admission: OwnedSemaphorePermit,
     reply: oneshot::Sender<ApiReply<heap::Outcome>>,
@@ -319,6 +331,7 @@ enum Message {
         reply: oneshot::Sender<Result<()>>,
     },
     Status {
+        span: tracing::Span,
         flow: String,
         reply: oneshot::Sender<ApiReply<EpilogueStatus>>,
     },
@@ -335,9 +348,13 @@ impl Message {
                     .send(Err(anyhow::anyhow!("publication stopped")));
             }
             Self::Commit(c) => {
+                c.trace
+                    .finish("failed", prefix.milestone(), !c.reply.is_closed());
                 let _ = c.reply.send(observed(Err(stopped()), prefix));
             }
             Self::Reserve(r) => {
+                r.trace
+                    .finish("failed", prefix.milestone(), !r.reply.is_closed());
                 let _ = r.reply.send(observed(Err(stopped()), prefix));
             }
             Self::InspectCommit { reply, .. } => {
@@ -385,9 +402,14 @@ async fn epilogue_status(
             query.map_err(|error| Failure::new(error.status(), "invalid_query", error))?;
         let flow = event::normalize_flow(&query.flow).map_err(Failure::bad)?;
         basinsync::epilogue::check_flow_key(&flow, &Viewpoint::zero()).map_err(Failure::bad)?;
+        tracing::Span::current().record("flow", &flow);
         let (reply, result) = oneshot::channel();
         app.queue
-            .send(Message::Status { flow, reply })
+            .send(Message::Status {
+                flow,
+                reply,
+                span: tracing::Span::current(),
+            })
             .await
             .map_err(|_| stopped())?;
         result.await.map_err(|_| stopped())
@@ -398,12 +420,13 @@ async fn epilogue_status(
 
 async fn heap_reserve(State(app): State<Shared>, body: axum::extract::Request) -> Response {
     let result = async {
-        let admission = app
-            .admission
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| stopped())?;
+        let admission = obs::measured(
+            "admission",
+            "reserve",
+            app.admission.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| stopped())?;
         let body = Bytes::from_request(body, &app).await.map_err(|e| {
             Failure::new(e.status(), "invalid_request", "invalid heap request body")
         })?;
@@ -428,12 +451,16 @@ async fn heap_reserve(State(app): State<Shared>, body: axum::extract::Request) -
                 .verify_children(&app.bucket, app.heap_heads.clone())
                 .await;
         }
+        tracing::Span::current()
+            .record("flow", &request.flow)
+            .record("viewpoint", request.viewpoint.decimal());
         let (reply, result) = oneshot::channel();
         app.queue
             .send(Message::Reserve(QueuedReservation {
                 request,
                 admission,
                 reply,
+                trace: obs::Submission::new("reserve"),
             }))
             .await
             .map_err(|_| stopped())?;
@@ -480,12 +507,7 @@ async fn shutdown_signal() -> std::io::Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "basinsync=info".into()),
-        )
-        .init();
+    let metrics = obs::init()?;
     s3::set_retries(0);
     let region = Region::Custom {
         region: env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".into()),
@@ -504,9 +526,13 @@ async fn main() -> Result<()> {
     let bucket = Bucket::new(&required("S3_BUCKET")?, region, credentials)?
         .with_path_style()
         .with_request_timeout(Duration::from_secs(10))?;
-    let state = timeline::recover_with(&bucket, basinsync::recovery::Config::from_env()?)
-        .await
-        .context("recover Datashed Timeline")?;
+    let state = obs::measured(
+        "recovery",
+        "datashed",
+        timeline::recover_with(&bucket, basinsync::recovery::Config::from_env()?),
+    )
+    .await
+    .context("recover Datashed Timeline")?;
     let (published, published_rx) = watch::channel(state.prefix());
     let next = &state.milestone + 1u8;
     timeline::key(&next)?;
@@ -627,6 +653,7 @@ async fn main() -> Result<()> {
         bucket: signing_bucket,
         heap_limits,
         heap_heads: Arc::new(Semaphore::new(8)),
+        metrics,
     });
     let api = Router::new()
         .route("/epilogue", put(commit))
@@ -646,9 +673,23 @@ async fn main() -> Result<()> {
                 "method not allowed",
             ))
         });
+    let telemetry_upkeep = tokio::spawn(obs::upkeep(app.metrics.clone(), shutdown_rx.clone()));
     let admission = app.admission.clone();
     let router = Router::new()
         .nest("/api/v0", api)
+        .route(
+            "/metrics",
+            get(|State(app): State<Shared>| async move {
+                (
+                    [(
+                        axum::http::header::CONTENT_TYPE,
+                        "text/plain; version=0.0.4; charset=utf-8",
+                    )],
+                    app.metrics.render(),
+                )
+            }),
+        )
+        .layer(axum::middleware::from_fn(obs::http))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(app);
     let address: SocketAddr = env::var("BASINSYNC_LISTEN")
@@ -682,6 +723,9 @@ async fn main() -> Result<()> {
             None => server.await,
         };
         let worker = supervisor.await.context("worker supervisor panicked")?;
+        telemetry_upkeep
+            .await
+            .context("telemetry upkeep panicked")?;
         served?;
         worker
     })

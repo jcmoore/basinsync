@@ -8,6 +8,7 @@
 [diy/0z005/deep-heap-support]: <diy/0z005/deep-heap-support/README.md>
 [diy/0z006/commit-marker-edges-with-node-promotion]: <diy/0z006/commit-marker-edges-with-node-promotion/README.md>
 [diy/0z007/shallow-datashed-backup-nodes]: <diy/0z007/shallow-datashed-backup-nodes/README.md>
+[diy/0z008/observability]: <diy/0z008/observability/README.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [object-keys]: <object-keys.md>
 
@@ -44,5 +45,8 @@ Coalesce and retrieve history with *Timeline recovery acceleration*[~][diy/0z004
 
 Back up paired database graphs with
 *Shallow Datashed backup nodes*[~][diy/0z007/shallow-datashed-backup-nodes].
+
+Inspect request publication and background progress with
+*Observability*[~][diy/0z008/observability].
 
 Audit storage layouts in the *object-key reference*[~][object-keys].

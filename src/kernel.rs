@@ -174,6 +174,7 @@ pub enum Operation {
     },
 }
 pub struct Request {
+    pub span: tracing::Span,
     pub operation: Operation,
     pub reply: tokio::sync::oneshot::Sender<Result<Viewpoint>>,
 }
@@ -428,7 +429,7 @@ pub async fn upload(
     if let Some(timeout) = bucket.request_timeout {
         request = request.timeout(timeout);
     }
-    let response = request.send().await?;
+    let response = request.send().await.map_err(|error| error.without_url())?;
     ensure!(
         response.status().is_success(),
         "kernel node upload returned HTTP {}",

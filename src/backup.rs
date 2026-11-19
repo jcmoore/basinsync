@@ -87,7 +87,11 @@ pub(crate) async fn internal(
 ) -> Result<Viewpoint> {
     let (reply, complete) = tokio::sync::oneshot::channel();
     queue
-        .try_send(crate::kernel::Request { operation, reply })
+        .try_send(crate::kernel::Request {
+            operation,
+            reply,
+            span: tracing::Span::current(),
+        })
         .map_err(|_| anyhow::anyhow!("backup request queue busy or closed"))?;
     complete.await.context("backup handler stopped")?
 }
@@ -127,11 +131,14 @@ async fn publish_roots(
                 cp.verify_headers(&existing.headers())?;
             }
         }
+        metrics::gauge!("basinsync_last_success_timestamp_seconds", "operation"=>"backup")
+            .set(time::OffsetDateTime::now_utc().unix_timestamp() as f64);
         tracing::info!(viewpoint=%cp.viewpoint.decimal(),milestone=%cp.milestone,"Datashed backup graph published");
     }
     Ok(())
 }
 
+#[tracing::instrument(skip_all, name = "datashed.backup")]
 async fn backup_graph(
     bucket: &Bucket,
     snapshot: &Snapshot,
@@ -181,7 +188,12 @@ async fn backup_graph(
         let node = &graph.databases[*id];
         let mut headers = epilogue::conditional_headers();
         headers.insert("x-amz-meta-sha384", node.sha384.parse()?);
-        crate::kernel::upload(bucket, node, file.path(), headers).await?;
+        crate::observability::measured(
+            "upload",
+            "kernelspace",
+            crate::kernel::upload(bucket, node, file.path(), headers),
+        )
+        .await?;
     }
     let etags = crate::kernel::verify(bucket, &graph).await?;
     let blob = graph.encode()?;
@@ -234,7 +246,13 @@ pub async fn run(
         let target = targets.borrow_and_update().clone();
         let mut failed = false;
         if let Some(snapshot) = target.filter(|s| s.activity > completed) {
-            match backup_graph(&bucket, &snapshot, &queue, &mut cache).await {
+            match crate::observability::measured(
+                "backup",
+                "datashed",
+                backup_graph(&bucket, &snapshot, &queue, &mut cache),
+            )
+            .await
+            {
                 Ok(()) => {
                     completed = snapshot.activity.clone();
                     let target = targets.borrow().clone();
@@ -252,9 +270,12 @@ pub async fn run(
             }
         }
         if targets.borrow().is_some()
-            && let Err(error) =
-                crate::kernel::promotion::cycle(&bucket, &targets, &queue, promotion, &mut cache)
-                    .await
+            && let Err(error) = crate::observability::measured(
+                "promotion",
+                "kernelspace",
+                crate::kernel::promotion::cycle(&bucket, &targets, &queue, promotion, &mut cache),
+            )
+            .await
         {
             tracing::warn!(%error,"KernelSpace marking will retry");
         }

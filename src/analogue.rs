@@ -484,7 +484,7 @@ pub async fn run(
     let mut builder: Option<Builder> = None;
     let mut builder_crc32c = 0;
     let mut started = tokio::time::Instant::now();
-    let mut pending = None;
+    let mut pending: Option<(Order, Vec<u8>, Range<usize>, u32)> = None;
     let mut closing = false;
     loop {
         let target = targets.borrow_and_update().milestone().clone();
@@ -528,6 +528,10 @@ pub async fn run(
             }
             next += 1u8;
         }
+        metrics::gauge!("basinsync_analogue_buffer_bytes").set(
+            builder.as_ref().map_or(0, |b| b.len()) as f64
+                + pending.as_ref().map_or(0, |(_, bytes, _, _)| bytes.len()) as f64,
+        );
         let due = builder.as_ref().is_some_and(|b| {
             b.len() >= config.target_bytes
                 || started.elapsed() >= config.max_age
@@ -543,9 +547,16 @@ pub async fn run(
             }
         }
         if let Some((order, bytes, range, base_crc)) = &pending {
-            match publish(&bucket, order, bytes, range.clone(), *base_crc).await {
+            match crate::observability::measured(
+                "publish",
+                "analogue",
+                publish(&bucket, order, bytes, range.clone(), *base_crc),
+            )
+            .await
+            {
                 Ok(()) => {
                     tracing::info!(lowest=%order.lowest, highest=%order.highest, bytes=bytes.len(), "BulkOrder published");
+                    metrics::gauge!("basinsync_last_success_timestamp_seconds", "operation"=>"analogue").set(time::OffsetDateTime::now_utc().unix_timestamp() as f64);
                     pending = None;
                 }
                 Err(error) => {

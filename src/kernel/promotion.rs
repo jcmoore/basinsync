@@ -1,6 +1,7 @@
 //! Bounded promotion of the shallow Datashed backup graphs.
 use super::*;
 use std::{collections::BTreeSet, sync::Arc};
+use tracing::Instrument;
 
 #[derive(Clone, Debug)]
 pub struct Task {
@@ -376,15 +377,18 @@ pub(crate) async fn cycle(
             while running.len() < limits.concurrency {
                 let Some(proof) = pending.next() else { break };
                 let bucket = bucket.clone();
-                running.spawn(async move {
-                    match promote_one(&bucket, &proof).await {
-                        Ok(()) => Some(proof),
-                        Err(error) => {
-                            tracing::warn!(%error,"KernelSpace promotion deferred");
-                            None
+                running.spawn(
+                    async move {
+                        match promote_one(&bucket, &proof).await {
+                            Ok(()) => Some(proof),
+                            Err(error) => {
+                                tracing::warn!(%error,"KernelSpace promotion deferred");
+                                None
+                            }
                         }
                     }
-                });
+                    .in_current_span(),
+                );
             }
             let Some(result) = running.join_next().await else {
                 break;

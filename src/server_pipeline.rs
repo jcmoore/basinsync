@@ -1,7 +1,21 @@
 use super::*;
 use std::collections::BTreeMap;
+fn submission_outcome<T>(
+    result: &std::result::Result<T, Failure>,
+    published: bool,
+) -> &'static str {
+    if !published {
+        return "failed";
+    }
+    match result {
+        Ok(_) => "ok",
+        Err(Failure::Error(status, _)) if status.is_server_error() => "failed",
+        Err(_) => "rejected",
+    }
+}
 
 struct CommitReply {
+    trace: obs::Submission,
     channel: oneshot::Sender<ApiReply<Position>>,
     result: Result<Position, Failure>,
     _admission: OwnedSemaphorePermit,
@@ -14,19 +28,22 @@ enum Reply {
     Cleanup(oneshot::Sender<Result<()>>),
     Commit(CommitReply),
     Reserve {
+        trace: obs::Submission,
         channel: oneshot::Sender<ApiReply<heap::Outcome>>,
         result: Result<heap::Outcome, Failure>,
         _admission: OwnedSemaphorePermit,
     },
 }
 struct Batch {
+    trace: obs::BatchTrace,
     prepared: Option<timeline::Prepared>,
     prefix: timeline::Prefix,
     replies: Vec<Reply>,
     _permit: OwnedSemaphorePermit,
 }
 impl Batch {
-    fn finish(self, published: bool, prefix: &timeline::Prefix) {
+    fn finish(mut self, published: bool, prefix: &timeline::Prefix) {
+        self.trace.finish(published);
         for reply in self.replies {
             match reply {
                 Reply::Kernel { channel, viewpoint } => {
@@ -49,14 +66,25 @@ impl Batch {
                     } else {
                         Err(stopped())
                     };
+                    reply.trace.finish(
+                        submission_outcome(&result, published),
+                        prefix.milestone(),
+                        !reply.channel.is_closed(),
+                    );
                     let _ = reply.channel.send(observed(result, prefix));
                 }
                 Reply::Reserve {
+                    trace,
                     channel,
                     result,
                     _admission,
                 } => {
                     let result = if published { result } else { Err(stopped()) };
+                    trace.finish(
+                        submission_outcome(&result, published),
+                        prefix.milestone(),
+                        !channel.is_closed(),
+                    );
                     let _ = channel.send(observed(result, prefix));
                 }
             }
@@ -124,9 +152,12 @@ async fn publish(
             }
             match message {
                 Publication::Batch(mut batch) => {
+                    let span=batch.trace.span.clone();
+                    async {
+                    batch.trace.publishing();
                     let snapshot = batch.prepared.as_ref().and_then(|p| p.snapshot());
                     let next = match batch.prepared.take() {
-                        Some(prepared) => match prepared.publish_with_bytes(&bucket, &prefix).await {
+                        Some(prepared) => match obs::measured("publish", "timeline", prepared.publish_with_bytes(&bucket, &prefix)).await {
                             Ok((next, bytes)) => {
                                 if let Some(orders) = &orders {
                                     let _ = orders.try_send(basinsync::analogue::DurableEvent { milestone: next.milestone().clone(), bytes });
@@ -148,9 +179,12 @@ async fn publish(
                         backups.send_replace(Some(snapshot));
                     }
                     if advanced {
+                        metrics::gauge!("basinsync_last_success_timestamp_seconds", "operation"=>"timeline").set(time::OffsetDateTime::now_utc().unix_timestamp() as f64);
                         tracing::info!(milestone=%prefix.milestone(), requests=batch.replies.iter().filter(|r|matches!(r,Reply::Commit(CommitReply {result:Ok(_),..})|Reply::Reserve {result:Ok(_),..})).count(), "put of success");
                     }
                     batch.finish(true, &prefix);
+                    Ok::<_, anyhow::Error>(())
+                    }.instrument(span).await?;
                 }
                 Publication::Barrier(reply) => {
                     let _ = reply.send(Ok(prefix.clone()));
@@ -271,267 +305,291 @@ impl Preparation {
             let Some(message) = message else {
                 return Ok(());
             };
-            match message {
-                Message::BackupBarrier(reply) => {
-                    let (barrier, complete) = oneshot::channel();
-                    self.output
-                        .send(Publication::Barrier(barrier))
-                        .await
-                        .map_err(|_| anyhow::anyhow!("publication stopped"))?;
-                    let result = complete
-                        .await
-                        .context("backup barrier stopped")
-                        .and_then(|r| r)
-                        .map(|_| ());
-                    let _ = reply.send(result);
-                }
-                Message::Kernel(request) => {
-                    let permit = self
-                        .batches
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .context("publication stopped")?;
-                    let mut stager = self.write_stager().await?;
-                    let (stager, batch) = tokio::task::spawn_blocking(move || {
-                        match stager.prepare_kernel(request.operation) {
-                            Ok((prepared, viewpoint)) => {
-                                let batch = Batch {
-                                    prefix: stager.prefix(),
-                                    prepared: Some(prepared),
-                                    replies: vec![Reply::Kernel {
-                                        channel: request.reply,
-                                        viewpoint,
-                                    }],
-                                    _permit: permit,
-                                };
-                                Ok((stager, Some(batch)))
+            let span = match &message {
+                Message::Commit(c) => c.trace.span.clone(),
+                Message::Reserve(r) => r.trace.span.clone(),
+                Message::Status { span, .. } => span.clone(),
+                Message::Kernel(request) => request.span.clone(),
+                _ => tracing::Span::none(),
+            };
+            async {
+                match message {
+                    Message::BackupBarrier(reply) => {
+                        let (barrier, complete) = oneshot::channel();
+                        self.output
+                            .send(Publication::Barrier(barrier))
+                            .await
+                            .map_err(|_| anyhow::anyhow!("publication stopped"))?;
+                        let result = complete
+                            .await
+                            .context("backup barrier stopped")
+                            .and_then(|r| r)
+                            .map(|_| ());
+                        let _ = reply.send(result);
+                    }
+                    Message::Kernel(request) => {
+                        let permit = self
+                            .batches
+                            .clone()
+                            .acquire_owned()
+                            .await
+                            .context("publication stopped")?;
+                        let mut stager = self.write_stager().await?;
+                        let (stager, batch) = tokio::task::spawn_blocking(move || {
+                            let mut trace = obs::BatchTrace::new("kernel");
+                            trace.span.follows_from(request.span.id());
+                            let _entered = trace.span.clone().entered();
+                            match stager.prepare_kernel(request.operation) {
+                                Ok((prepared, viewpoint)) => {
+                                    trace.prepared(stager.prefix().milestone());
+                                    let batch = Batch {
+                                        trace,
+                                        prefix: stager.prefix(),
+                                        prepared: Some(prepared),
+                                        replies: vec![Reply::Kernel {
+                                            channel: request.reply,
+                                            viewpoint,
+                                        }],
+                                        _permit: permit,
+                                    };
+                                    Ok((stager, Some(batch)))
+                                }
+                                Err(error) => {
+                                    trace.finish(false);
+                                    let _ = request.reply.send(Err(error));
+                                    anyhow::ensure!(
+                                        !stager.poisoned(),
+                                        "database group restoration failed"
+                                    );
+                                    Ok((stager, None))
+                                }
                             }
-                            Err(error) => {
-                                let _ = request.reply.send(Err(error));
-                                anyhow::ensure!(
-                                    !stager.poisoned(),
-                                    "database group restoration failed"
-                                );
-                                Ok((stager, None))
+                        })
+                        .await
+                        .context("kernel preparation panicked")??;
+                        self.stager = Some(stager);
+                        if let Some(batch) = batch {
+                            self.output
+                                .send(Publication::Batch(batch))
+                                .await
+                                .map_err(|_| anyhow::anyhow!("publication stopped"))?;
+                        }
+                    }
+                    Message::InspectCommit { mut request, reply } => {
+                        let mut stager = self.write_stager().await?;
+                        let (stager, request) = tokio::task::spawn_blocking(move || {
+                            stager.inspect_children(&request.marker.edges, &mut request.proofs)?;
+                            Ok::<_, anyhow::Error>((stager, request))
+                        })
+                        .await
+                        .context("marker inspection panicked")??;
+                        self.stager = Some(stager);
+                        let _ = reply.send(Ok(request));
+                    }
+                    Message::Promote { command, reply } => {
+                        let permit = self
+                            .batches
+                            .clone()
+                            .acquire_owned()
+                            .await
+                            .context("publication stopped")?;
+                        let mut stager = self.write_stager().await?;
+                        let (stager, batch) = tokio::task::spawn_blocking(move || {
+                            let trace = obs::BatchTrace::new("promotion");
+                            let _entered = trace.span.clone().entered();
+                            let result = stager.prepare_promotion(command);
+                            maintenance_batch(stager, result, reply, permit, trace)
+                        })
+                        .await
+                        .context("promotion preparation panicked")??;
+                        self.stager = Some(stager);
+                        self.output
+                            .send(Publication::Batch(batch))
+                            .await
+                            .map_err(|_| anyhow::anyhow!("publication stopped"))?;
+                    }
+                    Message::InspectHeap { mut request, reply } => {
+                        let mut stager = self.write_stager().await?;
+                        let (stager, request) = tokio::task::spawn_blocking(move || {
+                            stager.inspect_heap(&mut request)?;
+                            Ok::<_, anyhow::Error>((stager, request))
+                        })
+                        .await
+                        .context("heap inspection panicked")??;
+                        self.stager = Some(stager);
+                        let _ = reply.send(Ok(request));
+                    }
+                    Message::Cleanup { command, reply } => {
+                        let permit = self
+                            .batches
+                            .clone()
+                            .acquire_owned()
+                            .await
+                            .context("publication stopped")?;
+                        let mut stager = self.write_stager().await?;
+                        let (stager, batch) = tokio::task::spawn_blocking(move || {
+                            let trace = obs::BatchTrace::new("cleanup");
+                            let _entered = trace.span.clone().entered();
+                            let result = stager.prepare_cleanup(command);
+                            maintenance_batch(stager, result, reply, permit, trace)
+                        })
+                        .await
+                        .context("cleanup preparation panicked")??;
+                        self.stager = Some(stager);
+                        self.output
+                            .send(Publication::Batch(batch))
+                            .await
+                            .map_err(|_| anyhow::anyhow!("publication stopped"))?;
+                    }
+                    Message::Reserve(reservation) => {
+                        let permit = self
+                            .batches
+                            .clone()
+                            .acquire_owned()
+                            .await
+                            .context("publication stopped")?;
+                        let stager = self.write_stager().await?;
+                        let (stager, batch) = tokio::task::spawn_blocking(move || {
+                            prepare_reservation(stager, reservation, permit)
+                        })
+                        .await
+                        .context("reservation preparation panicked")??;
+                        self.stager = Some(stager);
+                        anyhow::ensure!(!*self.halted.borrow(), "publication stopped");
+                        self.output
+                            .send(Publication::Batch(batch))
+                            .await
+                            .map_err(|_| anyhow::anyhow!("publication stopped"))?;
+                    }
+                    Message::Status { flow, reply, .. } => {
+                        let datashed = self.refreshed(false).await?;
+                        let latest = if let Some(viewpoint) = datashed.latest(&flow)? {
+                            let revision = datashed
+                                .flow_revision(&flow)?
+                                .context("missing Flow revision")?;
+                            let mut location = datashed.location(&flow, &viewpoint)?;
+                            // Only retained image-delta fixtures lack an indexed location.
+                            if location.is_none() {
+                                let mut milestone = datashed.milestone.clone();
+                                while milestone > 0u8.into() {
+                                    let bytes = basinsync::object_read::if_present(&self.bucket)?
+                                        .get_object(timeline::key(&milestone)?)
+                                        .await?;
+                                    anyhow::ensure!(
+                                        bytes.status_code() == 200,
+                                        "missing historical marker event"
+                                    );
+                                    if let Some(range) = event::blob_ranges(bytes.as_slice())?
+                                        .into_iter()
+                                        .find(|r| r.flow == flow && r.viewpoint == viewpoint)
+                                    {
+                                        location = Some(basinsync::turso::Location {
+                                            upstream: milestone,
+                                            offset: range.offset,
+                                            length: range.length,
+                                            sha384: range.sha384,
+                                        });
+                                        break;
+                                    }
+                                    milestone -= 1u8;
+                                }
+                            }
+                            let location = location.context("missing committed marker location")?;
+                            let access = if location.length == 0 {
+                                None
+                            } else if basinsync::epilogue::matches_marker(
+                                &self.bucket,
+                                &flow,
+                                &revision,
+                                &viewpoint,
+                                &location,
+                            )
+                            .await?
+                            {
+                                Some(
+                                    basinsync::range_get::presign(
+                                        &self.bucket,
+                                        &basinsync::epilogue::flow_key(
+                                            &flow, &revision, &viewpoint,
+                                        )?,
+                                        8,
+                                        location.length,
+                                    )
+                                    .await?,
+                                )
+                            } else {
+                                Some(
+                                    basinsync::range_get::presign(
+                                        &self.bucket,
+                                        &timeline::key(&location.upstream)?,
+                                        location.offset,
+                                        location.length,
+                                    )
+                                    .await?,
+                                )
+                            };
+                            Some(LatestMarker {
+                                viewpoint,
+                                length: location.length,
+                                access,
+                            })
+                        } else {
+                            None
+                        };
+                        let response = observed(Ok(EpilogueStatus { latest }), &datashed.prefix());
+                        self.stager = Some(datashed.into_stager());
+                        let _ = reply.send(response);
+                    }
+                    Message::Commit(first) => {
+                        let permit = self
+                            .batches
+                            .clone()
+                            .acquire_owned()
+                            .await
+                            .context("publication stopped")?;
+                        let mut size = first.size();
+                        let mut batch = vec![first];
+                        let deadline = tokio::time::Instant::now() + self.batch_wait;
+                        while batch.len() < self.batch_max {
+                            anyhow::ensure!(!*self.halted.borrow(), "publication stopped");
+                            let message = match queue.try_recv() {
+                                Ok(message) => Some(message),
+                                Err(mpsc::error::TryRecvError::Disconnected) => None,
+                                Err(mpsc::error::TryRecvError::Empty) => {
+                                    tokio::time::timeout_at(deadline, self.next(queue))
+                                        .await
+                                        .unwrap_or(Ok(None))?
+                                }
+                            };
+                            match message {
+                                Some(Message::Commit(c)) if size + c.size() <= MAX_BODY => {
+                                    size += c.size();
+                                    batch.push(c);
+                                }
+                                Some(message) => {
+                                    pending = Some(message);
+                                    break;
+                                }
+                                None => break,
                             }
                         }
-                    })
-                    .await
-                    .context("kernel preparation panicked")??;
-                    self.stager = Some(stager);
-                    if let Some(batch) = batch {
+                        let stager = self.write_stager().await?;
+                        let (stager, batch) =
+                            tokio::task::spawn_blocking(move || prepare(stager, batch, permit))
+                                .await
+                                .context("preparation task panicked")??;
+                        self.stager = Some(stager);
+                        anyhow::ensure!(!*self.halted.borrow(), "publication stopped");
                         self.output
                             .send(Publication::Batch(batch))
                             .await
                             .map_err(|_| anyhow::anyhow!("publication stopped"))?;
                     }
                 }
-                Message::InspectCommit { mut request, reply } => {
-                    let mut stager = self.write_stager().await?;
-                    let (stager, request) = tokio::task::spawn_blocking(move || {
-                        stager.inspect_children(&request.marker.edges, &mut request.proofs)?;
-                        Ok::<_, anyhow::Error>((stager, request))
-                    })
-                    .await
-                    .context("marker inspection panicked")??;
-                    self.stager = Some(stager);
-                    let _ = reply.send(Ok(request));
-                }
-                Message::Promote { command, reply } => {
-                    let permit = self
-                        .batches
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .context("publication stopped")?;
-                    let mut stager = self.write_stager().await?;
-                    let (stager, batch) = tokio::task::spawn_blocking(move || {
-                        let result = stager.prepare_promotion(command);
-                        maintenance_batch(stager, result, reply, permit)
-                    })
-                    .await
-                    .context("promotion preparation panicked")??;
-                    self.stager = Some(stager);
-                    self.output
-                        .send(Publication::Batch(batch))
-                        .await
-                        .map_err(|_| anyhow::anyhow!("publication stopped"))?;
-                }
-                Message::InspectHeap { mut request, reply } => {
-                    let mut stager = self.write_stager().await?;
-                    let (stager, request) = tokio::task::spawn_blocking(move || {
-                        stager.inspect_heap(&mut request)?;
-                        Ok::<_, anyhow::Error>((stager, request))
-                    })
-                    .await
-                    .context("heap inspection panicked")??;
-                    self.stager = Some(stager);
-                    let _ = reply.send(Ok(request));
-                }
-                Message::Cleanup { command, reply } => {
-                    let permit = self
-                        .batches
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .context("publication stopped")?;
-                    let mut stager = self.write_stager().await?;
-                    let (stager, batch) = tokio::task::spawn_blocking(move || {
-                        let result = stager.prepare_cleanup(command);
-                        maintenance_batch(stager, result, reply, permit)
-                    })
-                    .await
-                    .context("cleanup preparation panicked")??;
-                    self.stager = Some(stager);
-                    self.output
-                        .send(Publication::Batch(batch))
-                        .await
-                        .map_err(|_| anyhow::anyhow!("publication stopped"))?;
-                }
-                Message::Reserve(reservation) => {
-                    let permit = self
-                        .batches
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .context("publication stopped")?;
-                    let stager = self.write_stager().await?;
-                    let (stager, batch) = tokio::task::spawn_blocking(move || {
-                        prepare_reservation(stager, reservation, permit)
-                    })
-                    .await
-                    .context("reservation preparation panicked")??;
-                    self.stager = Some(stager);
-                    anyhow::ensure!(!*self.halted.borrow(), "publication stopped");
-                    self.output
-                        .send(Publication::Batch(batch))
-                        .await
-                        .map_err(|_| anyhow::anyhow!("publication stopped"))?;
-                }
-                Message::Status { flow, reply } => {
-                    let datashed = self.refreshed(false).await?;
-                    let latest = if let Some(viewpoint) = datashed.latest(&flow)? {
-                        let revision = datashed
-                            .flow_revision(&flow)?
-                            .context("missing Flow revision")?;
-                        let mut location = datashed.location(&flow, &viewpoint)?;
-                        // Only retained image-delta fixtures lack an indexed location.
-                        if location.is_none() {
-                            let mut milestone = datashed.milestone.clone();
-                            while milestone > 0u8.into() {
-                                let bytes = basinsync::object_read::if_present(&self.bucket)?
-                                    .get_object(timeline::key(&milestone)?)
-                                    .await?;
-                                anyhow::ensure!(
-                                    bytes.status_code() == 200,
-                                    "missing historical marker event"
-                                );
-                                if let Some(range) = event::blob_ranges(bytes.as_slice())?
-                                    .into_iter()
-                                    .find(|r| r.flow == flow && r.viewpoint == viewpoint)
-                                {
-                                    location = Some(basinsync::turso::Location {
-                                        upstream: milestone,
-                                        offset: range.offset,
-                                        length: range.length,
-                                        sha384: range.sha384,
-                                    });
-                                    break;
-                                }
-                                milestone -= 1u8;
-                            }
-                        }
-                        let location = location.context("missing committed marker location")?;
-                        let access = if location.length == 0 {
-                            None
-                        } else if basinsync::epilogue::matches_marker(
-                            &self.bucket,
-                            &flow,
-                            &revision,
-                            &viewpoint,
-                            &location,
-                        )
-                        .await?
-                        {
-                            Some(
-                                basinsync::range_get::presign(
-                                    &self.bucket,
-                                    &basinsync::epilogue::flow_key(&flow, &revision, &viewpoint)?,
-                                    8,
-                                    location.length,
-                                )
-                                .await?,
-                            )
-                        } else {
-                            Some(
-                                basinsync::range_get::presign(
-                                    &self.bucket,
-                                    &timeline::key(&location.upstream)?,
-                                    location.offset,
-                                    location.length,
-                                )
-                                .await?,
-                            )
-                        };
-                        Some(LatestMarker {
-                            viewpoint,
-                            length: location.length,
-                            access,
-                        })
-                    } else {
-                        None
-                    };
-                    let response = observed(Ok(EpilogueStatus { latest }), &datashed.prefix());
-                    self.stager = Some(datashed.into_stager());
-                    let _ = reply.send(response);
-                }
-                Message::Commit(first) => {
-                    let permit = self
-                        .batches
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .context("publication stopped")?;
-                    let mut size = first.size();
-                    let mut batch = vec![first];
-                    let deadline = tokio::time::Instant::now() + self.batch_wait;
-                    while batch.len() < self.batch_max {
-                        anyhow::ensure!(!*self.halted.borrow(), "publication stopped");
-                        let message = match queue.try_recv() {
-                            Ok(message) => Some(message),
-                            Err(mpsc::error::TryRecvError::Disconnected) => None,
-                            Err(mpsc::error::TryRecvError::Empty) => {
-                                tokio::time::timeout_at(deadline, self.next(queue))
-                                    .await
-                                    .unwrap_or(Ok(None))?
-                            }
-                        };
-                        match message {
-                            Some(Message::Commit(c)) if size + c.size() <= MAX_BODY => {
-                                size += c.size();
-                                batch.push(c);
-                            }
-                            Some(message) => {
-                                pending = Some(message);
-                                break;
-                            }
-                            None => break,
-                        }
-                    }
-                    let stager = self.write_stager().await?;
-                    let (stager, batch) =
-                        tokio::task::spawn_blocking(move || prepare(stager, batch, permit))
-                            .await
-                            .context("preparation task panicked")??;
-                    self.stager = Some(stager);
-                    anyhow::ensure!(!*self.halted.borrow(), "publication stopped");
-                    self.output
-                        .send(Publication::Batch(batch))
-                        .await
-                        .map_err(|_| anyhow::anyhow!("publication stopped"))?;
-                }
+                Ok::<_, anyhow::Error>(())
             }
+            .instrument(span)
+            .await?;
         }
     }
 }
@@ -541,7 +599,11 @@ fn maintenance_batch(
     result: Result<Option<timeline::Prepared>>,
     reply: oneshot::Sender<Result<()>>,
     permit: OwnedSemaphorePermit,
+    mut trace: obs::BatchTrace,
 ) -> Result<(timeline::Stager, Batch)> {
+    if result.is_err() {
+        trace.preparation_failed();
+    }
     let (prepared, replies) = match result {
         Ok(prepared) => (prepared, vec![Reply::Cleanup(reply)]),
         Err(error) => {
@@ -550,7 +612,9 @@ fn maintenance_batch(
             (None, vec![])
         }
     };
+    trace.prepared(stager.prefix().milestone());
     let batch = Batch {
+        trace,
         prefix: stager.prefix(),
         prepared,
         replies,
@@ -561,9 +625,14 @@ fn maintenance_batch(
 
 fn prepare(
     mut stager: timeline::Stager,
-    requests: Vec<QueuedCommit>,
+    mut requests: Vec<QueuedCommit>,
     permit: OwnedSemaphorePermit,
 ) -> Result<(timeline::Stager, Batch)> {
+    let mut trace = obs::BatchTrace::new("commit");
+    let _entered = trace.span.clone().entered();
+    for request in &mut requests {
+        request.trace.assigned(&trace);
+    }
     let mut expected = BTreeMap::<String, Viewpoint>::new();
     let mut commands = Vec::new();
     let mut replies = Vec::new();
@@ -600,6 +669,7 @@ fn prepare(
             Ok(Position { viewpoint })
         };
         replies.push(Reply::Commit(CommitReply {
+            trace: queued.trace,
             channel: queued.reply,
             result,
             _admission: queued.admission,
@@ -611,6 +681,7 @@ fn prepare(
         match stager.prepare(commands) {
             Ok(prepared) => Some(prepared),
             Err(error) => {
+                trace.preparation_failed();
                 anyhow::ensure!(!stager.poisoned(), "database group restoration failed");
                 for reply in &mut replies {
                     if let Reply::Commit(reply) = reply
@@ -628,6 +699,7 @@ fn prepare(
         }
     };
     let prefix = stager.prefix();
+    trace.prepared(prefix.milestone());
     if prepared.is_some() {
         tracing::debug!(milestone=%prefix.milestone(), "batch prepared");
     } else {
@@ -636,6 +708,7 @@ fn prepare(
     Ok((
         stager,
         Batch {
+            trace,
             prepared,
             prefix,
             replies,
@@ -646,9 +719,12 @@ fn prepare(
 
 fn prepare_reservation(
     mut stager: timeline::Stager,
-    reservation: QueuedReservation,
+    mut reservation: QueuedReservation,
     permit: OwnedSemaphorePermit,
 ) -> Result<(timeline::Stager, Batch)> {
+    let mut trace = obs::BatchTrace::new("reserve");
+    let _entered = trace.span.clone().entered();
+    reservation.trace.assigned(&trace);
     let expected = stager.expected(&reservation.request.flow)?;
     let (prepared, result) = if reservation.request.viewpoint != expected {
         (
@@ -663,6 +739,7 @@ fn prepare_reservation(
         match stager.prepare_heap(&reservation.request) {
             Ok((prepared, outcome)) => (prepared, Ok(outcome)),
             Err(error) => {
+                trace.preparation_failed();
                 anyhow::ensure!(!stager.poisoned(), "database group restoration failed");
                 (
                     None,
@@ -676,12 +753,15 @@ fn prepare_reservation(
         }
     };
     let prefix = stager.prefix();
+    trace.prepared(prefix.milestone());
     Ok((
         stager,
         Batch {
+            trace,
             prepared,
             prefix,
             replies: vec![Reply::Reserve {
+                trace: reservation.trace,
                 channel: reservation.reply,
                 result,
                 _admission: reservation.admission,
@@ -743,11 +823,17 @@ impl Worker {
             drop(kernel_queue);
             None
         };
+        let telemetry_snapshots = snapshots.clone();
         let snapshots = (!self.cleanup.interval.is_zero()).then_some(snapshots);
         let backups = Some(targets);
         let (output, receiver) = mpsc::channel(PIPELINE_BATCHES - 1);
         let published_rx = published.subscribe();
         let (signal, halted) = watch::channel(false);
+        let telemetry = tokio::spawn(obs::sample_loop(
+            telemetry_snapshots,
+            shutdown.clone(),
+            halted.clone(),
+        ));
         let batches = Arc::new(Semaphore::new(PIPELINE_BATCHES));
         let stop = Stop {
             signal,
@@ -834,6 +920,7 @@ impl Worker {
             Ok(())
         };
         let backup_result = coordinator.await.context("shutdown coordinator panicked")?;
+        telemetry.await.context("telemetry sampler panicked")?;
         cleanup_result?;
         backup_result?;
         kernel_bridge
@@ -972,7 +1059,7 @@ async fn cleanup_loop(
             Ok::<_, anyhow::Error>(())
         };
         // Finish the current phase (including S3 cleanup) rather than dropping it.
-        if let Err(error) = cycle.await {
+        if let Err(error) = obs::measured("cleanup", "userspace", cycle).await {
             tracing::warn!(%error,"cleanup deferred");
         }
     }

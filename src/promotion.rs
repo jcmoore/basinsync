@@ -3,6 +3,7 @@ use crate::{heap, lexidecimal::Viewpoint};
 use anyhow::{Context, Result, ensure};
 use num_bigint::BigUint;
 use std::{collections::BTreeSet, num::NonZeroUsize};
+use tracing::Instrument;
 use turso_core::{Connection, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,24 +75,27 @@ pub async fn confirm_signs(
                 break;
             };
             let bucket = bucket.clone();
-            running.spawn(async move {
-                let result = async {
-                    let key = crate::epilogue::flow_promotion_key(
-                        &task.flow,
-                        &task.revision,
-                        &Viewpoint::parse(&task.viewpoint)?,
-                    )?;
-                    crate::epilogue::confirm_promotion_sign(&bucket, &key, &task.upstream).await
-                }
-                .await;
-                match result {
-                    Ok(()) => Some(ConfirmedSign { task }),
-                    Err(error) => {
-                        tracing::warn!(%error,"PromotionSign deferred");
-                        None
+            running.spawn(
+                async move {
+                    let result = async {
+                        let key = crate::epilogue::flow_promotion_key(
+                            &task.flow,
+                            &task.revision,
+                            &Viewpoint::parse(&task.viewpoint)?,
+                        )?;
+                        crate::epilogue::confirm_promotion_sign(&bucket, &key, &task.upstream).await
+                    }
+                    .await;
+                    match result {
+                        Ok(()) => Some(ConfirmedSign { task }),
+                        Err(error) => {
+                            tracing::warn!(%error,"PromotionSign deferred");
+                            None
+                        }
                     }
                 }
-            });
+                .in_current_span(),
+            );
         }
         let Some(result) = running.join_next().await else {
             break;
@@ -270,6 +274,7 @@ async fn source_context(
         .collect::<Result<_>>()
 }
 
+#[tracing::instrument(skip_all, name = "s3.copy")]
 pub(crate) async fn conditional_copy(
     bucket: &s3::Bucket,
     source: &str,
@@ -277,30 +282,44 @@ pub(crate) async fn conditional_copy(
     etag: &str,
     context: &std::collections::BTreeMap<String, String>,
 ) -> Result<u16> {
-    let mut headers = std::collections::BTreeMap::from([
-        ("If-None-Match".into(), "*".into()),
-        (
-            "x-amz-copy-source".into(),
-            format!("{}/{}", bucket.name(), source),
-        ),
-        ("x-amz-copy-source-if-match".into(), etag.into()),
-        ("x-amz-metadata-directive".into(), "REPLACE".into()),
-        ("x-amz-meta-basinsync-source-etag".into(), etag.into()),
-    ]);
-    headers.extend(context.clone());
-    let access = crate::range_get::signed_request(bucket, destination, "PUT", headers).await?;
-    let mut request = bucket.http_client().put(&access.url).body(Vec::new());
-    for (name, value) in access.headers {
-        request = request.header(name, value);
+    let timer = crate::observability::Timer::new("copy", "heap");
+    let result = async {
+        let mut headers = std::collections::BTreeMap::from([
+            ("If-None-Match".into(), "*".into()),
+            (
+                "x-amz-copy-source".into(),
+                format!("{}/{}", bucket.name(), source),
+            ),
+            ("x-amz-copy-source-if-match".into(), etag.into()),
+            ("x-amz-metadata-directive".into(), "REPLACE".into()),
+            ("x-amz-meta-basinsync-source-etag".into(), etag.into()),
+        ]);
+        headers.extend(context.clone());
+        let access = crate::range_get::signed_request(bucket, destination, "PUT", headers).await?;
+        let mut request = bucket.http_client().put(&access.url).body(Vec::new());
+        for (name, value) in access.headers {
+            request = request.header(name, value);
+        }
+        if let Some(timeout) = bucket.request_timeout {
+            request = request.timeout(timeout);
+        }
+        let response = request.send().await.map_err(|error| error.without_url())?;
+        let status = response.status().as_u16();
+        // COPY may embed an error in HTTP 200; the verified HEAD is authoritative.
+        response
+            .bytes()
+            .await
+            .map_err(|error| error.without_url())?;
+        metrics::counter!("basinsync_s3_copy_total", "status"=>status.to_string()).increment(1);
+        Ok::<_, anyhow::Error>(status)
     }
-    if let Some(timeout) = bucket.request_timeout {
-        request = request.timeout(timeout);
-    }
-    let response = request.send().await?;
-    let status = response.status().as_u16();
-    // COPY may embed an error in HTTP 200; the verified HEAD is authoritative.
-    response.bytes().await?;
-    Ok(status)
+    .await;
+    timer.finish(
+        result
+            .as_ref()
+            .is_ok_and(|status| (200..300).contains(status)),
+    );
+    result
 }
 pub async fn promote_one(bucket: &s3::Bucket, node: &Node) -> Result<()> {
     ensure!(!node.etag.is_empty(), "marked node has no verified ETag");
@@ -336,15 +355,24 @@ pub async fn promote(bucket: &s3::Bucket, nodes: Vec<Node>, concurrency: usize) 
                 break;
             };
             let bucket = bucket.clone();
-            running.spawn(async move {
-                match promote_one(&bucket, &node).await {
-                    Ok(()) => Some(node),
-                    Err(error) => {
-                        tracing::warn!(%error,"heap promotion deferred");
-                        None
+            running.spawn(
+                async move {
+                    match crate::observability::measured(
+                        "promotion",
+                        "userspace",
+                        promote_one(&bucket, &node),
+                    )
+                    .await
+                    {
+                        Ok(()) => Some(node),
+                        Err(error) => {
+                            tracing::warn!(%error,"heap promotion deferred");
+                            None
+                        }
                     }
                 }
-            });
+                .in_current_span(),
+            );
         }
         let Some(result) = running.join_next().await else {
             break;

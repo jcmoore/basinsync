@@ -1,4 +1,5 @@
 [conditional-write]: <glossary/conditional-write.md>
+[observability]: <observability.md>
 [sha384]: <glossary/sha384.md>
 [versitygw]: <https://github.com/versity/versitygw/releases/tag/v1.11.0>
 [viewpoint]: <glossary/viewpoint.md>
@@ -35,3 +36,6 @@ Keep the internal request handler available until active producers finish their
 durable updates. `BASINSYNC_SHUTDOWN_TIMEOUT_MS` defaults to `30000`; exhausting
 it exits unsuccessfully and leaves in-flight outcomes for recovery. Test these
 boundaries with gated I/O, disconnects, source failures, and shutdown signals.
+
+Inspect request/batch correlation and scrape process-local metrics through the
+*observability interface*[~][observability].
