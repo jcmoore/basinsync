@@ -1,0 +1,53 @@
+name: Prompt request
+description: Propose a change for a maintainer to implement with their coding agent.
+title: "[Prompt request]: "
+labels: ["prompt-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the change you want. Maintainers can discuss, decline, or accept
+        it, then implement it using their own tools. Submission does not start an
+        agent or guarantee implementation. Please do not include secrets.
+  - type: textarea
+    id: change
+    attributes:
+      label: Requested change
+      description: What should change, and why? Include relevant examples.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Describe observable behavior that would satisfy this request.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and context
+      description: Scope boundaries, compatibility needs, related issues, or suggested approach.
+  - type: dropdown
+    id: attribution
+    attributes:
+      label: Attribution preference
+      description: The implementing maintainer opens the PR. Choose how your prompt contribution is credited.
+      options:
+        - Acknowledge my GitHub account
+        - Commit co-authorship (opt in)
+        - No additional credit
+      default: 0
+    validations:
+      required: true
+  - type: input
+    id: coauthor
+    attributes:
+      label: Co-author identity
+      description: 'For co-authorship only: Name <GitHub-associated email>. A GitHub no-reply address is welcome. This identity will be public in Git history. Subject to project authorship policy.'
+      placeholder: 'Your Name <your-GitHub-no-reply-address>'
+  - type: markdown
+    attributes:
+      value: |
+        Choosing no additional credit does not anonymize this issue or its author.
+        You can clarify your preference in the discussion before implementation.

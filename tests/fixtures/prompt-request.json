@@ -1,0 +1,23 @@
+{
+  "issue": {
+    "html_url": "https://github.com/jcmoore/basinsync/issues/1",
+    "number": 1,
+    "title": "[Offline example] Document the local prompt-request workflow",
+    "user": {"login": "example-requester"},
+    "body": "### Requested change\n\nDocument how a maintainer can implement a prompt request on their own device.\n\n### Acceptance criteria\n\nExplain manual selection, local implementation, checks, and preparing a linked PR.\n\n### Constraints and context\n\nNo hosted server is needed for this first experiment.\n\n### Attribution preference\n\nAcknowledge my GitHub account\n\n### Co-author identity\n\n_No response_",
+    "state": "open",
+    "updated_at": "2026-11-20T21:00:00Z",
+    "labels": [{"name": "prompt-request"}],
+    "assignees": [],
+    "comments": 1
+  },
+  "comments": [
+    {
+      "id": 1001,
+      "html_url": "https://github.com/jcmoore/basinsync/issues/1#issuecomment-1001",
+      "user": {"login": "example-maintainer"},
+      "body": "Offline example only: start with a skill and manual handoff. This is not a real issue or an authorization to run.",
+      "updated_at": "2026-11-20T21:01:00Z"
+    }
+  ]
+}
