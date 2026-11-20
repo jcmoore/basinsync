@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prompt request"
+  short_description: "Implement a maintainer-selected issue locally"
+  default_prompt: "Use $prompt-request to implement the accepted issue at the supplied URL and prepare a PR draft."
