@@ -1,6 +1,7 @@
 [development]: <development.md>
 [diy/0zg9/261121-durable-test-suites]: <diy/0zg9/261121-durable-test-suites/README.md>
 [docs]: <../docs/README.md>
+[verification]: <verification.md>
 
 # Repository notes
 
@@ -15,3 +16,5 @@ Build this repository with the *repository development notes*[~][development].
 
 Keep the test suites small and resilient with
 *Durable test suites*[~][diy/0zg9/261121-durable-test-suites].
+
+Weigh proof tools for the riskiest protocols in the *verification notes*[~][verification].
