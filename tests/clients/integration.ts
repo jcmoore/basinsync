@@ -17,6 +17,7 @@ import { all as envelopes, before as previousEnvelope, message as envelopeMessag
 import { stress } from "./stress";
 import { s3Fixture } from "./s3-fixture";
 import { objectKeys } from "./object-keys";
+import { vectors } from "./vectors";
 import { committedKeys } from "./listing";
 
 // Cursor cases below assert positions; full capability
@@ -459,18 +460,19 @@ try {
   {
     const name=await bucket(),app=await server(name,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     const node:HeapNode={auth:[0,0,bytes("flow-id-case-test")],length:1,edges:[]};
-    const mixed="MiXeD.Id_0-",canonical=mixed.toLowerCase();
+    const flowIds=vectors<{normalized:[string,string][];maxLength:number;invalid:string[]}>("flow-ids");
+    const [mixed,canonical]=flowIds.normalized[0]!;
     await status(await reserveHeap(app.url,mixed,0n,[node]),200);
     await assertManifestRange(name,1n); // Ingestion-only entries also carry a manifest.
     await status(await commit(app.url,canonical,a,0n),201);
     assert.equal((await fullStatus(app.url,mixed)).latest?.viewpoint,0n);
     await mismatch(await commit(app.url,mixed,a,0n),1n);
     await status(await reserveHeap(app.url,mixed,0n,[node]),409);
-    const longest="A".repeat(160);
+    const longest="A".repeat(flowIds.maxLength);
     const longestResponse=await commit(app.url,longest,a,0n);await status(longestResponse.clone(),201);
     const portableTip=parse<CommitResponse>(await longestResponse.text()).timelines.basin.milestone;
     assert.equal((await fullStatus(app.url,longest.toLowerCase())).latest?.viewpoint,0n);
-    for(const invalid of ["", ".", "..", "/", "a/b", "a\\b", "a b", "a\tb", "a\0b", "雪", "%2f", "a?b", "a#b", "a:b", "a".repeat(161)]){
+    for(const invalid of [...flowIds.invalid,"a".repeat(flowIds.maxLength+1)]){
       await status(await commit(app.url,invalid,a,0n),400);
       await status(await reserveHeap(app.url,invalid,0n,[node]),400);
       await status(await fetch(`${app.url}/api/v0/epilogue/status?${new URLSearchParams({flow:invalid})}`),400);
