@@ -43,7 +43,7 @@ run="${CLEANROOM_ROOT:-$HOME/cleanroom}/$name"
 ws="$run/workspace"
 [ -d "$ws/.git" ] || { echo "no clean room at $run; run setup.sh first" >&2; exit 1; }
 
-for tool in srt bwrap socat rg git cargo quint java node bun go; do
+for tool in srt bwrap socat rg git cargo quint java node bun go versitygw; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
 cargo kani --version >/dev/null 2>&1 || { echo "missing tool: cargo kani" >&2; exit 1; }
@@ -78,7 +78,9 @@ print(json.dumps({
     },
     "network": {
         "allowedDomains": domains + [
+            # The Go module proxy redirects module downloads to Google Cloud Storage.
             "crates.io", "*.crates.io", "registry.npmjs.org", "proxy.golang.org",
+            "storage.googleapis.com",
             "sum.golang.org", "docs.rs", "doc.rust-lang.org", "quint.sh",
             "model-checking.github.io"],
         "deniedDomains": [],
@@ -157,13 +159,16 @@ fi
 
 prompt="Read AGENTS.md and carry out the clean-room rebuild it describes. Work until every deliverable is done or blocked, committing as you go."
 log="$run/logs/$agent-$(date -u +%Y%m%dT%H%M%SZ).jsonl"
+# Builtins only: a stopping unit kills child processes such as date(1).
 status() {
+  local now; TZ=UTC printf -v now '%(%Y-%m-%dT%H:%M:%SZ)T' -1
   printf '{"state": "%s", "agent": "%s", "transcript": "%s", "pid": %s, "time": "%s"%s}\n' \
-    "$1" "$agent" "$log" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${2:-}" > "$run/status.json.tmp"
+    "$1" "$agent" "$log" "$$" "$now" "${2:-}" > "$run/status.json.tmp"
   mv "$run/status.json.tmp" "$run/status.json"
 }
 status running
 trap 'code=$?; status finished ", \"exit\": $code"' EXIT
+trap 'trap - EXIT; status stopped ", \"exit\": 143, \"signal\": \"TERM\""; exit 143' TERM INT
 case "$agent" in
   claude)
     # Long tokens pasted from a terminal often pick up wrapped-line whitespace.
