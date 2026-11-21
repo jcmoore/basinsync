@@ -4,17 +4,18 @@ import { encode, decode } from "./diffuse16";
 import { encodeEvent, markerAt } from "./events";
 import { toReference } from "./flexbuffer";
 import { sha384 } from "./client";
+import { vectors } from "./vectors";
 
-test("Diffuse16 reverses nibbles and scatters arbitrary-precision integers", () => {
-  for (const [n, wire] of [[0n,"0w0z"],[1n,"0w1z"],[16n,"0w01z"],[27n,"0wb1z"],[256n,"0w001z"],[-1n,"0wfy"],[-16n,"0w0y"],[-17n,"0wfey"],[-256n,"0w00y"]] as const) {
-    expect(encode(n)).toBe(wire); expect(decode(wire)).toBe(n);
-  }
+const shared = vectors<{canonical:[string,string][];invalid:string[]}>("diffuse16");
+
+test("Diffuse16 shared vectors and arbitrary-precision round trips", () => {
+  for (const [n, wire] of shared.canonical) { expect(encode(BigInt(n))).toBe(wire); expect(decode(wire)).toBe(BigInt(n)); }
+  for (const bad of shared.invalid) expect(() => decode(bad)).toThrow();
   for (let i=0;i<256;i++) {
     const value=BigInt(`0x${randomBytes(200).toString("hex")}`);
     expect(decode(encode(value))).toBe(value);
     expect(decode(encode(~value))).toBe(~value);
   }
-  for (const wire of ["", "0wz", "0w00z", "0w10z", "0wFz", "0w-1z"]) expect(()=>decode(wire)).toThrow();
 });
 
 test("FlexBuffers uses a unary command vector and exact binary blobs", () => {
