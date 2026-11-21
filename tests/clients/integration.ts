@@ -386,7 +386,8 @@ try {
     const app=await server(b,proxy.url,{BASINSYNC_BULK_MAX_AGE_MS:"10",BASINSYNC_BULK_TARGET_BYTES:"1"});
     await status(await commit(app.url,"bulk-margin",a,0n),201);
     await eventually(async()=>proxy.retries(),n=>n===3);
-    const archives=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/analogue/"}));assert.equal(archives.KeyCount,1);
+    // The last counted retry may still be uploading; VersityGW lists its temporary file until the PUT completes.
+    const archives=await eventually(()=>s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/analogue/"})),r=>r.KeyCount===1);
     const {object,body}=await eventually(async()=>{const object=await s3.send(new GetObjectCommand({Bucket:b,Key:archives.Contents![0].Key!}));return {object,body:await object.Body!.transformToByteArray()};},r=>envelopes(r.body).at(-1)!.content[0]===3);
     const order=decodeBulkOrder(body);
     assert.deepEqual(order.events[0],trimRetryMargins(await get(b,1n)));assert.equal(envelopes(body).at(-1)!.content[0],3);
