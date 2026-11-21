@@ -16,7 +16,7 @@ if command -v systemctl >/dev/null; then
     -p ExecMainStatus -p MemoryCurrent -p MemoryPeak -p MemoryMax \
     -p ActiveEnterTimestamp 2>/dev/null || true)"
 fi
-ooms="$(journalctl --user -u "$unit" --no-pager -q 2>/dev/null | grep -ci 'oom' || true)"
+ooms="$(journalctl --user -u "$unit" --no-pager -q 2>/dev/null | grep -ci 'killed by the OOM killer' || true)"
 RUN="$run" SYSTEMD="$systemd" OOMS="$ooms" BRIEF="$brief" python3 -I - <<'EOF'
 import json, os, subprocess, time
 run, brief = os.environ["RUN"], os.environ["BRIEF"] == "1"
@@ -37,7 +37,7 @@ if unit:
     print(f"unit: {unit.get('ActiveState')}/{unit.get('SubState')} since "
           f"{unit.get('ActiveEnterTimestamp') or '-'}; memory {size(unit.get('MemoryCurrent', ''))}"
           f" (peak {size(unit.get('MemoryPeak', ''))}, cap {size(unit.get('MemoryMax', ''))});"
-          f" OOM log lines {os.environ['OOMS']}")
+          f" OOM kills {os.environ['OOMS']}")
 log = status.get("transcript", "")
 events, actions, errors = 0, [], []
 if log and os.path.exists(log):
