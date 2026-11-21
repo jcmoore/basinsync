@@ -17,6 +17,7 @@ import { all as envelopes, before as previousEnvelope, message as envelopeMessag
 import { stress } from "./stress";
 import { s3Fixture } from "./s3-fixture";
 import { objectKeys } from "./object-keys";
+import { committedKeys } from "./listing";
 
 // Cursor cases below assert positions; full capability
 // responses and their byte ranges are exercised separately.
@@ -167,8 +168,8 @@ async function badStartup(bucket: string) {
 
 function isBasinPut(request:Request){const path=new URL(request.url).pathname;return request.method==="PUT"&&path.includes("/epilogue/0y")&&!path.includes(`/${objectKeys.userFlows}`);}
 async function flowRevisions(b:string):Promise<Record<string,string>> {
-  const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}));let image:Uint8Array|undefined;
-  for(const m of (list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1)){
+  let image:Uint8Array|undefined;
+  for(const m of (await committedKeys(s3,b,objectKeys.timeline)).map(fromKey).sort((a,b)=>a<b?-1:1)){
     const d=deltasAt(await get(b,m)).turso["default.turso"]!;
     image??=new Uint8Array(d.logical.base!);
     if("segments" in d.physical)image=ingestWal(image,d.physical.segments);
@@ -1270,8 +1271,7 @@ try {
     const b=await bucket(),flows=new Set<string>(),heads=new Map<string,number>();let mode="normal",target="",rootId="",checkedDeletion=false;
     const slow=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let hold=false;
     async function image(){
-      const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}));
-      const moments=(list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1);
+      const moments=(await committedKeys(s3,b,objectKeys.timeline)).map(fromKey).sort((a,b)=>a<b?-1:1);
       let bytes:Uint8Array|undefined;
       for(const m of moments){const d=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;bytes=ingestWal(bytes??d.logical.base!,d.physical.segments);}
       assert(bytes);return bytes;
@@ -1364,9 +1364,8 @@ try {
     const b=await bucket();let holdCopies=false,rootPath="",rootYoung="",copyCount=0,deleteFailed=false,ambiguous=true;
     const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     async function image(){
-      const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}));
       let bytes:Uint8Array|undefined;
-      for(const m of (list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1)){
+      for(const m of (await committedKeys(s3,b,objectKeys.timeline)).map(fromKey).sort((a,b)=>a<b?-1:1)){
         const d=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;
         bytes=ingestWal(bytes??d.logical.base!,d.physical.segments);
       }
@@ -1411,8 +1410,7 @@ try {
     await status(await commit(app.url,"graph",bytes("marker"),0n,undefined,[{auth:parent.auth},{auth:parent.auth}]),201);
     const markerImage=await image();const owner=`_m_graph/v.${lex(0n)}/e.${lex(0n)}`;
     assert((await inspect(parentId,owner,markerImage)).retained);
-    const events=(await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}))).Contents!;
-    const markerEvent=await get(b,events.map(o=>fromKey(o.Key!)).reduce((a,b)=>a>b?a:b));
+    const markerEvent=await get(b,(await committedKeys(s3,b,objectKeys.timeline)).map(fromKey).reduce((a,b)=>a>b?a:b));
     assert.equal((eventTuples(markerEvent)[0]![3] as {markers:Record<string,{edges:string[]}>}).markers.graph!.edges.length,1,"marker edge IDs are deduplicated");
     assert(!Buffer.from(markerEvent).includes(bytes("marker-edge-private-")),"marker auth tokens never persist");
     await mismatch(await commit(app.url,"graph",bytes("wrong"),0n,undefined,[{auth:parent.auth}]),1n);
@@ -1508,8 +1506,8 @@ try {
     const b=await bucket(),flow="sign-0x",attempted=Promise.withResolvers<void>();let target="";
     let stored=false,confirm=false,puts=0;let mismatch=Promise.withResolvers<void>();
     async function counts(image?:Uint8Array){
-      if(!image){const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}));
-      for(const m of (list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1)){const d=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;image=ingestWal(image??d.logical.base!,d.physical.segments);}
+      if(!image){
+      for(const m of (await committedKeys(s3,b,objectKeys.timeline)).map(fromKey).sort((a,b)=>a<b?-1:1)){const d=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;image=ingestWal(image??d.logical.base!,d.physical.segments);}
       }
       assert(image);const path=`${artifacts}/signs-${serial++}.turso`;writeFileSync(path,image);
       const p=spawn([`${root}/target/debug/examples/frame-fixture`,"--graph",path],{cwd:root,stdout:"pipe",stderr:"inherit"});

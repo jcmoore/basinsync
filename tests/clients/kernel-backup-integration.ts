@@ -69,8 +69,9 @@ try {
   const pending=await f.recover(interrupted,"sequential");assert(BigInt(pending.milestone)>=3n);
   reject=false;const restarted=await f.server(interrupted,{BASINSYNC_BACKUP_INTERVAL_MS:"30"},broken);
   const repaired=await eventually(()=>latest(interrupted),Boolean);assert(repaired);
-  await Bun.sleep(150);assert.equal((await f.s3.send(new ListObjectsV2Command({Bucket:interrupted,Prefix:objectKeys.kernelHeap}))).Contents!.length,2,"bookkeeping must not recursively create backups");
-  await f.stop(restarted.process);
+  // Shutdown drains uploads started in this window, so the count is settled.
+  await Bun.sleep(150);await f.stop(restarted.process);
+  assert.equal((await f.s3.send(new ListObjectsV2Command({Bucket:interrupted,Prefix:objectKeys.kernelHeap}))).Contents!.length,2,"bookkeeping must not recursively create backups");
   // Shutdown keeps the internal handler alive while a pinned image PUT is blocked.
   const draining=await f.bucket(),uploadEntered=Promise.withResolvers<void>(),uploadRelease=Promise.withResolvers<void>();let paused=false;
   const blocked=f.relay(async(request,next)=>{if(!paused&&request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.kernelHeap}young/`)){paused=true;uploadEntered.resolve();await uploadRelease.promise;}return next();});

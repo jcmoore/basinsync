@@ -8,6 +8,7 @@ import {encode as lex} from "./lexidecimal";
 import {fromKey,key as timelineKey} from "./timeline";
 import {eventTuples} from "./events";
 import { objectKeys } from "./object-keys";
+import { committedKeys } from "./listing";
 const f=await fixture("kernel-promotion");
 type Node={id:string;revision:string;length:number;sha384:string};
 type Graph={milestone:string;databases:Record<string,Node>};
@@ -15,7 +16,7 @@ const marker=`${objectKeys.basinEpilogue}${lex(-1n)}`,sign=`${objectKeys.basinEp
 const key=(n:Node,g:string)=>`${objectKeys.kernelHeap}${g}/${n.id}/${n.revision}`;
 async function root(bucket:string){const r=await f.s3.send(new GetObjectCommand({Bucket:bucket,Key:marker}));return toObject(message(await r.Body!.transformToByteArray())) as Graph;}
 async function exists(bucket:string,key:string){try{return await f.s3.send(new HeadObjectCommand({Bucket:bucket,Key:key}));}catch(e){if((e as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode===404)return null;throw e;}}
-async function sourceMilestone(bucket:string){const list=await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:objectKeys.timeline}));for(const o of list.Contents!){const r=await f.s3.send(new GetObjectCommand({Bucket:bucket,Key:o.Key!}));if(eventTuples(await r.Body!.transformToByteArray()).some(t=>t[2]==="sts/0/databasin/commitkernel"&&(t[3] as {viewpoint:string}).viewpoint==="0"))return fromKey(o.Key!);}throw Error("missing commitkernel");}
+async function sourceMilestone(bucket:string){for(const Key of await committedKeys(f.s3,bucket,objectKeys.timeline)){const r=await f.s3.send(new GetObjectCommand({Bucket:bucket,Key}));if(eventTuples(await r.Body!.transformToByteArray()).some(t=>t[2]==="sts/0/databasin/commitkernel"&&(t[3] as {viewpoint:string}).viewpoint==="0"))return fromKey(Key);}throw Error("missing commitkernel");}
 async function uploaded(bucket:string){return eventually(()=>root(bucket),Boolean);}
 async function checkGraph(bucket:string,graph:Graph){for(const node of Object.values(graph.databases)){assert.equal(await exists(bucket,key(node,"young")),null);const head=await exists(bucket,key(node,"old"));assert(head);assert.equal(head.ContentLength,node.length);assert.equal(head.Metadata!.sha384,node.sha384);assert(head.Metadata!["basinsync-source-etag"]);const r=await f.s3.send(new GetObjectCommand({Bucket:bucket,Key:key(node,"old")}));assert.equal(sha384(await r.Body!.transformToByteArray()),node.sha384);}}
 try{
