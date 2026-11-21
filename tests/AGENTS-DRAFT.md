@@ -26,6 +26,23 @@ Fewer, stronger tests beat exhaustive coverage of incidental paths.
   reach 100% and still miss defects. Break the behavior once and watch the
   test go red.
 
+## What history taught
+
+Test names were durable; bodies were rewritten by renames of domain terms,
+object-key layouts and wire formats. Invariants (round-trips, replay at every
+prefix, recovery equal to genesis replay, atomic rejection) survived intact.
+
+- **One source for layouts and vectors.** Object-key prefixes and codec wire
+  vectors live in `tests/vectors/*.json`; Rust and TypeScript tests both read
+  them, so a rename is one edit and the implementations must agree.
+- **Don't count incidental structure.** Exact envelope counts, byte offsets
+  and listing sizes broke on format changes; assert the contract instead.
+- **Wait, don't sample.** VersityGW's POSIX backend lists in-flight
+  `.sgwtmp` objects; after background writes, poll with `eventually` before
+  counting listings.
+- **Experiments are not tests.** Record results under `docs/`; keep prototype
+  code out of the default suite.
+
 ## Keep
 
 - Regression tests for specific bugs, named or commented with the bug.
@@ -44,8 +61,11 @@ Fewer, stronger tests beat exhaustive coverage of incidental paths.
 
 ## Measure
 
-Report test count, test lines, suite runtime and coverage before and after.
-Count and lines should drop; the invariants covered must not.
+Report test count, test lines, suite runtime and coverage before and after
+(`cargo nextest run` for timings, `cargo llvm-cov nextest` for coverage).
+Count and lines should drop; the invariants covered must not. Dependencies
+build optimized in dev, so keep property strength and scale it with
+`PROPTEST_CASES` rather than shrinking cases for speed.
 
 ## Sources
 
