@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # Run an agent inside a clean room created by setup.sh, sandboxed with srt.
 #
-#   scripts/cleanroom/run.sh [--agent claude|codex] [--model M] [--check] [--continue] NAME
+#   scripts/cleanroom/run.sh [--agent claude|codex] [--model M] [--memory SIZE]
+#                            [--check] [--continue] [--foreground] NAME
 #   scripts/cleanroom/run.sh --command 'CMD' NAME
+#
+# Runs start detached in their own systemd user unit, cleanroom-NAME, capped at
+# SIZE of memory (default 40% of RAM, no swap); an out-of-memory kill takes the
+# offending process, not the agent or the rest of the machine. Whoever starts a
+# run must then wait for it with wait.sh and report the outcome; status.sh
+# shows progress, memory, recent actions, errors, and the agent's STATUS.md.
 #
 # The sandbox can read and write only the workspace, the agent's own config
 # home, its TMPDIR, and the Quint cache; toolchains are read-only; everything
@@ -15,7 +22,8 @@
 # setup-token`) or ANTHROPIC_API_KEY; codex needs OPENAI_API_KEY.
 set -euo pipefail
 
-agent=claude model="${CLEANROOM_MODEL:-}" check_only=0 resume=0 command=""
+agent=claude model="${CLEANROOM_MODEL:-}" memory="${CLEANROOM_MEMORY_MAX:-}"
+check_only=0 resume=0 command="" foreground=0 inside=0 args=("$@")
 while [ $# -gt 1 ]; do
   case "$1" in
     --agent) agent="$2"; shift 2 ;;
@@ -23,11 +31,15 @@ while [ $# -gt 1 ]; do
     --command) agent=custom command="$2"; shift 2 ;;
     --check) check_only=1; shift ;;
     --continue) resume=1; shift ;;
+    --memory) memory="$2"; shift 2 ;;
+    --foreground) foreground=1; shift ;;
+    --inside) inside=1; foreground=1; shift ;;
     *) break ;;
   esac
 done
-[ $# -eq 1 ] || { sed -n '2,6p' "$0" >&2; exit 2; }
-run="${CLEANROOM_ROOT:-$HOME/cleanroom}/$1"
+[ $# -eq 1 ] || { sed -n '2,12p' "$0" >&2; exit 2; }
+name="$1"
+run="${CLEANROOM_ROOT:-$HOME/cleanroom}/$name"
 ws="$run/workspace"
 [ -d "$ws/.git" ] || { echo "no clean room at $run; run setup.sh first" >&2; exit 1; }
 
@@ -36,6 +48,10 @@ for tool in srt bwrap socat rg git cargo quint java node bun go; do
 done
 cargo kani --version >/dev/null 2>&1 || { echo "missing tool: cargo kani" >&2; exit 1; }
 
+if [ -z "$memory" ]; then
+  memory="$(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0) * 2 / 5 / 1024 ))M"
+  [ "$memory" != "0M" ] || memory=16G
+fi
 home="$HOME"
 mkdir -p "$run/agent/$agent" "$run/tmp" "$run/logs" "$run/cache" "$home/.quint"
 settings="$run/srt-settings.json"
@@ -83,7 +99,7 @@ envs=(
   "XDG_CACHE_HOME=$run/cache/xdg" "XDG_CONFIG_HOME=$run/agent/$agent/config"
   "GIT_AUTHOR_NAME=basinsync clean room" "GIT_AUTHOR_EMAIL=cleanroom@localhost"
   "GIT_COMMITTER_NAME=basinsync clean room" "GIT_COMMITTER_EMAIL=cleanroom@localhost"
-  "GIT_CONFIG_GLOBAL=/dev/null"
+  "GIT_CONFIG_GLOBAL=/dev/null" "CLEANROOM_MEMORY_MAX=$memory"
 )
 extra=()
 # Clear the environment and export only the curated variables. Exporting
@@ -105,14 +121,49 @@ touch .cleanroom-probe && rm .cleanroom-probe || { echo "workspace is not writab
 if curl -sS -m 10 -o /dev/null https://github.com 2>/dev/null; then echo "LEAK: github.com is reachable"; fail=1; fi
 curl -sS -m 10 -o /dev/null https://index.crates.io/config.json || { echo "crates.io is unreachable"; fail=1; }
 exit $fail'
-if ! in_sandbox bash -c "$probe"; then
+if [ "$inside" -eq 0 ] && ! in_sandbox bash -c "$probe"; then
   echo "sandbox probe failed; refusing to run" >&2; exit 1
 fi
-echo "sandbox probe passed"
+[ "$inside" -eq 1 ] || echo "sandbox probe passed"
 [ "$check_only" -eq 0 ] || exit 0
+
+# Detach into a memory-capped systemd unit unless asked to stay in the foreground.
+unit="cleanroom-$name"
+if [ "$foreground" -eq 0 ]; then
+  command -v systemd-run >/dev/null ||
+    { echo "systemd-run is unavailable; rerun with --foreground (no memory cap)" >&2; exit 1; }
+  if systemctl --user is-active --quiet "$unit.service"; then
+    echo "$unit is already running; see scripts/cleanroom/status.sh $name" >&2; exit 1
+  fi
+  systemctl --user reset-failed "$unit.service" 2>/dev/null || true
+  systemctl --user stop "$unit.service" 2>/dev/null || true
+  # Name-only --setenv copies values from this environment, keeping them out of argv.
+  setenvs=(--setenv=CLEANROOM_ROOT="${CLEANROOM_ROOT:-$HOME/cleanroom}")
+  for variable in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY; do
+    [ -z "${!variable:-}" ] || setenvs+=(--setenv="$variable")
+  done
+  systemd-run --user --quiet --unit="$unit" --description="basinsync clean room $name" \
+    -p MemoryMax="$memory" -p MemorySwapMax=0 -p OOMPolicy=continue \
+    -p CPUWeight=50 -p Nice=5 "${setenvs[@]}" \
+    "$(realpath "$0")" --inside "${args[@]}"
+  cat <<EOM
+Started $unit (memory cap $memory).
+Do not end your turn yet: run scripts/cleanroom/wait.sh $name, repeat it while
+it exits 3 (still running), then report the outcome. status.sh $name shows
+progress, memory, recent actions, errors, and blockers at any time.
+EOM
+  exit 0
+fi
 
 prompt="Read AGENTS.md and carry out the clean-room rebuild it describes. Work until every deliverable is done or blocked, committing as you go."
 log="$run/logs/$agent-$(date -u +%Y%m%dT%H%M%SZ).jsonl"
+status() {
+  printf '{"state": "%s", "agent": "%s", "transcript": "%s", "pid": %s, "time": "%s"%s}\n' \
+    "$1" "$agent" "$log" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${2:-}" > "$run/status.json.tmp"
+  mv "$run/status.json.tmp" "$run/status.json"
+}
+status running
+trap 'code=$?; status finished ", \"exit\": $code"' EXIT
 case "$agent" in
   claude)
     # Long tokens pasted from a terminal often pick up wrapped-line whitespace.

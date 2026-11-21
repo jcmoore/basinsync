@@ -52,6 +52,27 @@ as a gap, and keep going.
 6. **`README.md`** explaining how to build, run, and test everything, and what
    is incomplete.
 
+## Status and blockers
+
+Keep `STATUS.md` current and commit it with your work: the phase you are in,
+what is done, what is next, and anything blocking you. Start each blocking
+problem's line with `BLOCKED:` and say what you tried; the people running the
+rebuild watch for those lines. If you cannot make further progress, write the
+blockers, commit, and stop rather than looping.
+
+## Resources
+
+Everything you start shares one memory cap, `$CLEANROOM_MEMORY_MAX`; exceeding
+it kills the largest process. Model checkers can consume all of it:
+
+- run one Kani or Apalache job at a time, never several in parallel or in
+  background helpers;
+- wrap each in `timeout` (for example `timeout 900 cargo kani --harness NAME`),
+  start with small bounds (`--default-unwind`, `--max-steps`), and grow them
+  only while runs stay well under the cap;
+- treat an out-of-memory kill or timeout as a reason to shrink the bound or
+  split the harness, and record the bound you settled on.
+
 ## Environment
 
 Rust stable with Cargo, Kani (`cargo kani`), the Quint CLI (`quint`, with

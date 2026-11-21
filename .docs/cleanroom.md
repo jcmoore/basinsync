@@ -14,12 +14,32 @@ agents and against later documentation.
 ```sh
 scripts/cleanroom/setup.sh [--ref REF] NAME     # docs/ + brief at REF, fresh history
 scripts/cleanroom/run.sh --check NAME           # probe the sandbox only
-CLAUDE_CODE_OAUTH_TOKEN=... scripts/cleanroom/run.sh NAME
+CLAUDE_CODE_OAUTH_TOKEN=... scripts/cleanroom/run.sh NAME   # starts unit cleanroom-NAME
+scripts/cleanroom/wait.sh NAME                  # block; repeat while it exits 3
+scripts/cleanroom/status.sh NAME                # progress, memory, actions, errors, blockers
 scripts/cleanroom/run.sh --continue NAME        # resume an unfinished claude run
 scripts/cleanroom/run.sh --agent codex NAME     # with OPENAI_API_KEY
 scripts/cleanroom/run.sh --command 'CMD' NAME   # any other agent
 scripts/cleanroom/collect.sh NAME               # fetch as orphan branch cleanroom/NAME
 ```
+
+An agent that starts a run must not end its turn while the run is in flight:
+call `wait.sh` until it exits 0 or 1, then report the outcome, `STATUS.md`
+blockers, and anything `status.sh` flags.
+
+## Resources and observability
+
+Each run is a systemd user unit capped at `--memory` (default 40% of RAM),
+without swap, at reduced CPU priority. An out-of-memory kill takes the largest
+process in the unit, usually a model checker, and the agent continues; the
+first run exhausted the whole machine when CBMC grew past 54 GB. Without
+systemd (as on macOS), pass `--foreground`, which runs uncapped.
+
+`status.sh` reads the unit's memory use and peak, out-of-memory events, the
+transcript's activity (flagging more than twenty idle minutes as a possible
+stall), commits, the agent's `STATUS.md` with its `BLOCKED:` lines, recent
+actions, and recent tool errors. `wait.sh` prints a brief status every five
+minutes.
 
 Runs live in `~/cleanroom/NAME` (override with `CLEANROOM_ROOT`). The brief is
 `scripts/cleanroom/brief.md`, copied into each workspace as `AGENTS.md`, with a
