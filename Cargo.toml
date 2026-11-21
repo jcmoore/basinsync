@@ -30,4 +30,3 @@ metrics-exporter-prometheus = { version = "0.18", default-features = false }
 
 [dev-dependencies]
 proptest = "1"
-redb = "4.4.0"

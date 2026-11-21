@@ -67,10 +67,6 @@ pub struct Delta {
 struct CapturedStorage {
     inner: Arc<dyn DurableStorage>,
     frames: Mutex<Vec<Blob>>,
-    #[cfg(test)]
-    capture_versions: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
-    versions: Mutex<Vec<turso_core::mvcc::database::RowVersion>>,
 }
 impl turso_core::mvcc::persistent_storage::DurableStorage for CapturedStorage {
     fn serialize_row_version(
@@ -80,12 +76,7 @@ impl turso_core::mvcc::persistent_storage::DurableStorage for CapturedStorage {
         portable_extension: Option<&[u8]>,
     ) -> turso_core::Result<()> {
         self.inner
-            .serialize_row_version(log_record, row_version, portable_extension)?;
-        #[cfg(test)]
-        if self.capture_versions.load(Ordering::Relaxed) && row_version.row.id.row_id.is_int_key() {
-            self.versions.lock().unwrap().push(row_version.clone());
-        }
-        Ok(())
+            .serialize_row_version(log_record, row_version, portable_extension)
     }
 
     fn serialize_database_header(
@@ -430,15 +421,6 @@ impl State {
         )
     }
 
-    #[cfg(test)]
-    fn transact_values<'a>(
-        native: &Native,
-        milestone: &str,
-        values: impl IntoIterator<Item = (&'a str, &'a str)>,
-    ) -> Result<()> {
-        Self::transact_ranges(native, milestone, values, &[], &[])
-    }
-
     fn transact_ranges<'a>(
         native: &Native,
         milestone: &str,
@@ -715,10 +697,6 @@ impl Native {
         let storage = Arc::new(CapturedStorage {
             inner: Arc::new(Storage::new(log_file, io.clone(), None)),
             frames: Mutex::default(),
-            #[cfg(test)]
-            capture_versions: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
-            versions: Mutex::default(),
         });
         storage.set_checkpoint_threshold(-1);
         let db = Database::open(
@@ -1045,11 +1023,5 @@ mod tests {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod benchmark;
-
-#[cfg(test)]
-mod experiments;
 
 pub mod wal;
