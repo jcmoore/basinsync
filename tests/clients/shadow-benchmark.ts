@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { CreateBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import { spawn, spawnSync } from "bun";
 
-const root=resolve(import.meta.dir,"..");mkdirSync(`${root}/.local`,{recursive:true});
+const root=resolve(import.meta.dir,"../..");mkdirSync(`${root}/.local`,{recursive:true});
 const artifacts=mkdtempSync(`${root}/.local/shadow-benchmark-`);
 const rounds=Number(Bun.env.DISK_ROUNDS ?? 3);
 const workloads=(Bun.env.DISK_WORKLOADS ?? "8192:0,8192:1024").split(",").map(s=>{const [flows,rowBytes]=s.split(":").map(Number);return {flows,rowBytes}});

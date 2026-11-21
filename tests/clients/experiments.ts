@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { CreateBucketCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { spawn, spawnSync } from "bun";
 
-const root = resolve(import.meta.dir, "..");
+const root = resolve(import.meta.dir,"../..");
 mkdirSync(`${root}/.local`, {recursive:true});
 const artifacts = mkdtempSync(`${root}/.local/wal-experiments-`);
 const rounds=Number(Bun.env.EXP_ROUNDS ?? 3);

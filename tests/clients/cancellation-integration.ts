@@ -5,7 +5,7 @@ import {S3Client,CreateBucketCommand,HeadObjectCommand,ListObjectsV2Command} fro
 import {commit,reserveHeap,parseResponse,form,epilogueStatus,type HeapResponse} from "./client";
 import {s3Fixture} from "./s3-fixture";
 
-const root=new URL("../",import.meta.url).pathname;
+const root=new URL("../../",import.meta.url).pathname;
 const artifacts=mkdtempSync(`${root}.local/cancellation-probe-`);
 const processes:ReturnType<typeof Bun.spawn>[]=[];
 const proxies:ReturnType<typeof Bun.serve>[]=[];

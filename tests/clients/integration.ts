@@ -26,7 +26,7 @@ function payload<T extends {timelines:Timelines}>(value:T){
 function positions(value:Awaited<ReturnType<typeof fullStatus>>){return {...payload(value),latest:value.latest?{viewpoint:value.latest.viewpoint}:null};}
 async function epilogueStatus(...args:Parameters<typeof fullStatus>){return positions(await fullStatus(...args));}
 
-const root = resolve(import.meta.dir, "..");
+const root = resolve(import.meta.dir,"../..");
 mkdirSync(`${root}/.local`, { recursive: true });
 const artifacts = mkdtempSync(`${root}/.local/timeline-`);
 const processes: ReturnType<typeof spawn>[] = [];

@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { CreateBucketCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { spawn, spawnSync } from "bun";
 
-const root = resolve(import.meta.dir, "..");
+const root = resolve(import.meta.dir,"../..");
 mkdirSync(`${root}/.local`, {recursive:true});
 const artifacts = mkdtempSync(`${root}/.local/zsets-benchmark-`);
 const rounds=Number(Bun.env.ZSET_ROUNDS ?? 3);

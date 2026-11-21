@@ -22,7 +22,7 @@ export async function eventually<T>(call:()=>Promise<T>,accept:(value:T)=>boolea
 async function freePort(){const server=createServer();await new Promise<void>((yes,no)=>{server.once("error",no);server.listen(0,"127.0.0.1",yes);});const address=server.address();assert(address&&typeof address!=="string");await new Promise<void>(yes=>server.close(()=>yes()));return address.port;}
 
 export async function fixture(label="analogue"){
-  const root=resolve(import.meta.dir,"..");mkdirSync(`${root}/.local`,{recursive:true});
+  const root=resolve(import.meta.dir,"../..");mkdirSync(`${root}/.local`,{recursive:true});
   const artifacts=mkdtempSync(`${root}/.local/${label}-`),children:ReturnType<typeof spawn>[]=[],relays:ReturnType<typeof Bun.serve>[]=[];
   const endpoint=`http://127.0.0.1:${await freePort()}`,credentials={accessKeyId:"analogue-test",secretAccessKey:"analogue-test-secret"};let serial=0;
   const env={AWS_REGION:"us-east-1",AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,AWS_SESSION_TOKEN:"",S3_ENDPOINT:endpoint};

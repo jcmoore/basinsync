@@ -9,7 +9,7 @@ import { spawn } from "bun";
 import { S3Client, CreateBucketCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { commit, epilogueStatus, sha384 } from "./client";
 
-const root=resolve(import.meta.dir,"..");mkdirSync(`${root}/.local`,{recursive:true});
+const root=resolve(import.meta.dir,"../..");mkdirSync(`${root}/.local`,{recursive:true});
 const artifacts=mkdtempSync(`${root}/.local/backup-benchmark-`);
 const credentials={accessKeyId:"basinsync-test",secretAccessKey:"basinsync-test-secret"};
 const children:ReturnType<typeof spawn>[]=[];let serial=0;
