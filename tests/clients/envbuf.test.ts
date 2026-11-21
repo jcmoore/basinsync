@@ -1,9 +1,10 @@
 import { expect,test } from "bun:test";
-import { all,at,before,concat,wrap,readable,MARGIN,PLATFORM_EXTENSION, message, nestedMessage, NESTED } from "./envbuf";
+import { all,at,before,concat,wrap,readable,MARGIN, message, nestedMessage, NESTED } from "./envbuf";
 import { encodeWalEvent,encodeTuples,manifestPath,commandFrames,entryDigest,eventEnvelope,trimRetryMargins,rangesAt,eventTuples,deltasAt,type WalDelta } from "./events";
 import { encode,toObject } from "./flexbuffer";
 import { encode as lex } from "./lexidecimal";
 import { sha384 } from "./client";
+import { vectors } from "./vectors";
 
 test("default EnvBuf total lengths and concatenated boundaries are multiples of eight",()=>{
   const chunks=[];
@@ -14,7 +15,6 @@ test("default EnvBuf total lengths and concatenated boundaries are multiples of 
   }
   const bytes=concat(chunks),frames=all(bytes);
   for(const frame of frames){expect(frame.start%8).toBe(0);expect(frame.end%8).toBe(0);expect(before(bytes,frame.end)).toEqual(frame);}
-  expect([...wrap(new Uint8Array([1]))]).toEqual([0x65,0x6e,0x56,0xa3,1,0,0,0,1,...new Array(7).fill(0xee),1,0,0,0,0xa3,0x76,0x4e,0x45]);
 });
 test("margin is skipped, raw payloads remain readable, and platform extensions stay reserved",()=>{
   const ignored=wrap(new TextEncoder().encode("ignored enV vNE"),MARGIN),raw=wrap(new TextEncoder().encode("read me"),0);
@@ -22,11 +22,18 @@ test("margin is skipped, raw payloads remain readable, and platform extensions s
   expect(frames.map(f=>f.format)).toEqual([6,0,6]);expect(before(bytes,bytes.length).format).toBe(MARGIN);
   expect(readable(bytes)).toEqual([at(bytes,ignored.length)]);expect(readable(bytes)[0].content).toEqual(new TextEncoder().encode("read me"));
   const bad=new Uint8Array(bytes);bad[ignored.length-1]^=1;expect(()=>readable(bad)).toThrow();
-  for(const format of [1,2,3,PLATFORM_EXTENSION])expect(()=>wrap(new Uint8Array(),format)).toThrow();
 });
-test("EnvBuf still reads power-three frames",()=>{
-  const frame=new Uint8Array([0x65,0x6e,0x56,0xa3,1,0,0,0,1,...new Array(7).fill(0xee),1,0,0,0,0xa3,0x76,0x4e,0x45]),bytes=concat([frame,frame]);
-  expect(all(bytes).length).toBe(2);expect(before(bytes,48)).toEqual(at(bytes,24));expect(before(bytes,24).content).toEqual(new Uint8Array([1]));
+type Frame={format:number;alignmentPower:number;content:number[];wire:number[]};
+const shared=vectors<{frames:Frame[];reservedFormats:number[]}>("envbuf");
+test("shared vectors concatenate and walk both ways",()=>{
+  for(const {format,alignmentPower,content,wire} of shared.frames){
+    expect(wrap(new Uint8Array(content),format,alignmentPower)).toEqual(new Uint8Array(wire));
+    const frame=at(new Uint8Array(wire),0);expect(frame.format).toBe(format);expect(frame.content).toEqual(new Uint8Array(content));
+  }
+  for(const format of shared.reservedFormats)expect(()=>wrap(new Uint8Array(),format)).toThrow();
+  const bytes=concat(shared.frames.map(f=>new Uint8Array(f.wire)));let end=bytes.length;
+  for(const original of [...shared.frames].reverse()){const frame=before(bytes,end);expect(frame.content).toEqual(new Uint8Array(original.content));expect(at(bytes,frame.start)).toEqual(frame);end=frame.start;}
+  expect(end).toBe(0);
 });
 test("complete EnvBuf sizes round up to the declared alignment, including framing",()=>{
   for(let power=0;power<=10;power++){
