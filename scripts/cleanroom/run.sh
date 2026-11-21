@@ -51,11 +51,13 @@ domains = {
 }[agent]
 print(json.dumps({
     "filesystem": {
-        "denyRead": ["/home", "/root", f"/tmp/claude-{os.environ['SRT_UID']}"],
+        # /run/user holds this user's D-Bus and keyring sockets.
+        "denyRead": ["/home", "/root", "/run/user", f"/tmp/claude-{os.environ['SRT_UID']}"],
         "allowRead": [f"{run}/workspace", f"{run}/agent/{agent}", f"{run}/tmp", f"{run}/cache"]
                      + [f"{home}/{path}" for path in toolchains],
         "allowWrite": [f"{run}/workspace", f"{run}/agent/{agent}", f"{run}/tmp", f"{run}/cache",
                        f"{home}/.quint"],
+        "denyWrite": [],
     },
     "network": {
         "allowedDomains": domains + [
@@ -63,6 +65,9 @@ print(json.dumps({
             "sum.golang.org", "docs.rs", "doc.rust-lang.org", "quint.sh",
             "model-checking.github.io"],
         "deniedDomains": [],
+        # srt's Unix-socket seccomp helper needs nested user namespaces, which
+        # Ubuntu's AppArmor refuses; host sockets stay hidden via /run/user.
+        "allowAllUnixSockets": True,
     },
 }, indent=2))
 EOF
@@ -80,7 +85,15 @@ envs=(
   "GIT_CONFIG_GLOBAL=/dev/null"
 )
 extra=()
-in_sandbox() { (cd "$ws" && env -i "${envs[@]}" "${extra[@]}" srt --settings "$settings" "$@"); }
+# Clear the environment and export only the curated variables. Exporting
+# (rather than passing `env -i VAR=...` arguments) keeps tokens out of argv,
+# which other local users can read through /proc.
+in_sandbox() { (
+  cd "$ws"
+  for variable in $(compgen -e); do unset "$variable" 2>/dev/null || true; done
+  export "${envs[@]}" "${extra[@]}"
+  exec srt --settings "$settings" "$@"
+); }
 
 # Probe the sandbox before trusting it with an agent.
 probe='set -u; fail=0

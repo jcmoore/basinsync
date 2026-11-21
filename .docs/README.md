@@ -1,3 +1,4 @@
+[cleanroom]: <cleanroom.md>
 [development]: <development.md>
 [diy/0zg9/261121-durable-test-suites]: <diy/0zg9/261121-durable-test-suites/README.md>
 [docs]: <../docs/README.md>
@@ -18,3 +19,5 @@ Keep the test suites small and resilient with
 *Durable test suites*[~][diy/0zg9/261121-durable-test-suites].
 
 Weigh proof tools for the riskiest protocols in the *verification notes*[~][verification].
+
+Check the documentation by rebuilding from it in a *clean room*[~][cleanroom].
