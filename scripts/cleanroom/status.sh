@@ -39,7 +39,7 @@ if unit:
           f" (peak {size(unit.get('MemoryPeak', ''))}, cap {size(unit.get('MemoryMax', ''))});"
           f" OOM kills {os.environ['OOMS']}")
 log = status.get("transcript", "")
-events, actions, errors = 0, [], []
+events, actions, errors, final, retry = 0, [], [], None, None
 if log and os.path.exists(log):
     idle = time.time() - os.path.getmtime(log)
     for line in open(log, errors="replace"):
@@ -56,9 +56,33 @@ if log and os.path.exists(log):
             elif part.get("type") == "tool_result" and part.get("is_error"):
                 errors.append(str(part.get("content"))[:160])
         if event.get("type") == "result":
+            final = event
             actions.append(f"result: {event.get('subtype')} {str(event.get('result'))[:110]}")
+        elif event.get("type") == "system" and event.get("subtype") == "api_retry":
+            retry = event
+        elif event.get("type") == "assistant":
+            # Sessions emit a result per turn; only a result after the last turn counts.
+            retry, final = None, None
     print(f"transcript: {events} events, last write {int(idle // 60)} min ago"
           + ("  <- possible stall" if state == "running" and idle > 1200 else ""))
+# Outcome: finished, usage-limit (resume later with run.sh --continue), error,
+# throttled (still retrying), or in progress.
+limit_words = ("usage limit", "limit reached", "hit your limit", "resets", "quota", "rate limit")
+text = str((final or {}).get("result") or "")
+if state == "running" and not (retry and retry.get("error_status") in (429, 529)):
+    outcome = "in progress"
+elif final and final.get("is_error"):
+    outcome = ("usage-limit: " if any(w in text.lower() for w in limit_words) else "error: ") + text[:200]
+elif final:
+    outcome = "finished"
+elif retry and retry.get("error_status") in (429, 529):
+    outcome = f"throttled: retrying after HTTP {retry.get('error_status')} ({retry.get('error')})"
+elif retry:
+    outcome = f"retrying after HTTP {retry.get('error_status')} ({retry.get('error')})"
+else:
+    outcome = "in progress" if state == "running" else "ended without a result"
+print(f"outcome: {outcome}")
+open(f"{run}/outcome.txt", "w").write(outcome.split(":")[0] + "\n")
 def git(*args):
     return subprocess.run(["git", "-C", ws, *args], capture_output=True, text=True).stdout.strip()
 print(f"commits: {git('rev-list', '--count', 'HEAD')}; last: {git('log', '-1', '--format=%cr: %s')};"

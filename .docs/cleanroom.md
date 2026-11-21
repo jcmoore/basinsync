@@ -24,8 +24,14 @@ scripts/cleanroom/collect.sh NAME               # fetch as orphan branch cleanro
 ```
 
 An agent that starts a run must not end its turn while the run is in flight:
-call `wait.sh` until it exits 0 or 1, then report the outcome, `STATUS.md`
+call `wait.sh` until it exits 0, 1, or 4, then report the outcome, `STATUS.md`
 blockers, and anything `status.sh` flags.
+
+`status.sh` classifies each run's outcome: in progress, finished, throttled
+(still retrying after HTTP 429/529), usage-limit, or error. A usage-limit stop
+makes `wait.sh` exit 4; once the allowance resets, `run.sh --continue NAME`
+resumes the same agent session from its last state, with its uncommitted work
+still in the workspace.
 
 ## Resources and observability
 

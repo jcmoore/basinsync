@@ -7,7 +7,8 @@
 #
 # Exit status: 0 the agent finished cleanly; 1 it failed or was stopped;
 # 3 still running when the timeout elapsed (default 6600 s, under the usual
-# two-hour limit on an agent's tool call).
+# two-hour limit on an agent's tool call); 4 it stopped on a usage limit, so
+# resume it with `run.sh --continue NAME` once the allowance resets.
 set -euo pipefail
 timeout=6600 interval=300
 while [ $# -gt 1 ]; do
@@ -34,9 +35,11 @@ while :; do
     # Foreground runs have no unit; fall back to the recorded process.
     if [ "$state" != running ] || [ "$known" -eq 1 ] || ! kill -0 "$pid" 2>/dev/null; then
       "$here/status.sh" "$name"
-      code="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("exit",1))' \
-        "$run/status.json" 2>/dev/null || echo 1)"
-      [ "$code" = 0 ] && exit 0 || exit 1
+      case "$(cat "$run/outcome.txt" 2>/dev/null)" in
+        finished) exit 0 ;;
+        usage-limit) echo "paused by a usage limit; resume with run.sh --continue $name"; exit 4 ;;
+        *) exit 1 ;;
+      esac
     fi
   fi
   now=$(date +%s)
