@@ -228,7 +228,8 @@ fn wal_preserves_counters_above_machine_precision() -> Result<()> {
 }
 
 proptest::proptest! {
-    #![proptest_config(proptest::test_runner::Config::with_cases(32))]
+    // Each run draws new cases; set PROPTEST_CASES for a deeper search.
+    #![proptest_config(proptest::test_runner::Config::with_cases(std::env::var("PROPTEST_CASES").ok().and_then(|c| c.parse().ok()).unwrap_or(32)))]
     #[test]
     fn persistent_wal_batches_reconstruct_at_every_prefix(batches in proptest::collection::vec(proptest::collection::vec(0u16..64,1..20),2..30)){
         let mut before=State::genesis().unwrap().image;

@@ -936,7 +936,8 @@ mod tests {
     }
 
     proptest::proptest! {
-        #![proptest_config(proptest::test_runner::Config::with_cases(32))]
+        // Each run draws new cases; set PROPTEST_CASES for a deeper search.
+    #![proptest_config(proptest::test_runner::Config::with_cases(std::env::var("PROPTEST_CASES").ok().and_then(|c| c.parse().ok()).unwrap_or(32)))]
         #[test]
         fn randomized_histories_reconstruct_at_every_prefix(ops in proptest::collection::vec(proptest::collection::vec(0u16..80, 1..16), 2..40)) {
             let mut state = State::genesis().unwrap();

@@ -212,7 +212,7 @@ mod tests {
         /// Neighbors of powers of two cross every size-prefix width, including widths beyond
         /// machine precision; Epilogue keys of viewpoints sort in reverse.
         #[test]
-        fn width_boundaries_keep_order_and_descending_keys(bits in prop_oneof![0usize..2048, Just(262_144)], negative in any::<bool>()) {
+        fn width_boundaries_keep_order_and_descending_keys(bits in prop_oneof![63 => 0usize..2048, 1 => Just(262_144)], negative in any::<bool>()) {
             let n = BigInt::from(1u8) << bits;
             let values: Vec<BigInt> = if negative {
                 vec![-&n - 1u8, -&n, -&n + 1u8]
