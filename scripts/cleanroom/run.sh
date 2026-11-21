@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run an agent inside a clean room created by setup.sh, sandboxed with srt.
 #
-#   scripts/cleanroom/run.sh [--agent claude|codex] [--check] [--continue] NAME
+#   scripts/cleanroom/run.sh [--agent claude|codex] [--model M] [--check] [--continue] NAME
 #   scripts/cleanroom/run.sh --command 'CMD' NAME
 #
 # The sandbox can read and write only the workspace, the agent's own config
@@ -15,10 +15,11 @@
 # setup-token`) or ANTHROPIC_API_KEY; codex needs OPENAI_API_KEY.
 set -euo pipefail
 
-agent=claude check_only=0 resume=0 command=""
+agent=claude model="${CLEANROOM_MODEL:-}" check_only=0 resume=0 command=""
 while [ $# -gt 1 ]; do
   case "$1" in
     --agent) agent="$2"; shift 2 ;;
+    --model) model="$2"; shift 2 ;;
     --command) agent=custom command="$2"; shift 2 ;;
     --check) check_only=1; shift ;;
     --continue) resume=1; shift ;;
@@ -114,18 +115,20 @@ prompt="Read AGENTS.md and carry out the clean-room rebuild it describes. Work u
 log="$run/logs/$agent-$(date -u +%Y%m%dT%H%M%SZ).jsonl"
 case "$agent" in
   claude)
+    # Long tokens pasted from a terminal often pick up wrapped-line whitespace.
+    CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN//[[:space:]]/}"
     [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}" ] ||
       { echo "set CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) or ANTHROPIC_API_KEY" >&2; exit 1; }
-    extra=("CLAUDE_CONFIG_DIR=$run/agent/claude")
+    extra=("CLAUDE_CONFIG_DIR=$run/agent/claude" "CLAUDE_CODE_TMPDIR=$run/tmp")
     [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || extra+=("CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
     [ -z "${ANTHROPIC_API_KEY:-}" ] || extra+=("ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
-    flags=(-p "$prompt" --dangerously-skip-permissions --output-format stream-json --verbose)
+    flags=(-p "$prompt" --model "${model:-opus}" --dangerously-skip-permissions --output-format stream-json --verbose)
     [ "$resume" -eq 0 ] || flags=(--continue "${flags[@]}")
-    in_sandbox claude "${flags[@]}" > "$log" ;;
+    in_sandbox claude "${flags[@]}" < /dev/null > "$log" ;;
   codex)
     [ -n "${OPENAI_API_KEY:-}" ] || { echo "set OPENAI_API_KEY" >&2; exit 1; }
     extra=("CODEX_HOME=$run/agent/codex" "OPENAI_API_KEY=$OPENAI_API_KEY")
-    in_sandbox codex exec --json --dangerously-bypass-approvals-and-sandbox "$prompt" > "$log" ;;
+    in_sandbox codex exec --json --dangerously-bypass-approvals-and-sandbox ${model:+--model "$model"} "$prompt" < /dev/null > "$log" ;;
   custom)
     in_sandbox bash -c "$command" > "$log" ;;
   *) echo "unknown agent: $agent" >&2; exit 2 ;;
