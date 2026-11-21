@@ -16,6 +16,7 @@ import { ingestWal } from "./wal";
 import { all as envelopes, before as previousEnvelope, message as envelopeMessage, wrap as wrapEnvelope } from "./envbuf";
 import { stress } from "./stress";
 import { s3Fixture } from "./s3-fixture";
+import { objectKeys } from "./object-keys";
 
 // Cursor cases below assert positions; full capability
 // responses and their byte ranges are exercised separately.
@@ -164,9 +165,9 @@ async function badStartup(bucket: string) {
   assert.equal(await timeout(serverProcess(bucket,endpoint,"127.0.0.1:0").exited),1);
 }
 
-function isBasinPut(request:Request){const path=new URL(request.url).pathname;return request.method==="PUT"&&path.includes("/epilogue/0y")&&!path.includes("/userspace/flows/");}
+function isBasinPut(request:Request){const path=new URL(request.url).pathname;return request.method==="PUT"&&path.includes("/epilogue/0y")&&!path.includes(`/${objectKeys.userFlows}`);}
 async function flowRevisions(b:string):Promise<Record<string,string>> {
-  const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/timeline/"}));let image:Uint8Array|undefined;
+  const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}));let image:Uint8Array|undefined;
   for(const m of (list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1)){
     const d=deltasAt(await get(b,m)).turso["default.turso"]!;
     image??=new Uint8Array(d.logical.base!);
@@ -184,11 +185,11 @@ async function flowPrefix(b:string,flow:string){
   flow=flow.toLowerCase();
   const cacheKey=JSON.stringify([b,flow]);let revision=revisions.get(cacheKey);
   if(!revision){revision=(await flowRevisions(b))[flow];assert(revision);revisions.set(cacheKey,revision);}
-  return `userspace/flows/${flow.toLowerCase()}/${revision}/epilogue/`;
+  return `${objectKeys.userFlows}${flow.toLowerCase()}/${revision}/epilogue/`;
 }
 async function signKey(b:string,flow:string,vp:bigint){return `${await flowPrefix(b,flow)}${lex(vp)}`;}
 async function exists(b:string,key:string){try{await s3.send(new HeadObjectCommand({Bucket:b,Key:key,IfMatch:"*"}));return true;}catch(e){if([404,412].includes((e as {$metadata: {httpStatusCode:number}}).$metadata.httpStatusCode))return false;throw e;}}
-async function flowKey(b:string,flow:string,vp:bigint){return `${await flowPrefix(b,flow)}${epilogueKey(vp).slice("kernelspace/basin/epilogue/".length)}`;}
+async function flowKey(b:string,flow:string,vp:bigint){return `${await flowPrefix(b,flow)}${epilogueKey(vp).slice(objectKeys.basinEpilogue.length)}`;}
 async function flowBlob(bucket:string,flow:string,viewpoint:bigint):Promise<Uint8Array|null>{
   try{
     const response=await s3.send(new GetObjectCommand({Bucket:bucket,Key:await flowKey(bucket,flow,viewpoint)}));
@@ -204,8 +205,8 @@ async function eventually<T>(read:()=>Promise<T>,done:(value:T)=>boolean):Promis
   throw new Error(`condition not reached: ${JSON.stringify(last,(_key,value)=>typeof value==="bigint"?value.toString():value)}; ${artifacts}`);
 }
 async function basinBackup(bucket:string){
-  const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/basin/epilogue/"}));
-  const key=list.Contents?.find(o=>o.Size!>=16&&o.Key!.startsWith("kernelspace/basin/epilogue/0y"))?.Key;if(!key)return null;
+  const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:objectKeys.basinEpilogue}));
+  const key=list.Contents?.find(o=>o.Size!>=16&&o.Key!.startsWith(`${objectKeys.basinEpilogue}0y`))?.Key;if(!key)return null;
   const response=await s3.send(new GetObjectCommand({Bucket:bucket,Key:key}));
   const object=await response.Body!.transformToByteArray();
   const marker=envelopeMessage(object);
@@ -214,7 +215,7 @@ async function basinBackup(bucket:string){
     const graph=toObject(marker) as {databases:Record<string,{id:string;revision:string}>};
     const node=graph.databases["default.turso"];
     for(const generation of ["old","young"]){
-      try{const image=await s3.send(new GetObjectCommand({Bucket:bucket,Key:`kernelspace/basin/heap/${generation}/${node.id}/${node.revision}`}));blob=await image.Body!.transformToByteArray();break;}
+      try{const image=await s3.send(new GetObjectCommand({Bucket:bucket,Key:`${objectKeys.kernelHeap}${generation}/${node.id}/${node.revision}`}));blob=await image.Body!.transformToByteArray();break;}
       catch(error){if(generation==="young"||(error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode!==404)throw error;}
     }
   }
@@ -251,23 +252,23 @@ try {
     console.log("put of success: COPY enforces source ETags and atomic destination preconditions");
   }
   const probeBucket=await bucket();
-  const reference=await s3.send(new PutObjectCommand({Bucket:probeBucket,Key:"kernelspace/sentinel/empty",Body:new Uint8Array(),IfNoneMatch:"*"}));
+  const reference=await s3.send(new PutObjectCommand({Bucket:probeBucket,Key:objectKeys.emptySentinel,Body:new Uint8Array(),IfNoneMatch:"*"}));
   const emptyETag=reference.ETag!;assert(emptyETag);
   // Bootstrap learns opaque validators, preserves an existing reference, and rejects a nonempty one.
   {
     const name=await bucket(),opaque='"bucket-empty-validator"';let probes=0;
-    await s3.send(new PutObjectCommand({Bucket:name,Key:"kernelspace/sentinel/empty",Body:new Uint8Array(),Metadata:{preserved:"yes"}}));
+    await s3.send(new PutObjectCommand({Bucket:name,Key:objectKeys.emptySentinel,Body:new Uint8Array(),Metadata:{preserved:"yes"}}));
     await s3.send(new PutObjectCommand({Bucket:name,Key:key(1n),Body:new Uint8Array()}));
     const proxy=relay((request,response)=>{
       const path=new URL(request.url).pathname;
-      if(request.method==="HEAD"&&path.endsWith("/kernelspace/sentinel/empty")&&response.status===200){const headers=new Headers(response.headers);headers.set("etag",opaque);return new Response(null,{status:200,headers});}
-      if(request.method==="HEAD"&&path.includes("/kernelspace/basin/timeline/")&&request.headers.has("if-none-match")){assert.equal(request.headers.get("if-none-match"),opaque);probes++;}
+      if(request.method==="HEAD"&&path.endsWith(`/${objectKeys.emptySentinel}`)&&response.status===200){const headers=new Headers(response.headers);headers.set("etag",opaque);return new Response(null,{status:200,headers});}
+      if(request.method==="HEAD"&&path.includes(`/${objectKeys.timeline}`)&&request.headers.has("if-none-match")){assert.equal(request.headers.get("if-none-match"),opaque);probes++;}
       return response;
     });
     const app=await server(name,proxy.url);await status(await commit(app.url,"opaque-validator",bytes("data"),0n),201);await stop(app.process);assert(probes>0);
-    assert.equal((await s3.send(new HeadObjectCommand({Bucket:name,Key:"kernelspace/sentinel/empty"}))).Metadata!.preserved,"yes");
-    const invalid=await bucket();await s3.send(new PutObjectCommand({Bucket:invalid,Key:"kernelspace/sentinel/empty",Body:bytes("not empty")}));await badStartup(invalid);
-    assert.deepEqual(await (await s3.send(new GetObjectCommand({Bucket:invalid,Key:"kernelspace/sentinel/empty"}))).Body!.transformToByteArray(),bytes("not empty"));
+    assert.equal((await s3.send(new HeadObjectCommand({Bucket:name,Key:objectKeys.emptySentinel}))).Metadata!.preserved,"yes");
+    const invalid=await bucket();await s3.send(new PutObjectCommand({Bucket:invalid,Key:objectKeys.emptySentinel,Body:bytes("not empty")}));await badStartup(invalid);
+    assert.deepEqual(await (await s3.send(new GetObjectCommand({Bucket:invalid,Key:objectKeys.emptySentinel}))).Body!.transformToByteArray(),bytes("not empty"));
   }
   const a = bytes("359");assert(sha384(a).startsWith("00"));
   // Probe collisions bound tombstones below sixteen bytes and standalone margins to u8 values 1–7.
@@ -296,7 +297,7 @@ try {
     const sign=await signKey(b,"probed",0n);await eventually(()=>s3.send(new HeadObjectCommand({Bucket:b,Key:sign})),head=>head.ContentLength===24);
     const signFrames=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key:sign}))).Body!.transformToByteArray());assert.equal(signFrames.length,1);assert.equal(signFrames[0]!.format,6);assert.deepEqual(signFrames[0]!.content,new Uint8Array([7]));
     await eventually(()=>basinBackup(b),Boolean);await stop(app.process);
-    const cp=await basinBackup(b);assert(cp);const vp=~unlex(cp.key.slice("kernelspace/basin/epilogue/".length));
+    const cp=await basinBackup(b);assert(cp);const vp=~unlex(cp.key.slice(objectKeys.basinEpilogue.length));
     await s3.send(new PutObjectCommand({Bucket:b,Key:epilogueKey(vp+1n),Body:new Uint8Array([0xde,0xad,0xde,0xad,0xde,0xad])}));
     app=await server(b,proxy.url);assert.equal((await fullStatus(app.url,"probed")).latest?.viewpoint,0n);await stop(app.process);
   }
@@ -354,7 +355,7 @@ try {
     const next=fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("collision",bytes("second"),1n),signal:AbortSignal.timeout(120000)}).then(r=>{done++;return r});await batchLogged(app.log,2);assert.equal(done,0);
     proxy.release.resolve();await status(await first,201);await status(await next,201);assert.equal(proxy.retries(),259);
     const payload=await get(b,1n),original=proxy.originals.get(key(1n))!.body;assert.equal(entryDigest(payload),entryDigest(original));assert.notEqual(sha384(payload),sha384(original));
-    const archives=await eventually(()=>s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/analogue/"})),r=>r.KeyCount===1);
+    const archives=await eventually(()=>s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.analogue})),r=>r.KeyCount===1);
     const archived=await s3.send(new GetObjectCommand({Bucket:b,Key:archives.Contents![0].Key!}));assert.deepEqual(decodeBulkOrder(await archived.Body!.transformToByteArray()).events[0],trimRetryMargins(payload),"archive handoff trims the accepted event without changing its command bytes");
     assert.equal((deltasAt(await get(b,2n)).turso["default.turso"] as WalDelta).physical.parent,entryDigest(payload));await assertManifestRange(b,1n,payload);await stop(app.process);
     const replayed=await server(b);assert.equal((await fullStatus(replayed.url,"collision")).latest?.viewpoint,1n);await stop(replayed.process);
@@ -362,19 +363,19 @@ try {
     const restored=await server(b);assert.deepEqual(await latestBlob((await fullStatus(restored.url,"collision")).latest!),bytes("second"));await stop(restored.process);
   }
   for(const kind of ["marker","backup","sign"]){
-    const b=await bucket(),proxy=collisionProxy(b,r=>{const path=new URL(r.url).pathname;return kind==="marker"?path.includes("/userspace/flows/"):kind==="backup"?isBasinPut(r):path.includes("/epilogue/0z");},false,false,3);
+    const b=await bucket(),proxy=collisionProxy(b,r=>{const path=new URL(r.url).pathname;return kind==="marker"?path.includes(`/${objectKeys.userFlows}`):kind==="backup"?isBasinPut(r):path.includes("/epilogue/0z");},false,false,3);
     const app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10",BASINSYNC_CLEANUP_INTERVAL_MS:kind==="sign"?"10":"0"});await status(await commit(app.url,"collision",a,0n),201);
     await eventually(()=>basinBackup(b),Boolean);await eventually(async()=>proxy.retries(),n=>n>0);await stop(app.process);
     const cp=await basinBackup(b);assert(cp);assert.equal((await inspectImage(cp.blob)).flows.collision,"0");
     const restored=await server(b);assert.deepEqual(await latestBlob((await fullStatus(restored.url,"collision")).latest!),a);await stop(restored.process);
   }
   {
-    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes("/kernelspace/basin/timeline/"),false,true);
+    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes(`/${objectKeys.timeline}`),false,true);
     const app=await server(b,proxy.url);await status(await commit(app.url,"missing-validator",a,0n),503);assert.equal(await timeout(app.process.exited),1);
     const restored=await server(b);assert.equal((await fullStatus(restored.url,"missing-validator")).latest?.viewpoint,0n);await stop(restored.process);
   }
   {
-    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes("/userspace/flows/")&&new URL(r.url).pathname.includes("/epilogue/0z"),false,false,8);
+    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes(`/${objectKeys.userFlows}`)&&new URL(r.url).pathname.includes("/epilogue/0z"),false,false,8);
     const app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});await status(await commit(app.url,"bounded-sign",a,0n),201);
     await eventually(async()=>readFileSync(app.log,"utf8"),log=>log.includes("standalone margin exhausted u8 counters 1–7"));
     assert.equal(proxy.retries(),6);const Key=await signKey(b,"bounded-sign",0n);
@@ -382,12 +383,12 @@ try {
     assert.equal(sign.length,1);assert.deepEqual(sign[0]!.content,new Uint8Array([7]));await stop(app.process);
   }
   {
-    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes("/kernelspace/basin/analogue/"),false,false,3);
+    const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes(`/${objectKeys.analogue}`),false,false,3);
     const app=await server(b,proxy.url,{BASINSYNC_BULK_MAX_AGE_MS:"10",BASINSYNC_BULK_TARGET_BYTES:"1"});
     await status(await commit(app.url,"bulk-margin",a,0n),201);
     await eventually(async()=>proxy.retries(),n=>n===3);
     // The last counted retry may still be uploading; VersityGW lists its temporary file until the PUT completes.
-    const archives=await eventually(()=>s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/analogue/"})),r=>r.KeyCount===1);
+    const archives=await eventually(()=>s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.analogue})),r=>r.KeyCount===1);
     const {object,body}=await eventually(async()=>{const object=await s3.send(new GetObjectCommand({Bucket:b,Key:archives.Contents![0].Key!}));return {object,body:await object.Body!.transformToByteArray()};},r=>envelopes(r.body).at(-1)!.content[0]===3);
     const order=decodeBulkOrder(body);
     assert.deepEqual(order.events[0],trimRetryMargins(await get(b,1n)));assert.equal(envelopes(body).at(-1)!.content[0],3);
@@ -399,7 +400,7 @@ try {
   {
     const b=await bucket(),replaced=new Set<string>();
     async function sentinel(Key:string){const r=await s3.send(new PutObjectCommand({Bucket:b,Key,Body:new Uint8Array(),Metadata:{reserved:"yes"}}));assert.equal(r.ETag,emptyETag);}
-    await sentinel(key(1n));await sentinel(epilogueKey(0n));await sentinel(`kernelspace/basin/epilogue/${lex(0n)}`);
+    await sentinel(key(1n));await sentinel(epilogueKey(0n));await sentinel(`${objectKeys.basinEpilogue}${lex(0n)}`);
     const proxy=relay((request,response)=>{
       if(request.method==="PUT"&&request.headers.get("if-match")===emptyETag)replaced.add(decodeURIComponent(new URL(request.url).pathname.slice(b.length+2)));
       return response;
@@ -419,7 +420,7 @@ try {
     }
     await stop(app.process);
     for(const Key of [key(1n),epilogueKey(0n),markerKey,sign])assert(replaced.has(Key),`ETag-guarded replacement: ${Key}`);
-    const saved=await basinBackup(b);assert(saved);await sentinel(epilogueKey((~unlex(saved.key.slice("kernelspace/basin/epilogue/".length)))+1n));
+    const saved=await basinBackup(b);assert(saved);await sentinel(epilogueKey((~unlex(saved.key.slice(objectKeys.basinEpilogue.length)))+1n));
     const restored=await server(b);assert.equal((await fullStatus(restored.url,"sentinel")).latest?.viewpoint,0n);await stop(restored.process);
   }
   {
@@ -431,8 +432,8 @@ try {
     const reads:{method:string;url:URL}[]=[];
     const proxy=relay((request,response)=>{reads.push({method:request.method,url:new URL(request.url)});return request.method==="HEAD"&&response.status===304?new Response(null,{status:200,headers:{"content-length":"0"}}):response;});
     const restored=await server(b,proxy.url);
-    assert.equal(reads.filter(r=>r.method==="GET"&&r.url.searchParams.get("prefix")==="kernelspace/basin/timeline/").length,4,"skip each sentinel using ordered LIST pages");
-    assert(!reads.some(r=>r.method==="HEAD"&&r.url.pathname.includes("/kernelspace/basin/timeline/")),"LIST gives the tail without exponential probes");
+    assert.equal(reads.filter(r=>r.method==="GET"&&r.url.searchParams.get("prefix")===objectKeys.timeline).length,4,"skip each sentinel using ordered LIST pages");
+    assert(!reads.some(r=>r.method==="HEAD"&&r.url.pathname.includes(`/${objectKeys.timeline}`)),"LIST gives the tail without exponential probes");
     assert.equal((await fullStatus(restored.url,"bounds")).latest?.viewpoint,2n);
     await status(await commit(restored.url,"bounds",bytes("marker-3"),3n),201);
     assert.equal(markerAt(await get(b,4n),"bounds").viewpoint,"3");await stop(restored.process);
@@ -447,7 +448,7 @@ try {
   }
   console.log("put of success: bucket-derived empty sentinel validators, atomic conditional replacement, metadata-only ETag caveat, exclusive search bounds, wrapped empty markers, margin signs, and snapshot recovery");
   // Flow Epilogue contents must never become a source of Basin state.
-  await s3.send(new PutObjectCommand({Bucket:b,Key:"userspace/flows/unrelated/epilogue/0",Body:bytes("legacy, not a Timeline")}));
+  await s3.send(new PutObjectCommand({Bucket:b,Key:`${objectKeys.userFlows}unrelated/epilogue/0`,Body:bytes("legacy, not a Timeline")}));
   const trace: {method:string;url:URL}[] = [];
   const traced = relay((r,response)=>{ trace.push({method:r.method,url:new URL(r.url)}); return response; });
   let writer = await server(b,traced.url);
@@ -474,9 +475,9 @@ try {
       await status(await fetch(`${app.url}/api/v0/epilogue/status?${new URLSearchParams({flow:invalid})}`),400);
     }
     await eventually(()=>basinBackup(name),v=>!!v&&v.milestone>=portableTip);
-    const objects=(await s3.send(new ListObjectsV2Command({Bucket:name,Prefix:"userspace/flows/"}))).Contents??[];
-    assert(objects.some(o=>o.Key!.startsWith(`userspace/flows/${canonical}/`)));
-    assert(objects.some(o=>o.Key!.startsWith(`userspace/flows/${longest.toLowerCase()}/`)));
+    const objects=(await s3.send(new ListObjectsV2Command({Bucket:name,Prefix:objectKeys.userFlows}))).Contents??[];
+    assert(objects.some(o=>o.Key!.startsWith(`${objectKeys.userFlows}${canonical}/`)));
+    assert(objects.some(o=>o.Key!.startsWith(`${objectKeys.userFlows}${longest.toLowerCase()}/`)));
     assert.deepEqual(Object.keys(await flowRevisions(name)).sort(),[canonical,longest.toLowerCase()].sort());
     await stop(app.process);
     const restored=await server(name);assert.equal((await fullStatus(restored.url,mixed)).latest?.viewpoint,0n);await stop(restored.process);
@@ -558,7 +559,7 @@ try {
   }));
   const total = [...receipts.values()].reduce((n,m)=>n+m.size,0);
   const keys:string[]=[];
-  for await(const page of paginateListObjectsV2({client:s3,pageSize:137},{Bucket:b,Prefix:"kernelspace/basin/timeline/"})) keys.push(...(page.Contents??[]).map(o=>o.Key!));
+  for await(const page of paginateListObjectsV2({client:s3,pageSize:137},{Bucket:b,Prefix:objectKeys.timeline})) keys.push(...(page.Contents??[]).map(o=>o.Key!));
   const eventCount=keys.length;
   assert.deepEqual(keys,Array.from({length:eventCount},(_,i)=>key(BigInt(i+1))).sort());
   assert.deepEqual(keys,Array.from({length:eventCount},(_,i)=>key(BigInt(eventCount-i))),"keys list newest Milestones first");
@@ -596,16 +597,16 @@ try {
   const materialized=await new Response(inspector.stdout).json() as {milestone:string;flows:Record<string,string>};
   assert.equal(await inspector.exited,0);assert.equal(materialized.milestone,String(eventCount));
   assert.deepEqual(materialized.flows,Object.fromEntries([...replayed].map(([flow,vp])=>[flow,String(vp)])));
-  const all=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"userspace/flows/"}));
-  assert.deepEqual(all.Contents?.map(o=>o.Key),["userspace/flows/unrelated/epilogue/0"],"background backup is disabled in this pipeline test");
+  const all=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.userFlows}));
+  assert.deepEqual(all.Contents?.map(o=>o.Key),[`${objectKeys.userFlows}unrelated/epilogue/0`],"background backup is disabled in this pipeline test");
   await stop(writer.process);
   const start=trace.length;
   writer=await server(b,traced.url);
   const startup=trace.slice(start);
-  assert.equal(startup.filter(r=>r.method==="GET"&&r.url.searchParams.get("prefix")==="kernelspace/basin/timeline/").length,1);
-  assert.equal(startup.filter(r=>r.method==="GET"&&r.url.pathname.includes("/kernelspace/basin/timeline/")).length,eventCount,"replay the entire Timeline");
+  assert.equal(startup.filter(r=>r.method==="GET"&&r.url.searchParams.get("prefix")===objectKeys.timeline).length,1);
+  assert.equal(startup.filter(r=>r.method==="GET"&&r.url.pathname.includes(`/${objectKeys.timeline}`)).length,eventCount,"replay the entire Timeline");
   for(const [flow,v] of replayed) assert.deepEqual(await epilogueStatus(writer.url,flow),{latest:{viewpoint:v}});
-  assert(trace.some(r=>r.url.searchParams.get("prefix")==="kernelspace/basin/epilogue/"),"read the Basin recovery anchor before writing");
+  assert(trace.some(r=>r.url.searchParams.get("prefix")===objectKeys.basinEpilogue),"read the Basin recovery anchor before writing");
   await accepted(writer.url,flowA,bytes("after recovery"),2n);
   await stop(writer.process);await stop(observer.process);
   console.log(`put of success: ${total} markers across ${eventCount} gapless Milestones; independent TS WAL ingestion, full replay, and minimum-key latest discovery`);
@@ -642,11 +643,11 @@ try {
     const batchBucket=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let puts=0,active=0,peak=0;
     const proxy=relay(async(request,response)=>{
-      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")){
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)){
         active--;if(fail){assert.equal(response.status,200);await response.arrayBuffer();return new Response("durable reply lost",{status:503});}
       }
       return response;
-    },async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")){puts++;active++;peak=Math.max(peak,active);entered.resolve();await gate.promise;}});
+    },async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)){puts++;active++;peak=Math.max(peak,active);entered.resolve();await gate.promise;}});
     const app=await server(batchBucket,proxy.url,{BASINSYNC_BATCH_MAX:"4",BASINSYNC_BATCH_WAIT_MS:"1000",RUST_LOG:"basinsync=debug"});
     const flow=`ordered-${fail?"lost":"ok"}`;let completed=0;
     const requests:Promise<Response>[]=[];
@@ -694,11 +695,11 @@ try {
     const pipelineBucket=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let puts=0,active=0,peak=0,completed=0;
     const proxy=relay(async(request,response)=>{
-      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")){
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)){
         active--;if(fault==="after"){assert.equal(response.status,200);await response.arrayBuffer();return new Response("durable reply lost",{status:503});}
       }
       return response;
-    },async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")){
+    },async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)){
       puts++;active++;peak=Math.max(peak,active);
       if(puts===1){entered.resolve();await gate.promise;}
       if(fault==="before"){active--;return new Response("not stored",{status:503});}
@@ -739,9 +740,9 @@ try {
     const mismatchBucket=await bucket();const second=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let puts=0;
     const proxy=relay(async(request,response)=>{
-      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")&&puts===2&&fail){await response.arrayBuffer();return new Response("second reply lost",{status:503});}
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)&&puts===2&&fail){await response.arrayBuffer();return new Response("second reply lost",{status:503});}
       return response;
-    },async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")&&++puts===2){entered.resolve();await second.promise;}});
+    },async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)&&++puts===2){entered.resolve();await second.promise;}});
     const app=await server(mismatchBucket,proxy.url,{BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});
     await status(await commit(app.url,"deferred-mismatch",a,0n),201);
     const next=commit(app.url,"deferred-mismatch",a,1n);await timeout(entered.promise);
@@ -756,7 +757,7 @@ try {
   }
   {
     const full=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let puts=0;
-    const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"&&new URL(r.url).pathname.includes("/kernelspace/basin/timeline/")&&++puts===1){entered.resolve();await gate.promise;}});
+    const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"&&new URL(r.url).pathname.includes(`/${objectKeys.timeline}`)&&++puts===1){entered.resolve();await gate.promise;}});
     const app=await server(full,proxy.url,{BASINSYNC_BATCH_WAIT_MS:"1000",RUST_LOG:"basinsync=debug"});
     const first=Array.from({length:32},(_,n)=>commit(app.url,`full-${n}`,a,0n));await timeout(entered.promise);
     const next=Array.from({length:32},(_,n)=>commit(app.url,`full-${n+32}`,a,0n));await batchLogged(app.log,2);
@@ -787,7 +788,7 @@ try {
   // Dropping an HTTP caller after admission does not cancel its owned batch.
   {
     const disconnected=await bucket(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
-    const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"&&new URL(r.url).pathname.includes("/kernelspace/basin/timeline/")){entered.resolve();await gate.promise}});
+    const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"&&new URL(r.url).pathname.includes(`/${objectKeys.timeline}`)){entered.resolve();await gate.promise}});
     const app=await server(disconnected,proxy.url,{BASINSYNC_BATCH_MAX:"1",RUST_LOG:"basinsync=debug"});
     const abort=new AbortController();
     const request=fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("disconnected",a,0n),signal:abort.signal});
@@ -841,7 +842,7 @@ try {
       if (fault === "logical-byte") delta.logical.frames[0][0] ^= 1;
       const b = await bucket(); await seed(b, 1n, extensionEncode(event)); return b;
     }),
-    async()=>{const b=await bucket();await s3.send(new PutObjectCommand({Bucket:b,Key:"kernelspace/basin/timeline/0",Body:a}));return b},
+    async()=>{const b=await bucket();await s3.send(new PutObjectCommand({Bucket:b,Key:`${objectKeys.timeline}0`,Body:a}));return b},
     async()=>{const b=await bucket();await seed(b,2n,encodeEvent({f:marker(a)}, legacyDeltasAt(capturedBytes)));return b},
     async()=>{const b=await bucket();await seed(b,1n,encodeEvent({f:{...marker(a),sha384:"00".repeat(48)}}, legacyDeltasAt(capturedBytes)));return b},
     async()=>{const b=await bucket();await seed(b,1n,encodeEvent({f:marker(a,"18446744073709551616")}, legacyDeltasAt(capturedBytes)));return b},
@@ -858,7 +859,7 @@ try {
 
   const uncertain=await bucket();let puts=0;
   const faulty=relay(async(r,response)=>{
-    if(r.method==="PUT"&&new URL(r.url).pathname.includes("/kernelspace/basin/timeline/")&&new URL(r.url).pathname.includes("/kernelspace/basin/timeline/")) {puts++;assert.equal(response.status,200);await response.arrayBuffer();return new Response("lost durable reply",{status:503})}
+    if(r.method==="PUT"&&new URL(r.url).pathname.includes(`/${objectKeys.timeline}`)&&new URL(r.url).pathname.includes(`/${objectKeys.timeline}`)) {puts++;assert.equal(response.status,200);await response.arrayBuffer();return new Response("lost durable reply",{status:503})}
     return response;
   });
   const failed=await server(uncertain,faulty.url);
@@ -929,12 +930,12 @@ try {
     // Hold downstream copying: the URL must stay range-bound until the exact
     // marker is stored, then it uses the message range in the Flow's envelope.
     const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
-    const proxy=relay((_,response)=>response,async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes("/userspace/flows/")){entered.resolve();await gate.promise;}});
+    const proxy=relay((_,response)=>response,async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.userFlows}`)){entered.resolve();await gate.promise;}});
     const copying=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});await timeout(entered.promise);
     assert.deepEqual(await latestBlob((await fullStatus(copying.url,"public")).latest!),target);
     gate.resolve();
     await eventually(()=>flowBlob(b,"public",1n),blob=>blob!==null);
-    const complete=await eventually(()=>fullStatus(copying.url,"public"),s=>!!s.latest?.url&&new URL(s.latest.url).pathname.includes("/userspace/flows/"));
+    const complete=await eventually(()=>fullStatus(copying.url,"public"),s=>!!s.latest?.url&&new URL(s.latest.url).pathname.includes(`/${objectKeys.userFlows}`));
     assert(new URL(complete.latest!.url!).pathname.endsWith(`/${await flowKey(b,"public",1n)}`));
     assert.deepEqual(complete.latest!.headers,{"If-Match":"*",Range:`bytes=8-${8+target.length-1}`});assert.deepEqual(await latestBlob(complete.latest!),target);
     assert.equal(new URL(complete.latest!.url!).searchParams.get("X-Amz-SignedHeaders"),"host;if-match;range");
@@ -950,7 +951,7 @@ try {
     await stop(copying.process);
     const tail=await server(b);await status(await commit(tail.url,"public",bytes("after checkpoint"),2n),201);await stop(tail.process);
     const anchored=await server(b);const latest=(await fullStatus(anchored.url,"public")).latest!;
-    assert.equal(latest.viewpoint,2n);assert(new URL(latest.url!).pathname.includes("/kernelspace/basin/timeline/"));assert.deepEqual(await latestBlob(latest),bytes("after checkpoint"));await stop(anchored.process);
+    assert.equal(latest.viewpoint,2n);assert(new URL(latest.url!).pathname.includes(`/${objectKeys.timeline}`));assert.deepEqual(await latestBlob(latest),bytes("after checkpoint"));await stop(anchored.process);
   }
   console.log("put of success: signed blob-only Range capabilities, empty markers, downstream URL reuse, persistent locations, and snapshot-plus-suffix recovery");
   // Current observers need no LIST; a positive successor probe discovers the
@@ -963,10 +964,10 @@ try {
       reads.length=0;
       const state=await fullStatus(observer.url,flow);
       const lists=reads.filter(r=>r.url.searchParams.has("list-type"));
-      assert(!lists.some(r=>r.url.searchParams.get("prefix")?.startsWith("userspace/flows/")),"never list a Flow Epilogue");
+      assert(!lists.some(r=>r.url.searchParams.get("prefix")?.startsWith(objectKeys.userFlows)),"never list a Flow Epilogue");
       if(advanced){
-        assert(lists.some(r=>r.url.searchParams.get("prefix")==="kernelspace/basin/epilogue/"),"discover the latest Basin anchor after a positive probe");
-        assert.equal(reads[0].method,"HEAD");assert(reads[0].url.pathname.includes("/kernelspace/basin/timeline/"));
+        assert(lists.some(r=>r.url.searchParams.get("prefix")===objectKeys.basinEpilogue),"discover the latest Basin anchor after a positive probe");
+        assert.equal(reads[0].method,"HEAD");assert(reads[0].url.pathname.includes(`/${objectKeys.timeline}`));
       }else assert.equal(lists.length,0,"an absent successor avoids all LIST operations");
       return payload(state);
     }
@@ -991,7 +992,7 @@ try {
     assert.deepEqual(await flowBlob(b,"known",3n),bytes("fourth"));
     const stored=(await checkedStatus("known",true)).latest!;
     assert.equal(stored.viewpoint,3n);assert.deepEqual(stored.headers,{"If-Match":"*",Range:"bytes=8-13"});
-    assert(!reads.some(r=>r.method==="GET"&&r.url.pathname.includes("/kernelspace/basin/timeline/")&&fromKey(r.url.pathname.slice(r.url.pathname.indexOf("kernelspace/basin/timeline/")))<=cp.milestone),"load the newer snapshot instead of replaying its covered prefix");
+    assert(!reads.some(r=>r.method==="GET"&&r.url.pathname.includes(`/${objectKeys.timeline}`)&&fromKey(r.url.pathname.slice(r.url.pathname.indexOf(objectKeys.timeline)))<=cp.milestone),"load the newer snapshot instead of replaying its covered prefix");
     assert.deepEqual(await latestBlob(stored),bytes("fourth"));
     assert.deepEqual((await checkedStatus("known")).latest?.headers,{"If-Match":"*",Range:"bytes=8-13"});
     await status(await commit(suffixWriter.url,"known",bytes("suffix"),4n),201);
@@ -1007,7 +1008,7 @@ try {
     const proxy=relay((request,response)=>{reads.push({method:request.method,url:new URL(request.url)});return response;});
     const observer=await server(b,proxy.url,{BASINSYNC_STATUS_PROBE_MAX_AGE_MS:"3000"});
     const writer=await server(b);
-    function probes(){return reads.filter(r=>r.method==="HEAD"&&r.url.pathname.includes("/kernelspace/basin/timeline/"));}
+    function probes(){return reads.filter(r=>r.method==="HEAD"&&r.url.pathname.includes(`/${objectKeys.timeline}`));}
     reads.length=0;
     const initial=await fullStatus(observer.url,"external");
     assert.equal(initial.timelines.basin.milestone,0n);assert.deepEqual(payload(initial),{latest:null});
@@ -1036,7 +1037,7 @@ try {
     const localWrite=await commit(observer.url,"local",a,0n);
     assert.equal(parse<CommitResponse>(await localWrite.clone().text()).timelines.basin.milestone,3n);
     await status(localWrite,201);
-    assert(reads.some(r=>r.url.searchParams.get("prefix")==="kernelspace/basin/epilogue/"),"writes always discover the Basin anchor");
+    assert(reads.some(r=>r.url.searchParams.get("prefix")===objectKeys.basinEpilogue),"writes always discover the Basin anchor");
     reads.length=0;
     const local=await fullStatus(observer.url,"local");
     assert.equal(local.timelines.basin.milestone,3n);
@@ -1060,7 +1061,7 @@ try {
       const url=new URL(request.url),object=url.pathname.split("/").slice(2).join("/");
       if(object&&["GET","HEAD"].includes(request.method))assert.equal(request.headers.get("if-match"),"*");
       if(request.method!=="HEAD"||!object)return response;
-      const probe=url.pathname.includes("/kernelspace/basin/timeline/");
+      const probe=url.pathname.includes(`/${objectKeys.timeline}`);
       if(probe){
         assert.equal(request.headers.get("if-none-match"),emptyETag);
         if(mode==="denied")return new Response(null,{status:403});
@@ -1107,8 +1108,8 @@ try {
     assert(actions.write&&actions.preview&&zero.write&&zero.preview);
     const revision = new URL(actions.write.url).pathname.split("/").at(-1)!;
     assert.match(revision,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    assert(new URL(actions.write.url).pathname.endsWith(`/userspace/heap/young/${id(secret)}/${revision}`));
-    assert(new URL(actions.read.url).pathname.endsWith(`/userspace/heap/old/${id(secret)}/${revision}`));
+    assert(new URL(actions.write.url).pathname.endsWith(`/${objectKeys.userHeap}young/${id(secret)}/${revision}`));
+    assert(new URL(actions.read.url).pathname.endsWith(`/${objectKeys.userHeap}old/${id(secret)}/${revision}`));
     assert.equal(new URL(actions.write.url).searchParams.get("X-Amz-SignedHeaders"),"content-length;host;if-none-match");
     assert.deepEqual(actions.write.headers,{"Content-Length":"7","If-None-Match":"*"});
     for(const action of [actions.preview,actions.read]){assert.equal(action.headers["If-Match"],"*");const r=await fetch(action.url,{headers:action.headers});assert([404,412].includes(r.status));await r.arrayBuffer();}
@@ -1122,13 +1123,13 @@ try {
     for(const [headers,body] of badWrites){
       const rejected:Response=await fetch(actions.write.url,{method:"PUT",headers,body:new Blob([new Uint8Array(body)])});assert(rejected.status>=400,"changing length or omitting the write condition invalidates the signature");await rejected.arrayBuffer();
     }
-    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"userspace/heap/young/"}))).KeyCount,0);
+    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:`${objectKeys.userHeap}young/`}))).KeyCount,0);
     const put=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("payload")});assert(put.ok,await put.text());
     const duplicate=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("changed")});assert.equal(duplicate.status,412);await duplicate.arrayBuffer();
     const preview=await fetch(actions.preview.url,{headers:actions.preview.headers});assert.equal(preview.status,200);assert.deepEqual(new Uint8Array(await preview.arrayBuffer()),bytes("payload"));
     const emptyPut=await fetch(zero.write.url,{method:"PUT",headers:zero.write.headers,body:new Uint8Array()});assert(emptyPut.ok,await emptyPut.text());
     const emptyGet=await fetch(zero.preview.url,{headers:zero.preview.headers});assert.equal(emptyGet.status,200);assert.equal((await emptyGet.arrayBuffer()).byteLength,0);
-    await s3.send(new PutObjectCommand({Bucket:b,Key:`userspace/heap/old/${id(secret)}/${revision}`,Body:bytes("payload")}));
+    await s3.send(new PutObjectCommand({Bucket:b,Key:`${objectKeys.userHeap}old/${id(secret)}/${revision}`,Body:bytes("payload")}));
     const old=await fetch(actions.read.url,{headers:actions.read.headers});assert.equal(old.status,200);assert.deepEqual(new Uint8Array(await old.arrayBuffer()),bytes("payload"));
     const retry=await reserved(await reserveHeap(app.url,flow,0n,[node(),node()]));assert.equal(retry.errors,null);assert.deepEqual(Object.keys(retry.results!),["0","1"]);
     const other=await reserved(await reserveHeap(app.url,"another-flow",0n,[node()]));assert.equal(other.errors,null);
@@ -1168,7 +1169,7 @@ try {
     const proxy=relay(async(request,response)=>{
       if(fault==="after"&&request.method==="PUT"&&new URL(request.url).pathname.endsWith(`/${key(1n)}`)){await response.arrayBuffer();return new Response("reply lost",{status:503});}return response;
     },async request=>{
-      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")){puts++;if(puts===1){entered.resolve();await gate.promise;if(fault==="before")return new Response("not stored",{status:503});}}
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)){puts++;if(puts===1){entered.resolve();await gate.promise;if(fault==="before")return new Response("not stored",{status:503});}}
     });
     const app=await server(b,proxy.url,{BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});
     const input:HeapNode={auth:[0,0,bytes("pipeline-client-only-access-token")],length:0,edges:[]};
@@ -1190,7 +1191,7 @@ try {
   {
     const b=await bucket(),gate=Promise.withResolvers<void>();let puts=0;
     const proxy=relay((_,response)=>response,async request=>{
-      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")){if(++puts===2)gate.resolve();await gate.promise;}
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)){if(++puts===2)gate.resolve();await gate.promise;}
     });
     const apps=await Promise.all([server(b,proxy.url),server(b,proxy.url)]);
     const nodes:HeapNode[]=[{auth:[0,0,bytes("shared-client-only-reservation-secret")],length:0,edges:[]}];
@@ -1199,14 +1200,14 @@ try {
     for(let i=0;i<results.length;i++)await status(results[i],results[i].status);
     await Promise.all(apps.map(app=>stop(app.process)));
     const restored=await server(b);for(let i=0;i<2;i++)await status(await reserveHeap(restored.url,`heap-race-${i}`,0n,nodes),200);
-    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/timeline/"}))).KeyCount,3);await stop(restored.process);
+    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}))).KeyCount,3);await stop(restored.process);
   }
   console.log("put of success: pipelined reservation/commit durability, ambiguous reservation recovery, and competing reservers");
   // Independent workers may DELETE the same old revision; neither can erase its replacement.
   {
     const b=await bucket(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let held=false;
     const proxy=relay((_,response)=>response,async request=>{
-      if(request.method==="DELETE"&&new URL(request.url).pathname.includes("/userspace/heap/young/")){held=true;entered.resolve();await gate.promise;}
+      if(request.method==="DELETE"&&new URL(request.url).pathname.includes(`/${objectKeys.userHeap}young/`)){held=true;entered.resolve();await gate.promise;}
     });
     const options={BASINSYNC_CLEANUP_INTERVAL_MS:"15",BASINSYNC_SWEEP_BATCH_SIZE:"1",BASINSYNC_SWEEP_EDGE_BATCH_SIZE:"1",BASINSYNC_ERASE_BATCH_SIZE:"1",BASINSYNC_ERASE_CONCURRENCY:"1"};
     const app=await server(b,proxy.url,options),secret=bytes("cleanup-reusable-token"),input:HeapNode={auth:[0,0,secret],length:4,edges:[]};
@@ -1233,7 +1234,7 @@ try {
     await stop(app.process);await stop(competing.process);
     // An old still-valid PUT can leave dust, without changing the current revision.
     const late=await fetch(actions.write.url,{method:"PUT",headers:actions.write.headers,body:bytes("same")});assert(late.ok,await late.text());
-    const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"userspace/heap/young/"}));assert.equal(objects.KeyCount,2);assert(objects.Contents!.some(o=>o.Key===oldKey));
+    const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:`${objectKeys.userHeap}young/`}));assert.equal(objects.KeyCount,2);assert(objects.Contents!.some(o=>o.Key===oldKey));
     const restored=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     const again=await reserve(restored.url,"reuse");assert.equal(new URL(again.results![0].actions.preview!.url).pathname,new URL(next.preview.url).pathname);
     const target=again.timelines.basin.milestone;
@@ -1269,7 +1270,7 @@ try {
     const b=await bucket(),flows=new Set<string>(),heads=new Map<string,number>();let mode="normal",target="",rootId="",checkedDeletion=false;
     const slow=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let hold=false;
     async function image(){
-      const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/timeline/"}));
+      const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}));
       const moments=(list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1);
       let bytes:Uint8Array|undefined;
       for(const m of moments){const d=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;bytes=ingestWal(bytes??d.logical.base!,d.physical.segments);}
@@ -1283,7 +1284,7 @@ try {
     }
     const proxy=relay((_,response)=>response,async request=>{
       const path=new URL(request.url).pathname;
-      if(request.method==="HEAD"&&path.includes("/userspace/heap/")){
+      if(request.method==="HEAD"&&path.includes(`/${objectKeys.userHeap}`)){
         assert.equal(request.headers.get("if-match"),"*");heads.set(path,(heads.get(path)??0)+1);
         if(path===target&&mode==="denied")return new Response(null,{status:403});
         if(path===target&&mode==="unavailable")return new Response(null,{status:500});
@@ -1306,7 +1307,7 @@ try {
     const rightResult=await reserve("deep",[right]);await upload(rightResult.results![0].actions);
     const sharedPath=new URL(leaves.results![1].actions.preview!.url).pathname;assert.equal(heads.get(sharedPath),1,"ETag cache avoids a second child HEAD");
     const rootNode=parent(2,"root",[left,right]),rootResult=await reserve("deep",[rootNode]);await upload(rootResult.results![0].actions);
-    const rootPath=new URL(rootResult.results![0].actions.preview!.url).pathname;rootId=rootPath.split("/userspace/heap/young/")[1].split("/").slice(0,-1).join("/");
+    const rootPath=new URL(rootResult.results![0].actions.preview!.url).pathname;rootId=rootPath.split(`/${objectKeys.userHeap}young/`)[1].split("/").slice(0,-1).join("/");
     const repeat=await reserve("sharing",[{...left,edges:[...left.edges].reverse().concat(left.edges[0])}]);assert(repeat.results);assert.equal(new URL(repeat.results![0].actions.preview!.url).pathname,new URL(leftResult.results![0].actions.preview!.url).pathname);
     assert.equal((await reserve("deep",[{...left,length:2}])).errors![0].code,"length_collision");
     assert.equal((await reserve("deep",[{...left,edges:[left.edges[0]]}])).errors![0].code,"edges_collision");
@@ -1336,7 +1337,7 @@ try {
     for(const flow of flows)await status(await commit(cleaner.url,flow,bytes("marker"),0n),201);
     await eventually(async()=>{const rows=await inspect(await image());return rows;},rows=>rows.userspace_nodes===0&&rows.userspace_edges===0&&rows.sweeping_tasks===0&&rows.marking_tasks===0);
     assert(checkedDeletion,"parent object deletion follows durable outbound edge removal");
-    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"userspace/heap/young/"}))).KeyCount,0);
+    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:`${objectKeys.userHeap}young/`}))).KeyCount,0);
     await stop(cleaner.process);
     const restored=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"}),tip=(await fullStatus(restored.url,"deep")).timelines.basin.milestone;
     const cp=await eventually(()=>basinBackup(b),cp=>!!cp&&cp.milestone>=tip);assert(cp);assert.deepEqual(await inspect(cp.blob),{userspace_nodes:0,userspace_edges:0,sweeping_tasks:0,marking_tasks:0});await stop(restored.process);
@@ -1363,7 +1364,7 @@ try {
     const b=await bucket();let holdCopies=false,rootPath="",rootYoung="",copyCount=0,deleteFailed=false,ambiguous=true;
     const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     async function image(){
-      const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/timeline/"}));
+      const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}));
       let bytes:Uint8Array|undefined;
       for(const m of (list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1)){
         const d=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;
@@ -1382,7 +1383,7 @@ try {
       return response;
     },async request=>{
       const path=new URL(request.url).pathname;
-      if(request.method==="PUT"&&path.includes("/userspace/heap/old/")&&request.headers.has("x-amz-copy-source")){
+      if(request.method==="PUT"&&path.includes(`/${objectKeys.userHeap}old/`)&&request.headers.has("x-amz-copy-source")){
         assert.equal(request.headers.get("if-none-match"),"*");assert(request.headers.get("x-amz-copy-source-if-match"));
         if(holdCopies&&path===rootPath){entered.resolve();await gate.promise;}
         copies.push(path);if(path===rootPath)copyCount++;
@@ -1398,7 +1399,7 @@ try {
     const leaves=await reserve("graph",[leaf,orphan]);await upload(leaves.results![0].actions.write);await upload(leaves.results![1].actions.write);
     const parent:HeapNode={auth:auth(1,"parent"),length:1,edges:[{auth:leaf.auth}],context:{kind:"parent"}};
     const parentActions=(await reserve("graph",[parent])).results![0].actions;assert(parentActions.preview);
-    const parentId=new URL(parentActions.preview.url).pathname.split("/userspace/heap/young/")[1]!.split("/").slice(0,-1).join("/");
+    const parentId=new URL(parentActions.preview.url).pathname.split(`/${objectKeys.userHeap}young/`)[1]!.split("/").slice(0,-1).join("/");
     const missing=await commit(app.url,"graph",bytes("marker"),0n,undefined,[{auth:parent.auth}]);await status(missing.clone(),422);assert.equal(parse<ApiError>(await missing.text()).error,"child_missing");
     assert.deepEqual(await epilogueStatus(app.url,"graph"),{latest:null});
     const unknown=await commit(app.url,"graph",bytes("marker"),0n,undefined,[{auth:auth(0,"unknown")}]);await status(unknown.clone(),422);assert.equal(parse<ApiError>(await unknown.text()).error,"child_unknown");
@@ -1410,7 +1411,7 @@ try {
     await status(await commit(app.url,"graph",bytes("marker"),0n,undefined,[{auth:parent.auth},{auth:parent.auth}]),201);
     const markerImage=await image();const owner=`_m_graph/v.${lex(0n)}/e.${lex(0n)}`;
     assert((await inspect(parentId,owner,markerImage)).retained);
-    const events=(await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/timeline/"}))).Contents!;
+    const events=(await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}))).Contents!;
     const markerEvent=await get(b,events.map(o=>fromKey(o.Key!)).reduce((a,b)=>a>b?a:b));
     assert.equal((eventTuples(markerEvent)[0]![3] as {markers:Record<string,{edges:string[]}>}).markers.graph!.edges.length,1,"marker edge IDs are deduplicated");
     assert(!Buffer.from(markerEvent).includes(bytes("marker-edge-private-")),"marker auth tokens never persist");
@@ -1455,11 +1456,11 @@ try {
       return response;
     },async request=>{
       const path=new URL(request.url).pathname;
-      if(request.method==="PUT"&&path.includes("/userspace/heap/old/")&&request.headers.has("x-amz-copy-source")){
+      if(request.method==="PUT"&&path.includes(`/${objectKeys.userHeap}old/`)&&request.headers.has("x-amz-copy-source")){
         copyAttempts++;if(unsupported){copyRejected.resolve();return new Response("unsupported",{status:501});}
       }
-      if(request.method==="GET"&&path.includes("/userspace/heap/young/"))sourceReads++;
-      if(request.method==="DELETE"&&path.includes("/userspace/heap/young/")&&blocked)return new Response("deferred",{status:500});
+      if(request.method==="GET"&&path.includes(`/${objectKeys.userHeap}young/`))sourceReads++;
+      if(request.method==="DELETE"&&path.includes(`/${objectKeys.userHeap}young/`)&&blocked)return new Response("deferred",{status:500});
     });
     let app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});
     const data=new Uint8Array(9*1024*1024+3);data.fill(42);data[0]=7;data[data.length-1]=19;
@@ -1507,7 +1508,7 @@ try {
     const b=await bucket(),flow="sign-0x",attempted=Promise.withResolvers<void>();let target="";
     let stored=false,confirm=false,puts=0;let mismatch=Promise.withResolvers<void>();
     async function counts(image?:Uint8Array){
-      if(!image){const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/timeline/"}));
+      if(!image){const list=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}));
       for(const m of (list.Contents??[]).map(o=>fromKey(o.Key!)).sort((a,b)=>a<b?-1:1)){const d=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;image=ingestWal(image??d.logical.base!,d.physical.segments);}
       }
       assert(image);const path=`${artifacts}/signs-${serial++}.turso`;writeFileSync(path,image);
@@ -1527,7 +1528,7 @@ try {
       }
     });
     // Positive signs alone cannot be mistaken for a recovery marker.
-    await s3.send(new PutObjectCommand({Bucket:b,Key:`kernelspace/basin/epilogue/${lex(100n)}`,Body:new Uint8Array()}));
+    await s3.send(new PutObjectCommand({Bucket:b,Key:`${objectKeys.basinEpilogue}${lex(100n)}`,Body:new Uint8Array()}));
     let app=await server(b,proxy.url);
     await status(await commit(app.url,flow,new Uint8Array(),0n),201);
     await status(await commit(app.url,flow,bytes("second"),1n),201);
@@ -1553,7 +1554,7 @@ try {
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:await signKey(b,flow,1n)}))).Metadata!.upstream,"2");
     assert(await exists(b,await signKey(b,"foreground-sign",0n)));
     const cp=await eventually(async()=>{const cp=await basinBackup(b);if(!cp)return null;const rows=await counts(cp.blob);return rows.marking_tasks===0&&rows.sweeping_tasks===0?cp:null;},Boolean);assert(cp);
-    const cpViewpoint=~unlex(cp.key.slice("kernelspace/basin/epilogue/".length));const cpSign=`kernelspace/basin/epilogue/${lex(cpViewpoint)}`;
+    const cpViewpoint=~unlex(cp.key.slice(objectKeys.basinEpilogue.length));const cpSign=`${objectKeys.basinEpilogue}${lex(cpViewpoint)}`;
     await eventually(()=>exists(b,cpSign),Boolean);
     await eventually(()=>flowBlob(b,flow,1n),v=>!!v);await stop(app.process);
     const objects=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:await flowPrefix(b,flow)}));
@@ -1582,7 +1583,7 @@ try {
     await stop(app.process);
     let lost=false;
     const proxy=relay(async(request,response)=>{
-      if(!lost&&request.method==="PUT"&&new URL(request.url).pathname.includes("/userspace/flows/")&&response.ok){lost=true;await response.arrayBuffer();return new Response("lost marker reply",{status:503});}
+      if(!lost&&request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.userFlows}`)&&response.ok){lost=true;await response.arrayBuffer();return new Response("lost marker reply",{status:503});}
       return response;
     });
     app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
@@ -1596,13 +1597,13 @@ try {
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:secondKey}))).Metadata!["ctx-owner"],"bob");
     await stop(app.process);
     // Recover from only the backup; the next commit keeps its existing namespace.
-    for(const object of (await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/timeline/"}))).Contents??[])if(fromKey(object.Key!)<=cp.milestone)await s3.send(new DeleteObjectCommand({Bucket:b,Key:object.Key!}));
+    for(const object of (await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}))).Contents??[])if(fromKey(object.Key!)<=cp.milestone)await s3.send(new DeleteObjectCommand({Bucket:b,Key:object.Key!}));
     app=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     assert.deepEqual(await latestBlob((await fullStatus(app.url,flow)).latest!),bytes("second"));
     const third=await commit(app.url,flow,bytes("third"),2n,undefined,[],{owner:"carol"});await status(third.clone(),201);
     const thirdMilestone=parse<CommitResponse>(await third.text()).timelines.basin.milestone;
     await eventually(()=>basinBackup(b),cp=>!!cp&&cp.milestone>=thirdMilestone);
-    const thirdKey=`userspace/flows/${flow}/${initial}/epilogue/${lex(~2n)}`;
+    const thirdKey=`${objectKeys.userFlows}${flow}/${initial}/epilogue/${lex(~2n)}`;
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:thirdKey}))).Metadata!["ctx-owner"],"carol");
     await stop(app.process);
   }
@@ -1642,7 +1643,7 @@ try {
     await status(await commit(restored.url,flow,bytes("marker"),0n),201);await stop(restored.process);
     const copying=await server(b,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     const cp=await eventually(()=>basinBackup(b),cp=>!!cp&&cp.milestone>=3n);assert(cp);await stop(copying.process);
-    for(const object of (await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"kernelspace/basin/timeline/"}))).Contents??[])if(fromKey(object.Key!)<=cp.milestone)await s3.send(new DeleteObjectCommand({Bucket:b,Key:object.Key!}));
+    for(const object of (await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}))).Contents??[])if(fromKey(object.Key!)<=cp.milestone)await s3.send(new DeleteObjectCommand({Bucket:b,Key:object.Key!}));
     const snapshotOnly=await server(b);
     const mismatch=await reserveHeap(snapshotOnly.url,flow,1n,[{...node,context:{owner:"bob"}}]);await status(mismatch.clone(),200);
     const fromSnapshot=parse<HeapResponse>(await mismatch.text());assert.equal(fromSnapshot.results,null);assert.equal(fromSnapshot.errors![0].code,"context_collision");
@@ -1654,7 +1655,7 @@ try {
   {
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let puts=0;
     const proxy=relay((_,response)=>response,async request=>{
-      if(request.method==="PUT"&&new URL(request.url).pathname.includes("/kernelspace/basin/timeline/")){
+      if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)){
         if(++puts===2)entered.resolve();await release.promise;
       }
     });

@@ -5,6 +5,7 @@ import {HeadObjectCommand,ListObjectsV2Command,PutObjectCommand} from "@aws-sdk/
 import {fixture,eventually} from "./analogue-fixture";
 import {encodeBulkOrder,decodeBulkOrder,key} from "./bulkorder";
 import {commit} from "./client";
+import { objectKeys } from "./object-keys";
 
 const f=await fixture("recovery-benchmark"),rounds=Number(Bun.env.RECOVERY_BENCH_ROUNDS??2),count=Number(Bun.env.RECOVERY_BENCH_EVENTS??96);
 const modes=(Bun.env.RECOVERY_BENCH_MODES??"sequential,parallel,bulk,range,hedged,bulk-parallel,range-parallel,range-prefetch").split(","),profiles=[{name:"local",delay:0,bandwidth:Infinity},{name:"25ms",delay:25,bandwidth:Infinity},{name:"100ms",delay:100,bandwidth:Infinity},{name:"25ms-5MiBps",delay:25,bandwidth:5*1024*1024}].filter(p=>!Bun.env.RECOVERY_BENCH_PROFILES||Bun.env.RECOVERY_BENCH_PROFILES.split(",").includes(p.name));
@@ -12,7 +13,7 @@ const archivedCount=Number(Bun.env.RECOVERY_BENCH_ARCHIVED_EVENTS??count);
 const samples:Record<string,unknown>[]=[],foreground:Record<string,unknown>[]=[];
 let delay=0,bandwidth=Infinity,nextTransfer=0,bytes=0,active=0,peak=0,requests:Record<string,number>={};
 const proxy=f.relay(async(request,next)=>{
-  active++;peak=Math.max(peak,active);const url=new URL(request.url),kind=url.searchParams.has("list-type")?`LIST ${url.searchParams.get("prefix")??""}`:`${request.method} ${url.pathname.includes("/kernelspace/basin/timeline/")?"timeline":url.pathname.includes("/kernelspace/basin/analogue/")?"analogue":"other"}`;
+  active++;peak=Math.max(peak,active);const url=new URL(request.url),kind=url.searchParams.has("list-type")?`LIST ${url.searchParams.get("prefix")??""}`:`${request.method} ${url.pathname.includes(`/${objectKeys.timeline}`)?"timeline":url.pathname.includes(`/${objectKeys.analogue}`)?"analogue":"other"}`;
   requests[kind]=(requests[kind]??0)+1;
   try{const response=await next(),body=new Uint8Array(await response.arrayBuffer());bytes+=body.length;
     const now=performance.now(),transfer=Number.isFinite(bandwidth)?body.length/bandwidth*1000:0;nextTransfer=Math.max(now,nextTransfer)+transfer;const wait=delay+nextTransfer-now;if(wait>0)await Bun.sleep(wait);

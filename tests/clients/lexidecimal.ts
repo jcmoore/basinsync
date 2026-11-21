@@ -1,3 +1,4 @@
+import { objectKeys } from "./object-keys";
 // Independent client implementation used to cross-check the Rust codec.
 const complement = (hex: string): string =>
   [...hex].map((d) => (15 - Number.parseInt(d, 16)).toString(16)).join("");
@@ -36,5 +37,5 @@ export function decode(wire: string): bigint {
 
 export const key = (viewpoint: bigint): string => {
   if (viewpoint < 0n) throw new Error("negative viewpoint");
-  return `kernelspace/basin/epilogue/${encode(~viewpoint)}`;
+  return `${objectKeys.basinEpilogue}${encode(~viewpoint)}`;
 };

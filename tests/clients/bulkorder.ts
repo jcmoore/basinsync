@@ -3,16 +3,17 @@ import { all, before, concat, wrap, nestedMessage, NESTED, MARGIN } from "./envb
 import { encode, toReference, VT_VECTOR_UINT } from "./flexbuffer";
 import { encode as lex, decode as unlex } from "./lexidecimal";
 import {coordinateLength,trimRetryMargins,eventEnvelope} from "./events";
+import { objectKeys } from "./object-keys";
 export {coordinateLength,trimRetryMargins} from "./events";
 
 export const bulkmanifestPath="sts/0/databasin/bulkmanifest";
 export type BulkIndex={lowest:bigint;ends:number[];coordinate:bigint};
 export function boundary(index:BulkIndex,n:number):number{return n===0?0:index.ends[n-1];}
 export function key(lowest:bigint,highest:bigint,start:number,coordinate:bigint):string {
-  assert(lowest>0n&&highest>lowest&&coordinate>=0n);assert(Number.isSafeInteger(start)&&start>=16&&start%8===0);const key=`kernelspace/basin/analogue/${lex(~lowest)}/${lex(~highest)}/v0/${start}/${coordinate}`;assert(key.length<=1024);return key;
+  assert(lowest>0n&&highest>lowest&&coordinate>=0n);assert(Number.isSafeInteger(start)&&start>=16&&start%8===0);const key=`${objectKeys.analogue}${lex(~lowest)}/${lex(~highest)}/v0/${start}/${coordinate}`;assert(key.length<=1024);return key;
 }
 export function fromKey(keyText:string):{lowest:bigint;highest:bigint;start:number;coordinate:bigint} {
-  const prefix="kernelspace/basin/analogue/";assert(keyText.startsWith(prefix));const parts=keyText.slice(prefix.length).split("/");assert(parts.length===5&&parts[2]==="v0");
+  const prefix=objectKeys.analogue;assert(keyText.startsWith(prefix));const parts=keyText.slice(prefix.length).split("/");assert(parts.length===5&&parts[2]==="v0");
   const coordinate=BigInt(parts[4]),start=Number(parts[3]),lowest=~unlex(parts[0]),highest=~unlex(parts[1]);assert.equal(key(lowest,highest,start,coordinate),keyText);return {lowest,highest,start,coordinate};
 }
 export function encodeBulkOrder(lowest:bigint,events:Uint8Array[]):Uint8Array {

@@ -6,6 +6,7 @@ import {key} from "./timeline";
 import {decodeBulkOrder} from "./bulkorder";
 import {trimRetryMargins,coordinateLength} from "./events";
 import {append,hex} from "./crc32c";
+import { objectKeys } from "./object-keys";
 const f=await fixture("crc32c");
 try {
   const bucket=await f.bucket(),count=12,prefix=[0];let coordinate=0;
@@ -19,7 +20,7 @@ try {
     assert.equal(response.Metadata!.crc32c,hex(prefix[n]));
   }
   async function verifyOrders(){
-    const orders=await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:"kernelspace/basin/analogue/"}));assert((orders.KeyCount??0)>1);
+    const orders=await f.s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:objectKeys.analogue}));assert((orders.KeyCount??0)>1);
     for(const object of orders.Contents!){
       const response=await f.s3.send(new GetObjectCommand({Bucket:bucket,Key:object.Key!})),body=await response.Body!.transformToByteArray(),{index,range}=decodeBulkOrder(body),low=Number(index.lowest),high=low+index.ends.length;
       assert.equal(response.Metadata!["base-crc32c"],hex(prefix[low-1]));assert.equal(response.Metadata!.crc32c,hex(prefix[high-1]));

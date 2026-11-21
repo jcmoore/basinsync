@@ -3,12 +3,13 @@ import { randomBytes } from "node:crypto";
 import { key, fromKey } from "./timeline";
 import { encode } from "./lexidecimal";
 import { vectors } from "./vectors";
+import { objectKeys } from "./object-keys";
 
 const shared = vectors<{keys:[string,string][];invalidKeys:string[]}>("timeline");
 
 test("shared key vectors and rejection", () => {
   for (const [m, expected] of shared.keys) { expect(key(BigInt(m))).toBe(expected); expect(fromKey(expected)).toBe(BigInt(m)); }
-  for (const bad of [...shared.invalidKeys, `kernelspace/basin/timeline/${encode(~(1n << 4096n))}`]) expect(() => fromKey(bad)).toThrow();
+  for (const bad of [...shared.invalidKeys, `${objectKeys.timeline}${encode(~(1n << 4096n))}`]) expect(() => fromKey(bad)).toThrow();
   for (const m of [0n, -1n, 1n << 4096n]) expect(() => key(m)).toThrow();
 });
 

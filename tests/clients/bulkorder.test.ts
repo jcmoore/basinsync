@@ -3,6 +3,7 @@ import {encodeBulkOrder,decodeBulkOrder,key,fromKey,eventCoordinate,coordinateLe
 import {encodeTuples,entryDigest,trimRetryMargins} from "./events";
 import {at,all,concat,wrap,MARGIN,nestedMessage} from "./envbuf";
 import {encode} from "./flexbuffer";
+import { objectKeys } from "./object-keys";
 
 const event=encodeTuples([[Symbol.species,"sync.memoremix.com","sts/0/databasin/ingestturso",{turso:{}}]]);
 test("dense BulkOrder index retains nested event boundaries and arbitrary-precision lowest",()=>{
@@ -16,7 +17,7 @@ test("dense BulkOrder index retains nested event boundaries and arbitrary-precis
 });
 test("BulkOrder rejects malformed bounds, framing, and dense indexes",()=>{
   expect(()=>encodeBulkOrder(0n,[event])).toThrow();expect(()=>encodeBulkOrder(1n,[])).toThrow();
-  for(const text of ["kernelspace/basin/analogue/0yvf/0yve","kernelspace/basin/analogue/0yve/0yve","kernelspace/basin/analogue/0zg1/0zg2","kernelspace/basin/analogue/0yve/0yvd/x"])expect(()=>fromKey(text)).toThrow();
+  for(const text of [`${objectKeys.analogue}0yvf/0yve`,`${objectKeys.analogue}0yve/0yve`,`${objectKeys.analogue}0zg1/0zg2`,`${objectKeys.analogue}0yve/0yvd/x`])expect(()=>fromKey(text)).toThrow();
   const valid=encodeBulkOrder(1n,[event]),bad=new Uint8Array(valid);bad[coordinateLength(event)-1]^=1;expect(()=>decodeBulkOrder(bad)).toThrow();
   for(const ends of [[],[0],[1],[coordinateLength(event)+8],[-1],[1.5],[coordinateLength(event),coordinateLength(event)]]){
     const bytes=new Uint8Array([...trimRetryMargins(event),...wrap(encode([Symbol.species,"sync.memoremix.com","sts/0/databasin/bulkmanifest",{lowest:1n,coordinate:0n,ends}])),...wrap(new Uint8Array(8),MARGIN)]);
