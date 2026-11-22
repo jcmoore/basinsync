@@ -53,7 +53,7 @@ if [ -z "$memory" ]; then
   [ "$memory" != "0M" ] || memory=16G
 fi
 home="$HOME"
-mkdir -p "$run/agent/$agent" "$run/tmp" "$run/logs" "$run/cache" "$home/.quint"
+mkdir -p "$run/agent/$agent" "$run/tmp" "$run/logs" "$run/cache" "$run/eval" "$home/.quint"
 settings="$run/srt-settings.json"
 SRT_HOME="$home" SRT_RUN="$run" SRT_AGENT="$agent" SRT_UID="$(id -u)" python3 -I - > "$settings" <<'EOF'
 import json, os
@@ -83,10 +83,11 @@ print(json.dumps({
     "filesystem": {
         # /run/user holds this user's D-Bus and keyring sockets.
         "denyRead": ["/home", "/root", "/run/user", f"/tmp/claude-{os.environ['SRT_UID']}"],
-        "allowRead": [f"{run}/workspace", f"{run}/agent/{agent}", f"{run}/tmp", f"{run}/cache"]
+        "allowRead": [f"{run}/workspace", f"{run}/agent/{agent}", f"{run}/tmp", f"{run}/cache",
+                      f"{run}/eval"]
                      + [f"{home}/{path}" for path in toolchains],
         "allowWrite": [f"{run}/workspace", f"{run}/agent/{agent}", f"{run}/tmp", f"{run}/cache",
-                       f"{home}/.quint"],
+                       f"{run}/eval", f"{home}/.quint"],
         "denyWrite": [],
     },
     "network": {
@@ -179,6 +180,7 @@ status() {
     "$1" "$agent" "$log" "$$" "$now" "${2:-}" > "$run/status.json.tmp"
   mv "$run/status.json.tmp" "$run/status.json"
 }
+if [ "$agent" = custom ]; then status() { :; }; fi  # oracle and probe commands
 status running
 trap 'code=$?; status finished ", \"exit\": $code"' EXIT
 trap 'trap - EXIT; status stopped ", \"exit\": 143, \"signal\": \"TERM\""; exit 143' TERM INT

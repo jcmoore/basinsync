@@ -51,6 +51,13 @@ as a gap, and keep going.
    noncanonical encodings. Pick bounds Kani can finish; record them.
 6. **`README.md`** explaining how to build, run, and test everything, and what
    is incomplete.
+7. **The oracle CLI** described in `ORACLE-INTERFACE.md`, so independent checks
+   can drive your codecs and key layout. It defines only the interface, not
+   expected results; implement it from the documentation like everything else.
+8. **Server configuration** for running your server against any S3 endpoint:
+   document in `README.md` the environment variables for the endpoint, bucket,
+   region, credentials, and listen address, so external test suites can start
+   it.
 
 ## Status and blockers
 

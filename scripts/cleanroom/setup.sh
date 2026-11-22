@@ -31,6 +31,7 @@ mkdir -p "$run/workspace" "$run/agent" "$run/tmp" "$run/logs"
 git -C "$repo" archive "$commit" docs | tar -x -C "$run/workspace"
 # The brief comes from the same ref, so a rebuild can be repeated exactly.
 git -C "$repo" show "$commit:scripts/cleanroom/brief.md" > "$run/workspace/AGENTS.md"
+git -C "$repo" show "$commit:scripts/cleanroom/oracle-interface.md" > "$run/workspace/ORACLE-INTERFACE.md"
 printf '@AGENTS.md\n' > "$run/workspace/CLAUDE.md"
 printf 'target/\nnode_modules/\n.cache/\n' > "$run/workspace/.gitignore"
 
