@@ -169,7 +169,26 @@ async function badStartup(bucket: string) {
 }
 
 function isBasinPut(request:Request){const path=new URL(request.url).pathname;return request.method==="PUT"&&path.includes("/epilogue/0y")&&!path.includes(`/${objectKeys.userFlows}`);}
+// Black-box first: a Flow's revision is observable through its Epilogue keys,
+// userspace/flows/<flow>/<revision>/epilogue/..., once markers or signs land there.
+// Against this repository's own server (no BASINSYNC_SERVER override), white-box
+// scenarios may also read it from our materialized state before any object exists;
+// both sources must agree. Other implementations' state deltas are opaque.
 async function flowRevisions(b:string):Promise<Record<string,string>> {
+  const revisions:Record<string,string>={};
+  for(const key of await committedKeys(s3,b,objectKeys.userFlows)){
+    const [flow,revision]=key.slice(objectKeys.userFlows.length).split("/");
+    if(!flow||!revision)continue;
+    assert.match(revision,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    assert(!revisions[flow]||revisions[flow]===revision,`Flow ${flow} has more than one revision`);
+    revisions[flow]=revision;
+  }
+  if(Bun.env.BASINSYNC_SERVER)return revisions;
+  const internal=await materializedRevisions(b);
+  for(const [flow,revision] of Object.entries(revisions))assert.equal(internal[flow],revision,`Flow ${flow} keys disagree with materialized state`);
+  return {...internal,...revisions};
+}
+async function materializedRevisions(b:string):Promise<Record<string,string>> {
   let image:Uint8Array|undefined;
   for(const m of (await committedKeys(s3,b,objectKeys.timeline)).map(fromKey).sort((a,b)=>a<b?-1:1)){
     const d=deltasAt(await get(b,m)).turso["default.turso"]!;
@@ -187,7 +206,7 @@ const revisions=new Map<string,string>();
 async function flowPrefix(b:string,flow:string){
   flow=flow.toLowerCase();
   const cacheKey=JSON.stringify([b,flow]);let revision=revisions.get(cacheKey);
-  if(!revision){revision=(await flowRevisions(b))[flow];assert(revision);revisions.set(cacheKey,revision);}
+  if(!revision){revision=(await eventually(()=>flowRevisions(b),r=>!!r[flow]))[flow]!;revisions.set(cacheKey,revision);}
   return `${objectKeys.userFlows}${flow.toLowerCase()}/${revision}/epilogue/`;
 }
 async function signKey(b:string,flow:string,vp:bigint){return `${await flowPrefix(b,flow)}${lex(vp)}`;}
@@ -487,7 +506,7 @@ try {
     const objects=(await s3.send(new ListObjectsV2Command({Bucket:name,Prefix:objectKeys.userFlows}))).Contents??[];
     assert(objects.some(o=>o.Key!.startsWith(`${objectKeys.userFlows}${canonical}/`)));
     assert(objects.some(o=>o.Key!.startsWith(`${objectKeys.userFlows}${longest.toLowerCase()}/`)));
-    assert.deepEqual(Object.keys(await flowRevisions(name)).sort(),[canonical,longest.toLowerCase()].sort());
+    assert.deepEqual(Object.keys(await eventually(()=>flowRevisions(name),r=>Object.keys(r).length>=2)).sort(),[canonical,longest.toLowerCase()].sort());
     await stop(app.process);
     const restored=await server(name);assert.equal((await fullStatus(restored.url,mixed)).latest?.viewpoint,0n);await stop(restored.process);
     console.log("put of success: portable Flow IDs normalize across APIs and recovery, reject unsafe characters, and fit direct object keys at 160 characters");
@@ -1450,7 +1469,7 @@ try {
     app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_MARK_BATCH_SIZE:"1",BASINSYNC_SWEEP_EDGE_BATCH_SIZE:"1",BASINSYNC_ERASE_BATCH_SIZE:"1",BASINSYNC_ERASE_CONCURRENCY:"1"});
     await timeout(entered.promise);
     const parentMarked=await inspect(parentId,owner);assert(parentMarked.marked);assert.equal(parentMarked.promoted,"");assert.equal(parentMarked.freed,"");
-    assert.equal(await exists(b,await signKey(b,"graph",0n)),false,"no sign before the entire graph is promoted");
+    assert(!(await committedKeys(s3,b,`${objectKeys.userFlows}graph/`)).some(k=>k.endsWith(`/epilogue/${lex(0n)}`)),"no sign before the entire graph is promoted");
     await timeout(status(await commit(app.url,"foreground",bytes("responsive"),0n),201),3000);
     await s3.send(new CopyObjectCommand({Bucket:b,Key:rootPath.slice(b.length+2),CopySource:rootYoung.slice(1),CopySourceIfMatch:parentMarked.etag,IfNoneMatch:"*"}));
     gate.resolve();holdCopies=false;

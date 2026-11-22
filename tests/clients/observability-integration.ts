@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {ListObjectsV2Command} from "@aws-sdk/client-s3";
-import {fixture,eventually} from "./analogue-fixture";
+import {within,fixture,eventually} from "./analogue-fixture";
 import {commit,form,epilogueStatus,reserveHeap,parseResponse,type HeapResponse} from "./client";
 import { objectKeys } from "./object-keys";
 import { passed } from "./scenarios";
@@ -21,7 +21,7 @@ try {
   const body=new TextEncoder().encode("opaque-observability-secret"),context={secret:"private-context-value"};
   const first=commit(app.url,"observed-a",body,0n,undefined,[],context),abort=new AbortController();
   const disconnected=fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("observed-b",body,0n),signal:abort.signal}).then(()=>"response",()=>"disconnected");
-  await entered.promise;
+  await within(entered.promise,"entered");
   const before=await scrape(app.url);
   assert.equal(value(before,"basinsync_submissions_inflight",{operation:"commit"}),2);
   assert.equal(value(before,"basinsync_batches_publishing"),1);

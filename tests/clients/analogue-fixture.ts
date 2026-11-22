@@ -15,6 +15,12 @@ import {sha384} from "./client";
 import {append as crcAppend,hex as crcHex} from "./crc32c";
 import { objectKeys } from "./object-keys";
 
+/** Fail clearly when an awaited server action never happens (e.g. a feature is missing). */
+export async function within<T>(promise:Promise<T>,what:string,ms=60000):Promise<T>{
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  try{return await Promise.race([promise,new Promise<never>((_,no)=>{timer=setTimeout(()=>no(new Error(`timed out after ${ms} ms waiting for ${what}`)),ms);})]);}
+  finally{clearTimeout(timer);}
+}
 export async function eventually<T>(call:()=>Promise<T>,accept:(value:T)=>boolean,ms=15000):Promise<T>{
   const end=Date.now()+ms;let error:unknown;
   while(Date.now()<end){try{const value=await call();if(accept(value))return value;}catch(e){error=e;}await Bun.sleep(10);}
