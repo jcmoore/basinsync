@@ -73,8 +73,10 @@ On Ubuntu, AppArmor refuses srt's nested user namespace for Unix-socket
 filtering, so runs allow Unix sockets and hide `/run/user` instead.
 
 Prerequisites beyond the *development tools*[~][development]: `srt`,
-`bubblewrap`, `socat`, `ripgrep`, Quint (with Apalache cached in `~/.quint`
-by one `quint verify` outside the sandbox), Java, and Kani.
+`bubblewrap`, `socat`, `ripgrep`, Quint (with Apalache and the Rust evaluator
+cached in `~/.quint` by one `quint verify` and one `quint run` outside the
+sandbox, since both download from GitHub), Java, Kani, a C toolchain, and
+VersityGW on `PATH`.
 
 ## Oracles
 
