@@ -22,7 +22,6 @@
 [timeline]: <glossary/timeline.md>
 [timeline-eviction]: <glossary/timeline-eviction.md>
 [tombstone]: <glossary/tombstone.md>
-[turso]: <glossary/turso.md>
 [viewpoint]: <glossary/viewpoint.md>
 
 # Basin backup and recovery
@@ -38,7 +37,7 @@ A *Basin*[~][basin] root is a *FlexBuffers*[~][flexbuffers] message:
 
 ```ts
 {
-  version: string;             // Turso release and revision
+  version: string;             // engine release and revision
   milestone: string;           // covered decimal Milestone M
   coordinate: string;          // exclusive decimal coordinate
   crc32c: string;              // cumulative CRC32C, eight lowercase hex digits
@@ -69,7 +68,7 @@ x-amz-meta-turso-version: <engine release and revision>
 
 Retain the *CRC32C*[~][crc32c] as the recovered prefix's accumulator.
 Other digests are hexadecimal *SHA-384*[~][sha384]. Unwrap the raw *EnvBuf message*[~][envbuf], validate metadata and its checksum,
-then validate the root's *Turso*[~][turso] version and recovery prefix.
+then validate the root's engine version and recovery prefix.
 
 Before publishing a *Basin*[~][basin] *CommitMarker*[~][commit-marker], replicate
 all *Flow*[~][flow] *markers*[~][commit-marker] through its

@@ -6,10 +6,21 @@
 [turso]: <glossary/turso.md>
 [wal]: <glossary/wal.md>
 
-# Turso state deltas
+# Materialized state deltas
 
 An `sts/0/databasin/ingestturso` command carries `{ turso: { [id]: delta } }`,
-keyed by database id, including `default.turso` and `kernel.turso`:
+keyed by database id, including `default.turso` and `kernel.turso`. A delta's
+encoding belongs to the engine that wrote it; every engine must:
+
+- name itself in `version` and reject deltas whose version it cannot apply;
+- apply a delta to the previous state to reproduce the new rows exactly;
+- bind each delta to its base and resulting *Milestones*[~][milestone] and to
+  the hexadecimal *SHA-384*[~][sha384] of the preceding encoded
+  *DifferentialEvent*[~][differential-event] (`null` at the beginning), and
+  bind the first delta to a verified initial image;
+- apply all of a group's deltas, or none, as described below.
+
+The *Turso*[~][turso] encoding carries these bindings in `physical`:
 
 ```ts
 {
@@ -30,8 +41,7 @@ keyed by database id, including `default.turso` and `kernel.turso`:
 }
 ```
 
-`version` identifies the *Turso*[~][turso] release and revision; reject
-incompatible versions. `logical.header` is the 56-byte native log header;
+For Turso, `version` identifies the release and revision. `logical.header` is the 56-byte native log header;
 `logical.frames` contains the *logical frames*[~][logical-frame], including portable changes,
 without that header. All byte payloads are binary blobs.
 

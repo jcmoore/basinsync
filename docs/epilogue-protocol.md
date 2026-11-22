@@ -5,6 +5,7 @@
 [context]: <glossary/context.md>
 [differential-event]: <glossary/differential-event.md>
 [envbuf]: <glossary/envbuf.md>
+[flow]: <glossary/flow.md>
 [heap-protocol]: <heap-protocol.md>
 [json0]: <glossary/json0.md>
 [lexidecimal]: <glossary/lexidecimal.md>
@@ -50,7 +51,10 @@ Other failures return `{"error": code, "message": text, "timelines": …}`: 400
 for a malformed request or multipart body, 422 for content that fails
 validation (such as `digest_mismatch`, or invalid *context*[~][context] or edges),
 503 `stopped` while shutting down (the outcome may be unknown), and 500 when
-publication fails. Status and reservation requests return 200.
+publication fails. An invalid *Flow*[~][flow] id is a malformed request (400)
+on every endpoint. Clients act on the status; `error` codes beyond those named
+in these pages are informative and may change. Status and reservation requests
+return 200.
 A *viewpoint*[~][viewpoint] mismatch returns HTTP 409:
 
 ```json

@@ -16,7 +16,6 @@
 [milestone]: <glossary/milestone.md>
 [node]: <glossary/node.md>
 [object-keys]: <object-keys.md>
-[physical-frame]: <glossary/physical-frame.md>
 [range-manifest]: <glossary/range-manifest.md>
 [sha384]: <glossary/sha384.md>
 [timeline]: <glossary/timeline.md>
@@ -44,14 +43,17 @@ Commitflow tuples begin with `Symbol.species`, using the
 *FlexBuffers*[~][flexbuffers] extension encoding, and carry a `markers` map
 keyed by *Flow*[~][flow] id.
 Each entry contains decimal `viewpoint`, hexadecimal *SHA-384*[~][sha384] in
-`sha384`, binary `blob`, *context*[~][context] as `Record<string, string>`, and required `edges` (`[]` for an empty graph) containing derived child *node*[~][node] ids. *Conditional creation*[~][conditional-write] of a
+`sha384`, binary `blob`, *context*[~][context] as `Record<string, string>`, and required `edges` (`[]` for an empty graph) containing derived child *node*[~][node] ids.
+Write one commitflow tuple per accepted commit, with a single-entry `markers`
+map; readers accept any grouping that keeps each *Flow's*[~][flow]
+*Viewpoints*[~][viewpoint] in order. *Conditional creation*[~][conditional-write] of a
 *DifferentialEvent*[~][differential-event] at the next *Milestone*[~][milestone]
 arbitrates competing writers. Concatenate zero or more *EnvBuf-wrapped*[~][envbuf]
 commitflow or `sts/0/databasin/commitkernel` tuples, one `sts/0/databasin/ingestturso` tuple, then a
 *range manifest*[~][range-manifest]. Wrap that command feed in one nested
 *EnvBuf*[~][envbuf] (`100`), then append a separate *counter margin*[~][margin]. Each tuple is its own
 *FlexBuffers*[~][flexbuffers] document. The ingestion command's
-*Turso deltas*[~][turso-state] carry the *physical frames*[~][physical-frame]
+*state deltas*[~][turso-state] carry the engine-specific changes
 that materialize the recorded state; all requests wait for durable publication.
 
 `commitkernel` carries `{ viewpoint: string, graph }` for the server-driven
@@ -75,4 +77,7 @@ Mismatches use the *common response*[~][epilogue-protocol].
 `BASINSYNC_STATUS_PROBE_MAX_AGE_MS` defaults to 3000; zero probes on every status
 request. Reuse a successful probe or refresh across *Flows*[~][flow] within that
 window, without extending it on cache hits. Status still waits for pending local
-uploads; writes always refresh independently of this allowance.
+uploads; writes always refresh independently of this allowance: before
+preparing from a drained pipeline, ingest any newer events. A server that loses
+a *conditional write*[~][conditional-write] race while batches are in flight
+fails them and exits; restarting recovers it from the *Timeline*[~][timeline].

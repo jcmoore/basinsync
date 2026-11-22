@@ -2,6 +2,7 @@
 [development]: <development.md>
 [diy/0zg9/261121-durable-test-suites]: <diy/0zg9/261121-durable-test-suites/README.md>
 [docs]: <../docs/README.md>
+[turso]: <turso.md>
 [verification]: <verification.md>
 
 # Repository notes
@@ -13,7 +14,8 @@ instead, so clean rooms can be given `docs/` alone. Links may point into
 `docs/`, never the reverse; tutorials here follow the same DAG rules and may
 depend on `docs/diy`.
 
-Build this repository with the *repository development notes*[~][development].
+Build this repository with the *repository development notes*[~][development];
+its *Turso materialization*[~][turso] notes cover the engine-specific parts.
 
 Keep the test suites small and resilient with
 *Durable test suites*[~][diy/0zg9/261121-durable-test-suites].
