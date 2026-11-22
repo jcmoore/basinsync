@@ -59,7 +59,8 @@ Wrap each *DifferentialEvent's*[~][differential-event] command feed in one neste
 ```ts
 [Symbol.species, "sync.memoremix.com", "sts/0/databasin/commitflow", {
   markers: { [flow: string]: {
-    viewpoint: string; sha384: string; blob: Uint8Array; context: Record<string, string>
+    viewpoint: string; sha384: string; blob: Uint8Array; context: Record<string, string>;
+    edges: string[]
   } }
 }]
 ```

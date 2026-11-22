@@ -6,6 +6,12 @@
 
 # Development
 
+Configure the server through its environment: `S3_ENDPOINT`, `S3_BUCKET`,
+`AWS_REGION` (default `us-east-1`), `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+and optional `AWS_SESSION_TOKEN`, using path-style bucket addressing; and
+`BASINSYNC_LISTEN` for the HTTP address (default `127.0.0.1:3000`). Tutorials
+introduce further `BASINSYNC_*` tuning variables.
+
 Use *VersityGW v1.11.0*[~][versitygw] as the S3-compatible test endpoint, with its
 POSIX backend and a separate metadata sidecar directory. Install the pinned binary:
 

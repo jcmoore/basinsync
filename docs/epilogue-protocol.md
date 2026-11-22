@@ -40,6 +40,17 @@ their known durable *basin*[~][basin] *Milestone*[~][milestone] (zero before the
 Successful commits report their published batch; status reports its materialized
 prefix, including when cached. A lower value than a client has already observed
 reveals a *causal reverse*[~][causal-consistency] across server instances.
+A successful commit returns HTTP 201 with its committed *Viewpoint*[~][viewpoint]:
+
+```json
+{"viewpoint":"0x0","timelines":{"basin":{"milestone":"0x1"}}}
+```
+
+Other failures return `{"error": code, "message": text, "timelines": …}`: 400
+for a malformed request or multipart body, 422 for content that fails
+validation (such as `digest_mismatch`, or invalid *context*[~][context] or edges),
+503 `stopped` while shutting down (the outcome may be unknown), and 500 when
+publication fails. Status and reservation requests return 200.
 A *viewpoint*[~][viewpoint] mismatch returns HTTP 409:
 
 ```json

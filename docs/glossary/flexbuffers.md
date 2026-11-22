@@ -23,3 +23,7 @@ the tag (in contrast to `VT_BLOB`, which keeps payload bytes packed as its lengt
 
 Magnitudes are minimal, with zero represented by one zero byte. Symbol names
 follow *JSON0*[~][json0].
+
+Writers may choose different widths, ordering, and sharing for the same value.
+Readers accept any valid layout and never require a canonical re-encoding;
+digests cover the stored bytes.

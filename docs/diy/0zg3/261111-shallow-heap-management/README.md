@@ -64,7 +64,7 @@ CREATE INDEX userspace_edges_retainer ON userspace_edges(retainer, node);
 
 For each valid *node*[~][node], insert its id, length, current reservation time,
 and empty etag/promotion values, then its staging *retainer*[~][retainer] edge.
-On collision, require matching length and *context*[~][context], and no incoming `n-` edges; add the
+On collision, require matching length and *context*[~][context]; add the
 staging edge idempotently. Report errors by input index while retaining valid
 entries in the same transaction.
 
