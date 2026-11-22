@@ -46,10 +46,13 @@ if log and os.path.exists(log):
     for line in open(log, errors="replace"):
         try: event = json.loads(line)
         except ValueError: continue
+        if not isinstance(event, dict): continue
         events += 1
-        content = (event.get("message") or {}).get("content") or []
+        message = event.get("message")
+        content = (message.get("content") if isinstance(message, dict) else None) or []
         if not isinstance(content, list): continue
         for part in content:
+            if not isinstance(part, dict): continue
             if part.get("type") == "tool_use":
                 actions.append(f"{part['name']}: {str(part.get('input'))[:110]}")
             elif part.get("type") == "text" and event.get("type") == "assistant":
