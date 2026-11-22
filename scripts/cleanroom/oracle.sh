@@ -4,12 +4,77 @@
 # only ever sees requests, never this repository's expected results.
 #
 #   scripts/cleanroom/oracle.sh vectors [--cli 'CMD'] NAME
+#   scripts/cleanroom/oracle.sh integration [--server 'CMD'] [SUITE...] NAME
 #
-# CMD runs from the clean room's workspace and is remembered in
-# eval/cli for later runs, e.g. 'cargo run -q --release -p some-cli'.
+# vectors: CMD runs from the clean room's workspace and is remembered in
+# eval/cli, e.g. 'cargo run -q --release -p some-cli'.
+# integration: CMD builds the clean room's server and prints its path
+# (remembered in eval/server); eval/server-env maps its variable names to
+# ours as THEIRS=OURS lines. Each suite (default: all) runs in a sandbox that
+# can read this repository but write only under eval/.
 set -euo pipefail
-[ "${1:-}" = vectors ] || { sed -n '5,9p' "$0" >&2; exit 2; }
-shift
+HOME_SAVE="$HOME"
+mode="${1:-}"; shift || true
+case "$mode" in vectors|integration) ;; *) sed -n '5,15p' "$0" >&2; exit 2 ;; esac
+if [ "$mode" = integration ]; then
+  server=""
+  [ "${1:-}" != --server ] || { server="$2"; shift 2; }
+  [ $# -ge 1 ] || { sed -n '5,15p' "$0" >&2; exit 2; }
+  name="${!#}"; suites=("${@:1:$#-1}")
+  here="$(cd "$(dirname "$0")" && pwd)"; repo="$(git -C "$here" rev-parse --show-toplevel)"
+  run="${CLEANROOM_ROOT:-$HOME/cleanroom}/$name"; eval_dir="$run/eval"
+  mkdir -p "$eval_dir/integration/tmp"
+  [ -z "$server" ] || printf '%s\n' "$server" > "$eval_dir/server"
+  [ -s "$eval_dir/server" ] || { echo "no server build recorded; pass --server 'CMD'" >&2; exit 1; }
+  [ -f "$eval_dir/server-env" ] || { echo "write $eval_dir/server-env (THEIRS=OURS lines)" >&2; exit 1; }
+  "$here/run.sh" --foreground --command "( $(cat "$eval_dir/server") ) > '$eval_dir/server-path'" "$name" >/dev/null
+  bin="$(tail -1 "$eval_dir/server-path")"
+  [ -x "$bin" ] || { echo "server build did not print an executable path: $bin" >&2; exit 1; }
+  [ ${#suites[@]} -gt 0 ] || suites=(integration cancellation-integration analogue-integration
+    bidirectional-integration crc32c-integration kernel-backup-integration
+    kernel-promotion-integration observability-integration)
+  # The suites write artifacts under their root's .local; srt will not grant
+  # writes inside this repository, so run them from a fresh copy in eval/.
+  copy="$eval_dir/integration/root"
+  rm -rf "$copy"; mkdir -p "$copy/tests" "$copy/.local"
+  cp -r "$repo/tests/clients" "$repo/tests/vectors" "$copy/tests/"
+  cp "$repo/package.json" "$copy/"
+  ln -s "$repo/node_modules" "$copy/node_modules"; ln -s "$repo/target" "$copy/target"
+  ln -s "$repo/.local/bin" "$copy/.local/bin"
+  settings="$eval_dir/integration/srt-settings.json"
+  HOME_DIR="$HOME" REPO="$repo" RUN="$run" python3 -I - > "$settings" <<'PY'
+import json, os
+home, repo, run = os.environ["HOME_DIR"], os.environ["REPO"], os.environ["RUN"]
+print(json.dumps({
+    "filesystem": {
+        "denyRead": ["/home", "/root", "/run/user", f"/tmp/claude-{os.getuid()}"],
+        "allowRead": [repo, f"{run}/workspace/target", f"{run}/eval"]
+                     + [f"{home}/{p}" for p in (".bun/bin", ".local/bin", ".local/node")],
+        "allowWrite": [f"{run}/eval"],
+        "denyWrite": [],
+    },
+    "network": {"allowedDomains": [], "deniedDomains": [], "allowAllUnixSockets": True,
+                "allowLocalBinding": True},
+}, indent=2))
+PY
+  failed=0
+  for suite in "${suites[@]}"; do
+    log="$eval_dir/integration/$suite.log"
+    if ( cd "$copy"
+         for variable in $(compgen -e); do unset "$variable" 2>/dev/null || true; done
+         export PATH="$HOME_SAVE/.local/bin:$HOME_SAVE/.bun/bin:/usr/bin:/bin" HOME="$HOME_SAVE" \
+           TMPDIR="$eval_dir/integration/tmp" BASINSYNC_SERVER="$here/oracles/server-adapter.sh" \
+           CLEANROOM_SERVER_BIN="$bin" CLEANROOM_SERVER_ENV_MAP="$eval_dir/server-env"
+         exec srt --settings "$settings" bun "tests/clients/$suite.ts" ) > "$log" 2>&1 < /dev/null
+    then echo "PASS $suite"
+    else
+      failed=1
+      echo "FAIL $suite: $(grep -m1 -E 'Error|error:' "$log" | cut -c1-160)"
+      grep -m1 -E '^ +at .*tests/clients/' "$log" | sed 's/^ */     /' || true
+    fi
+  done | tee "$eval_dir/integration/report.txt"
+  exit 0
+fi
 cli=""
 [ "${1:-}" != --cli ] || { cli="$2"; shift 2; }
 [ $# -eq 1 ] || { sed -n '5,9p' "$0" >&2; exit 2; }

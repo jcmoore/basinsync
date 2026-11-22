@@ -76,7 +76,7 @@ async function bucket() {
   await s3.send(new CreateBucketCommand({ Bucket:name })); return name;
 }
 function serverProcess(bucket: string, s3Endpoint: string, address: string, options:Record<string,string>={}) {
-  return launch([`${root}/target/debug/basinsync`],{
+  return launch([Bun.env.BASINSYNC_SERVER??`${root}/target/debug/basinsync`],{
     BASINSYNC_LOG_FORMAT:"json",S3_ENDPOINT:s3Endpoint,S3_BUCKET:bucket,AWS_REGION:"us-east-1",
     AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,
     AWS_SESSION_TOKEN:"",BASINSYNC_LISTEN:address,BASINSYNC_CLEANUP_INTERVAL_MS:"0",BASINSYNC_BULK_MAX_AGE_MS:"0",BASINSYNC_BACKUP_INTERVAL_MS:"0",BASINSYNC_STATUS_PROBE_MAX_AGE_MS:"0",...options,
@@ -261,9 +261,10 @@ try {
     const name=await bucket(),opaque='"bucket-empty-validator"';let probes=0;
     await s3.send(new PutObjectCommand({Bucket:name,Key:objectKeys.emptySentinel,Body:new Uint8Array(),Metadata:{preserved:"yes"}}));
     await s3.send(new PutObjectCommand({Bucket:name,Key:key(1n),Body:new Uint8Array()}));
-    const proxy=relay((request,response)=>{
+    const proxy=relay(async (request,response)=>{
       const path=new URL(request.url).pathname;
-      if(request.method==="HEAD"&&path.endsWith(`/${objectKeys.emptySentinel}`)&&response.status===200){const headers=new Headers(response.headers);headers.set("etag",opaque);return new Response(null,{status:200,headers});}
+      // Servers may observe the reference validator by HEAD or GET; rewrite both.
+      if((request.method==="HEAD"||request.method==="GET")&&path.endsWith(`/${objectKeys.emptySentinel}`)&&response.status===200){const headers=new Headers(response.headers);headers.set("etag",opaque);return new Response(request.method==="GET"?await response.arrayBuffer():null,{status:200,headers});}
       if(request.method==="HEAD"&&path.includes(`/${objectKeys.timeline}`)&&request.headers.has("if-none-match")){assert.equal(request.headers.get("if-none-match"),opaque);probes++;}
       return response;
     });

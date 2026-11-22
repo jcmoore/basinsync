@@ -23,7 +23,7 @@ let seq=0;
 async function bucket(){const Bucket=`audit-${++seq}`;await s3.send(new CreateBucketCommand({Bucket}));return Bucket;}
 async function app(Bucket:string,s3Endpoint:string,options:Record<string,string>={}){
   const address=`127.0.0.1:${await port()}`;
-  const p=launch([`${root}target/debug/basinsync`],{BASINSYNC_LOG_FORMAT:"json",S3_ENDPOINT:s3Endpoint,S3_BUCKET:Bucket,AWS_REGION:"us-east-1",AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,AWS_SESSION_TOKEN:"",BASINSYNC_LISTEN:address,BASINSYNC_CLEANUP_INTERVAL_MS:"0",BASINSYNC_BULK_MAX_AGE_MS:"0",BASINSYNC_BACKUP_INTERVAL_MS:"0",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug",...options});
+  const p=launch([Bun.env.BASINSYNC_SERVER??`${root}target/debug/basinsync`],{BASINSYNC_LOG_FORMAT:"json",S3_ENDPOINT:s3Endpoint,S3_BUCKET:Bucket,AWS_REGION:"us-east-1",AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,AWS_SESSION_TOKEN:"",BASINSYNC_LISTEN:address,BASINSYNC_CLEANUP_INTERVAL_MS:"0",BASINSYNC_BULK_MAX_AGE_MS:"0",BASINSYNC_BACKUP_INTERVAL_MS:"0",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug",...options});
   const url=`http://${address}`;await until(async()=>{if(p.process.exitCode!==null)throw Error(readFileSync(p.path,"utf8"));return (await fetch(`${url}/ready`)).status;},s=>s===404);return {...p,url};
 }
 function proxy(before:(request:Request)=>Promise<Response|void>,after:((request:Request,response:Response)=>Promise<void>)=async()=>{}){
