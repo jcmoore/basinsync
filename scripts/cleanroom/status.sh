@@ -16,7 +16,7 @@ if command -v systemctl >/dev/null; then
     -p ExecMainStatus -p MemoryCurrent -p MemoryPeak -p MemoryMax \
     -p ActiveEnterTimestamp 2>/dev/null || true)"
 fi
-ooms="$(journalctl --user -u "$unit" --no-pager -q 2>/dev/null | grep -ci 'killed by the OOM killer' || true)"
+ooms="$(journalctl --user -u "$unit" --no-pager -q 2>/dev/null | grep -ciE 'OOM killer' || true)"
 RUN="$run" SYSTEMD="$systemd" OOMS="$ooms" BRIEF="$brief" python3 -I - <<'EOF'
 import json, os, subprocess, time
 run, brief = os.environ["RUN"], os.environ["BRIEF"] == "1"
@@ -38,8 +38,9 @@ if unit:
           f"{unit.get('ActiveEnterTimestamp') or '-'}; memory {size(unit.get('MemoryCurrent', ''))}"
           f" (peak {size(unit.get('MemoryPeak', ''))}, cap {size(unit.get('MemoryMax', ''))});"
           f" OOM kills {os.environ['OOMS']}")
+limit_words = ("usage limit", "limit reached", "hit your limit", "resets", "quota", "rate limit")
 log = status.get("transcript", "")
-events, actions, errors, final, retry = 0, [], [], None, None
+events, actions, errors, final, retry, limit = 0, [], [], None, None, None
 if log and os.path.exists(log):
     idle = time.time() - os.path.getmtime(log)
     for line in open(log, errors="replace"):
@@ -57,20 +58,25 @@ if log and os.path.exists(log):
                 errors.append(str(part.get("content"))[:160])
         if event.get("type") == "result":
             final = event
+            text = str(event.get("result") or "")
+            if event.get("is_error") and any(w in text.lower() for w in limit_words):
+                limit = event
             actions.append(f"result: {event.get('subtype')} {str(event.get('result'))[:110]}")
         elif event.get("type") == "system" and event.get("subtype") == "api_retry":
             retry = event
         elif event.get("type") == "assistant":
             # Sessions emit a result per turn; only a result after the last turn counts.
-            retry, final = None, None
+            retry, final, limit = None, None, None
     print(f"transcript: {events} events, last write {int(idle // 60)} min ago"
           + ("  <- possible stall" if state == "running" and idle > 1200 else ""))
 # Outcome: finished, usage-limit (resume later with run.sh --continue), error,
 # throttled (still retrying), or in progress.
-limit_words = ("usage limit", "limit reached", "hit your limit", "resets", "quota", "rate limit")
 text = str((final or {}).get("result") or "")
 if state == "running" and not (retry and retry.get("error_status") in (429, 529)):
     outcome = "in progress"
+elif limit:
+    # Background tasks can append empty results after the limit error.
+    outcome = "usage-limit: " + str(limit.get("result"))[:200]
 elif final and final.get("is_error"):
     outcome = ("usage-limit: " if any(w in text.lower() for w in limit_words) else "error: ") + text[:200]
 elif final:
@@ -81,6 +87,8 @@ elif retry:
     outcome = f"retrying after HTTP {retry.get('error_status')} ({retry.get('error')})"
 else:
     outcome = "in progress" if state == "running" else "ended without a result"
+if outcome == "finished" and status.get("exit", 0) != 0:
+    outcome = f"error: agent exited with status {status['exit']} after its last result"
 print(f"outcome: {outcome}")
 open(f"{run}/outcome.txt", "w").write(outcome.split(":")[0] + "\n")
 def git(*args):
