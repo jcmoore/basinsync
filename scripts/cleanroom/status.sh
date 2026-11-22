@@ -93,6 +93,9 @@ print(f"outcome: {outcome}")
 open(f"{run}/outcome.txt", "w").write(outcome.split(":")[0] + "\n")
 def git(*args):
     return subprocess.run(["git", "-C", ws, *args], capture_output=True, text=True).stdout.strip()
+try: kills = open(f"{run}/logs/watchdog.log").read().splitlines()
+except OSError: kills = []
+if kills: print(f"watchdog: {len(kills)} oversized model-checker kills; last: {kills[-1]}")
 print(f"commits: {git('rev-list', '--count', 'HEAD')}; last: {git('log', '-1', '--format=%cr: %s')};"
       f" uncommitted files: {len(git('status', '--short').splitlines())}")
 try: notes = open(f"{ws}/STATUS.md").read().splitlines()

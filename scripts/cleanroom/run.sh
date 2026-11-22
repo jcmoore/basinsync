@@ -171,6 +171,31 @@ EOM
   exit 0
 fi
 
+# Model checkers can outgrow the unit's cap, and under that pressure the kernel
+# may kill the agent instead (the third run lost its agent after three CBMC
+# kills). Kill an oversized checker first, at 70% of the cap, and log it.
+watchdog() {
+  local cap_kb limit_kb cgroup procs pid name rss
+  cap_kb=$(( $(numfmt --from=iec "${memory%B}") / 1024 ))
+  limit_kb=$(( cap_kb * 7 / 10 ))
+  cgroup="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)"
+  while sleep 2; do
+    procs="$(cat "$cgroup/cgroup.procs" 2>/dev/null)" || continue
+    for pid in $procs; do
+      name="$(cat "/proc/$pid/comm" 2>/dev/null)" || continue
+      case "$name" in cbmc|kani*|java|z3|goto-*) ;; *) continue ;; esac
+      rss="$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null)"
+      if [ "${rss:-0}" -gt "$limit_kb" ]; then
+        kill -9 "$pid" 2>/dev/null &&
+          printf '%s killed %s (pid %s) at %s kB; limit %s kB\n' "$(date -u +%FT%TZ)" "$name" "$pid" "$rss" "$limit_kb" >> "$run/logs/watchdog.log"
+      fi
+    done
+  done
+}
+if [ "$inside" -eq 1 ]; then
+  watchdog & watchdog_pid=$!
+fi
+
 prompt="Read AGENTS.md and carry out the clean-room rebuild it describes. Work until every deliverable is done or blocked, committing as you go."
 log="$run/logs/$agent-$(date -u +%Y%m%dT%H%M%SZ).jsonl"
 # Builtins only: a stopping unit kills child processes such as date(1).
@@ -182,7 +207,7 @@ status() {
 }
 if [ "$agent" = custom ]; then status() { :; }; fi  # oracle and probe commands
 status running
-trap 'code=$?; status finished ", \"exit\": $code"' EXIT
+trap 'code=$?; [ -z "${watchdog_pid:-}" ] || kill "$watchdog_pid" 2>/dev/null; status finished ", \"exit\": $code"' EXIT
 trap 'trap - EXIT; status stopped ", \"exit\": 143, \"signal\": \"TERM\""; exit 143' TERM INT
 case "$agent" in
   claude)
