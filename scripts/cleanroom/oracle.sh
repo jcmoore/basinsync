@@ -65,10 +65,14 @@ PY
          export PATH="$HOME_SAVE/.local/bin:$HOME_SAVE/.bun/bin:/usr/bin:/bin" HOME="$HOME_SAVE" \
            TMPDIR="$eval_dir/integration/tmp" BASINSYNC_SERVER="$here/oracles/server-adapter.sh" \
            CLEANROOM_SERVER_BIN="$bin" CLEANROOM_SERVER_ENV_MAP="$eval_dir/server-env"
-         exec srt --settings "$settings" bun "tests/clients/$suite.ts" ) > "$log" 2>&1 < /dev/null
+         exec timeout --kill-after=30 "${CLEANROOM_SUITE_TIMEOUT:-900}" \
+           srt --settings "$settings" bun "tests/clients/$suite.ts" ) > "$log" 2>&1 < /dev/null
     then echo "PASS $suite"
     else
-      failed=1
+      code=$?; failed=1
+      if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
+        echo "HANG $suite: no result within ${CLEANROOM_SUITE_TIMEOUT:-900}s"; continue
+      fi
       echo "FAIL $suite: $(grep -m1 -E 'Error|error:' "$log" | cut -c1-160)"
       grep -m1 -E '^ +at .*tests/clients/' "$log" | sed 's/^ */     /' || true
     fi
