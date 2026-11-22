@@ -61,6 +61,19 @@ home, run, agent = os.environ["SRT_HOME"], os.environ["SRT_RUN"], os.environ["SR
 toolchains = [".cargo/bin", ".rustup", ".kani", ".quint", ".bun/bin", ".local/bin",
               ".local/node", ".local/jdk", ".local/go", ".local/share/claude",
               ".local/share/codex-cli"]
+# Tools on PATH are often symlinks into a toolchain elsewhere in $HOME (for
+# example ~/.cargo/bin/cc -> ~/.local/gcc-15/...); allow each target's
+# top-level toolchain directory so the tool actually runs.
+for link_dir in (".cargo/bin", ".local/bin"):
+    try: names = os.listdir(f"{home}/{link_dir}")
+    except OSError: continue
+    for name in names:
+        target = os.path.realpath(f"{home}/{link_dir}/{name}")
+        if not target.startswith(home + "/"): continue
+        parts = os.path.relpath(target, home).split("/")
+        depth = 3 if parts[:2] == [".local", "share"] else 2
+        if len(parts) > depth and not any(parts[:depth] == t.split("/")[:depth] for t in toolchains):
+            toolchains.append("/".join(parts[:depth]))
 domains = {
     "claude": ["api.anthropic.com", "*.anthropic.com", "claude.ai", "*.claude.ai", "*.claude.com"],
     "codex": ["api.openai.com", "*.openai.com", "chatgpt.com", "*.chatgpt.com"],

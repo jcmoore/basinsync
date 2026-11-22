@@ -76,8 +76,8 @@ it kills the largest process. Model checkers can consume all of it:
 ## Environment
 
 Rust stable with Cargo, Kani (`cargo kani`), the Quint CLI (`quint`, with
-Apalache cached), Java, Node.js, Bun, Go, and VersityGW v1.11.0 (`versitygw`)
-are on `PATH`. You run inside a
+Apalache cached), Java, Node.js, Bun, Go, a C toolchain (`cc`), and VersityGW
+v1.11.0 (`versitygw`) are on `PATH`. You run inside a
 sandbox: you can read and write this repository and your tool caches, nothing
 else on the machine. Network access is limited to the model API, package
 registries (crates.io, npm, the Go module proxy), and tool documentation. If
