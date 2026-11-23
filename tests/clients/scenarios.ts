@@ -11,8 +11,10 @@ let current = "(setup)";
 const strays: string[] = [];
 const stray = (kind: string) => (reason: unknown) => {
   const text = reason instanceof Error ? reason.message : String(reason);
+  const where = reason instanceof Error ? reason.stack?.split("\n").find(line => line.includes("/tests/clients/")) : undefined;
   strays.push(`${current}: ${kind}: ${text}`);
   console.log(`STRAY [${current}] ${kind}: ${text.split("\n")[0]}`);
+  for (const line of [...text.split("\n").slice(1, 12), ...(where ? [where.trim()] : [])]) console.log(`  ${line}`);
   // Outside any scenario (suites that only report progress markers), a stray
   // means the suite itself broke; without this it could still exit 0.
   if (current === "(setup)" && outcomes.length === 0) process.exitCode = 1;
