@@ -107,7 +107,9 @@ EOF
 
 # A curated environment: nothing from this shell leaks in except what is listed.
 envs=(
-  "HOME=$home" "TMPDIR=$run/tmp" "TERM=${TERM:-dumb}" "LANG=${LANG:-C.UTF-8}"
+  # srt sets the sandbox's TMPDIR from CLAUDE_CODE_TMPDIR, else /tmp/claude,
+  # which it does not create.
+  "HOME=$home" "TMPDIR=$run/tmp" "CLAUDE_CODE_TMPDIR=$run/tmp" "TERM=${TERM:-dumb}" "LANG=${LANG:-C.UTF-8}"
   "PATH=$home/.local/bin:$home/.cargo/bin:$home/.bun/bin:$home/.local/go/bin:/usr/local/bin:/usr/bin:/bin"
   "RUSTUP_HOME=$home/.rustup" "CARGO_HOME=$run/cache/cargo"
   "GOPATH=$run/cache/go" "GOCACHE=$run/cache/go-build" "GOFLAGS=-modcacherw"

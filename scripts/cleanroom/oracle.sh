@@ -64,7 +64,8 @@ PY
     ( cd "$copy"
       for variable in $(compgen -e); do unset "$variable" 2>/dev/null || true; done
       export PATH="$HOME_SAVE/.local/bin:$HOME_SAVE/.bun/bin:/usr/bin:/bin" HOME="$HOME_SAVE" \
-        TMPDIR="$eval_dir/integration/tmp" BASINSYNC_SERVER="$here/oracles/server-adapter.sh" \
+        TMPDIR="$eval_dir/integration/tmp" CLAUDE_CODE_TMPDIR="$eval_dir/integration/tmp" \
+        BASINSYNC_SERVER="$here/oracles/server-adapter.sh" \
         CLEANROOM_SERVER_BIN="$bin" CLEANROOM_SERVER_ENV_MAP="$eval_dir/server-env" "$@"
       exec timeout --kill-after=30 "$limit" srt --settings "$settings" bun "tests/clients/$suite.ts" ) < /dev/null
   }

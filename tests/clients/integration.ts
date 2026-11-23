@@ -650,6 +650,21 @@ try {
   // A real HTTP batch preserves ordered markers, and no success or status
   // escapes while its S3 write is still blocked before storage.
   let modernRoot:Uint8Array|null=null;
+  // Isolated scenario runs start without the two-batch scenario's root, so
+  // build an equivalent four-marker batch on demand.
+  async function ensureModernRoot():Promise<Uint8Array>{
+    if(modernRoot)return modernRoot;
+    const rootBucket=await bucket();
+    const app=await server(rootBucket,undefined,{BASINSYNC_BATCH_MAX:"4",BASINSYNC_BATCH_WAIT_MS:"1000",RUST_LOG:"basinsync=debug"});
+    const requests:Promise<Response>[]=[];
+    for(let viewpoint=0;viewpoint<4;viewpoint++){
+      requests.push(commit(app.url,"ordered-ok",bytes(`marker-${viewpoint}`),BigInt(viewpoint)));
+      await queued(app.log,"ordered-ok",viewpoint);
+    }
+    for(const response of await Promise.all(requests))await status(response,201);
+    modernRoot=await get(rootBucket,1n);await stop(app.process);
+    return modernRoot;
+  }
   for(const fail of [false,true]){
     await scenario("0zg2 turso reservoir", `two-batch real-route overlap, one ordered PUT, full-batch admission, durable status/mismatch barriers, and failed-publication recovery (fail=${fail})`, async () => {
     const batchBucket=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
@@ -814,8 +829,7 @@ try {
   });
   for(const fault of ["version","format","parent","bootstrap","wal","logical","command-order"]){
     await scenario("0zg2 turso reservoir", `JS-to-Rust replay, malformed-event rejection, and ambiguous Timeline PUT recovery without retries (fault=${fault})`, async () => {
-      assert(modernRoot,"needs the modern root from the two-batch scenario");
-    const vector=eventTuples(modernRoot!) as any[];
+    const vector=eventTuples(await ensureModernRoot()) as any[];
     const delta=vector.at(-1)[3].turso["default.turso"];
     if(fault==="version")delta.version="incompatible";
     if(fault==="format")delta.physical.format="unknown";
