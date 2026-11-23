@@ -277,6 +277,7 @@ try {
   const a = bytes("359");assert(sha384(a).startsWith("00"));
   // Probe collisions bound tombstones below sixteen bytes and standalone margins to u8 values 1–7.
   for(const mode of ["selected","all-tombstones","all-margins"]){
+    await scenario("0zg1 timeline race", `bounded tombstone/margin probes, immutable tombstones, upload postconditions, margin retries across all sequence writers, and stable pipelined Timeline digest/recovery (mode=${mode})`, async () => {
     const b=await bucket(),writes:string[]=[];
     const proxy=relay(async(request,response)=>{
       const path=new URL(request.url).pathname;
@@ -292,7 +293,7 @@ try {
       const log=readFileSync(processLogs.get(process)!,"utf8");assert(log.includes(mode==="all-tombstones"?"refusing 16-byte tombstone":"cannot distinguish margin with u8 counters 1–7"));
       assert(!writes.some(p=>p.endsWith("/tombstone/16")),"sixteen-byte tombstones must never be written");
       if(mode==="all-margins")assert.deepEqual(writes.filter(p=>p.includes("/margin/")).map(p=>p.split("/").at(-1)),Array.from({length:7},(_,i)=>String(i+1)));
-      continue;
+      return;
     }
     let app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     assert.deepEqual(writes.filter(p=>p.includes("/tombstone/")).map(p=>p.split("/").at(-1)),["2","4","6"]);
@@ -304,6 +305,7 @@ try {
     const cp=await basinBackup(b);assert(cp);const vp=~unlex(cp.key.slice(objectKeys.basinEpilogue.length));
     await s3.send(new PutObjectCommand({Bucket:b,Key:epilogueKey(vp+1n),Body:new Uint8Array([0xde,0xad,0xde,0xad,0xde,0xad])}));
     app=await server(b,proxy.url);assert.equal((await fullStatus(app.url,"probed")).latest?.viewpoint,0n);await stop(app.process);
+    });
   }
   await scenario("0zg1 timeline race", "bounded tombstone/margin probes, immutable tombstones, upload postconditions, margin retries across all sequence writers, and stable pipelined Timeline digest/recovery (3/7)", async () => {
     const b=await bucket();let armed=false;
@@ -367,11 +369,13 @@ try {
     const restored=await server(b);assert.deepEqual(await latestBlob((await fullStatus(restored.url,"collision")).latest!),bytes("second"));await stop(restored.process);
   });
   for(const kind of ["marker","backup","sign"]){
+    await scenario("0zg1 timeline race", `bounded tombstone/margin probes, immutable tombstones, upload postconditions, margin retries across all sequence writers, and stable pipelined Timeline digest/recovery (kind=${kind})`, async () => {
     const b=await bucket(),proxy=collisionProxy(b,r=>{const path=new URL(r.url).pathname;return kind==="marker"?path.includes(`/${objectKeys.userFlows}`):kind==="backup"?isBasinPut(r):path.includes("/epilogue/0z");},false,false,3);
     const app=await server(b,proxy.url,{BASINSYNC_BACKUP_INTERVAL_MS:"10",BASINSYNC_CLEANUP_INTERVAL_MS:kind==="sign"?"10":"0"});await status(await commit(app.url,"collision",a,0n),201);
     await eventually(()=>basinBackup(b),Boolean);await eventually(async()=>proxy.retries(),n=>n>0);await stop(app.process);
     const cp=await basinBackup(b);assert(cp);assert.equal((await inspectImage(cp.blob)).flows.collision,"0");
     const restored=await server(b);assert.deepEqual(await latestBlob((await fullStatus(restored.url,"collision")).latest!),a);await stop(restored.process);
+    });
   }
   await scenario("0zg1 timeline race", "bounded tombstone/margin probes, immutable tombstones, upload postconditions, margin retries across all sequence writers, and stable pipelined Timeline digest/recovery (5/7)", async () => {
     const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes(`/${objectKeys.timeline}`),false,true);
@@ -617,6 +621,7 @@ try {
   });
 
   for(let round=0;round<Number(process.env.RACE_ROUNDS??8);round++){
+    await scenario("0zg1 timeline race", `real conditional Timeline races choose one winner; losers respond and exit (round=${round})`, async () => {
     const raceBucket=await bucket(); let armed=false,arrived=0;
     const gate=Promise.withResolvers<void>();
     const proxy=relay(async(r,response)=>{
@@ -638,6 +643,7 @@ try {
     assert.deepEqual(markerAt(await get(raceBucket,1n),"race").blob,payloads[winner]);
     await status(await commit(racers[winner].url,"race",a,1n),201);
     await stop(racers[winner].process);await proxy.service.stop(true);
+    });
   }
   passed("0zg1 timeline race", "real conditional Timeline races choose one winner; losers respond and exit");
 
@@ -645,6 +651,7 @@ try {
   // escapes while its S3 write is still blocked before storage.
   let modernRoot:Uint8Array|null=null;
   for(const fail of [false,true]){
+    await scenario("0zg2 turso reservoir", `two-batch real-route overlap, one ordered PUT, full-batch admission, durable status/mismatch barriers, and failed-publication recovery (fail=${fail})`, async () => {
     const batchBucket=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let puts=0,active=0,peak=0;
     const proxy=relay(async(request,response)=>{
@@ -694,9 +701,11 @@ try {
       assert.deepEqual(await epilogueStatus(restored.url,flow),{latest:{viewpoint:4n}});await stop(restored.process);
     }
     await proxy.service.stop(true);
+    });
   }
   // Preparation advances one batch ahead; failed publication discards it.
   for(const fault of ["none","before","after"]){
+    await scenario("0zg2 turso reservoir", `two-batch real-route overlap, one ordered PUT, full-batch admission, durable status/mismatch barriers, and failed-publication recovery (fault=${fault})`, async () => {
     const pipelineBucket=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let puts=0,active=0,peak=0,completed=0;
     const proxy=relay(async(request,response)=>{
@@ -740,8 +749,10 @@ try {
       await status(await commit(restored.url,flow,a,fault==="after"?1n:0n),201);await stop(restored.process);
     }
     await proxy.service.stop(true);
+    });
   }
   for(const fail of [false,true]){
+    await scenario("0zg2 turso reservoir", `two-batch real-route overlap, one ordered PUT, full-batch admission, durable status/mismatch barriers, and failed-publication recovery (fail=${fail})`, async () => {
     const mismatchBucket=await bucket();const second=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();
     let puts=0;
     const proxy=relay(async(request,response)=>{
@@ -759,6 +770,7 @@ try {
     if(fail){await status(await conflict,503);await status(await latest,503);assert.equal(await timeout(app.process.exited),1);}
     else{await mismatch(await conflict,2n);assert.deepEqual(positions(parse(await (await latest).text())),{latest:{viewpoint:1n}});await stop(app.process);}
     assert.equal(puts,2,"mismatch-only work must not create an event");await proxy.service.stop(true);
+    });
   }
   await scenario("0zg2 turso reservoir", "two-batch real-route overlap, one ordered PUT, full-batch admission, durable status/mismatch barriers, and failed-publication recovery", async () => {
     const full=await bucket();const gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let puts=0;
@@ -800,9 +812,10 @@ try {
     assert.deepEqual(await epilogueStatus(app.url,"disconnected"),{latest:{viewpoint:0n}});
     await status(await commit(app.url,"disconnected",a,1n),201);await stop(app.process);await proxy.service.stop(true);
   });
-  assert(modernRoot);
   for(const fault of ["version","format","parent","bootstrap","wal","logical","command-order"]){
-    const vector=eventTuples(modernRoot) as any[];
+    await scenario("0zg2 turso reservoir", `JS-to-Rust replay, malformed-event rejection, and ambiguous Timeline PUT recovery without retries (fault=${fault})`, async () => {
+      assert(modernRoot,"needs the modern root from the two-batch scenario");
+    const vector=eventTuples(modernRoot!) as any[];
     const delta=vector.at(-1)[3].turso["default.turso"];
     if(fault==="version")delta.version="incompatible";
     if(fault==="format")delta.physical.format="unknown";
@@ -812,6 +825,7 @@ try {
     if(fault==="logical")delta.logical.frames[0][0]^=1;
     if(fault==="command-order")vector.reverse();
     const fixture=await bucket();await seed(fixture,1n,encodeTuples(vector));await badStartup(fixture);
+    });
   }
 
   // Capture real Turso frames, then re-encode their event independently in JS.
@@ -1058,6 +1072,7 @@ try {
   // Conditional sequence HEADs distinguish live entries from empty sentinels. Exercise both missing-key
   // responses, an endpoint ignoring conditions, and failures that must not look absent.
   for(const mode of ["native","missing-412","ignored","denied","unavailable"]){
+    await scenario("0zg1 timeline race", `conditional reads, 304/412/404 probe compatibility, and fail-closed authorization/service errors (mode=${mode})`, async () => {
     const b=await bucket();let present=0,absent=0;
     const proxy=relay((request,response)=>{
       const url=new URL(request.url),object=url.pathname.split("/").slice(2).join("/");
@@ -1076,7 +1091,7 @@ try {
     const observer=await server(b,proxy.url);
     const initial=await fetch(`${observer.url}/api/v0/epilogue/status?flow=conditional`);
     if(mode==="denied"||mode==="unavailable"){
-      await status(initial,503);assert.equal(await timeout(observer.process.exited),1);continue;
+      await status(initial,503);assert.equal(await timeout(observer.process.exited),1);return;
     }
     await status(initial,200);
     const writer=await server(b);await status(await commit(writer.url,"conditional",a,0n),201);
@@ -1084,6 +1099,7 @@ try {
     assert.equal(found.latest?.viewpoint,0n);assert.deepEqual(await latestBlob(found.latest!),a);
     assert(present>0&&absent>0,"exercise both branches of conditional existence search");
     await stop(writer.process);await stop(observer.process);
+    });
   }
   passed("0zg1 timeline race", "conditional reads, 304/412/404 probe compatibility, and fail-closed authorization/service errors");
   // Heap staging journals derived identifiers, never authentication material.
@@ -1166,6 +1182,7 @@ try {
   });
   // Reservation and commit batches share the two-slot publication pipeline.
   for(const fault of ["none","before","after"]){
+    await scenario("0zg3 shallow heap", `pipelined reservation/commit durability, ambiguous reservation recovery, and competing reservers (fault=${fault})`, async () => {
     const b=await bucket(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>();let puts=0,done=false;
     const proxy=relay(async(request,response)=>{
       if(fault==="after"&&request.method==="PUT"&&new URL(request.url).pathname.endsWith(`/${key(1n)}`)){await response.arrayBuffer();return new Response("reply lost",{status:503});}return response;
@@ -1187,6 +1204,7 @@ try {
       const restored=await server(b);const retry=await reserveHeap(restored.url,"pipelined-heap",0n,[input]);await status(retry.clone(),200);
       assert.equal(parse<HeapResponse>(await retry.text()).timelines.basin.milestone,fault==="after"?2n:1n);await stop(restored.process);
     }
+    });
   }
   // Concurrent reservers arbitrate with the same conditional Timeline append.
   await scenario("0zg3 shallow heap", "pipelined reservation/commit durability, ambiguous reservation recovery, and competing reservers", async () => {
@@ -1245,6 +1263,7 @@ try {
     await stop(restored.process);
   });
   for(const fault of ["before","after"]){
+    await scenario("0zg5 deep heap", `deep node DAGs, cached conditional HEADs in both generations, immutable child sets, degree/height limits, nonblocking verification, revision races, bounded recursive reclamation, and snapshot replay (fault=${fault})`, async () => {
     const b=await bucket();let deletes=0,failed=false;const sweeps=new WeakSet<Request>();
     const isSweep=(request:Request)=>request.method==="PUT"&&new URL(request.url).pathname.endsWith(`/${key(3n)}`);
     const proxy=relay(async(request,response)=>{
@@ -1263,6 +1282,7 @@ try {
     const retry=await server(b,endpoint,{BASINSYNC_CLEANUP_INTERVAL_MS:"15"});
     await eventually(async()=>{const r=await fetch(actions.preview!.url,{headers:actions.preview!.headers});await r.arrayBuffer();return r.status;},n=>n===404||n===412);
     await stop(retry.process);
+    });
   }
 
   await scenario("0zg5 deep heap", "deep node DAGs, cached conditional HEADs in both generations, immutable child sets, degree/height limits, nonblocking verification, revision races, bounded recursive reclamation, and snapshot replay (1/2)", async () => {
