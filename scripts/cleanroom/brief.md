@@ -20,6 +20,13 @@ as a gap, and keep going.
   third-party dependency, not basinsync code: depend on `vendor/turso/core` by
   path, read it freely, and do not edit it. Materialize state in Turso as the
   documentation requires; do not substitute another store.
+- `vendor/basinsync-codec` is a codec kit from an earlier clean room built
+  from these docs: Lexidecimal, Diffuse16, EnvBuf, FlexBuffers extensions,
+  JSON0, CRC32C, SHA-384 hex, object keys, Flow ids, and the oracle CLI, with
+  Kani proofs already checked (`crates/codec/KANI.md`). Depend on
+  `vendor/basinsync-codec/crates/codec` by path instead of rewriting codecs,
+  and do not edit it. Where it disagrees with the docs, the docs win: record
+  a gap and wrap or work around the kit.
 - Your build will later be checked against independent tests you cannot see.
   Follow the documentation exactly; do not invent behavior to make things
   "work" without logging the gap that forced it.
@@ -44,9 +51,7 @@ as a gap, and keep going.
 3. **A Rust implementation** of every tutorial in a Cargo workspace, with the
    documented HTTP API, S3 object layout, configuration, shutdown behavior, and
    metrics, runnable against an S3-compatible endpoint such as VersityGW as
-   `docs/development.md` describes. That includes the codecs (Lexidecimal,
-   Diffuse16, EnvBuf, FlexBuffers extensions, JSON0, CRC32C and SHA-384
-   handling), Epilogue commits, the Basin Timeline, the materialized state in
+   `docs/development.md` describes, using the codec kit. That includes Epilogue commits, the Basin Timeline, the materialized state in
    Turso with its logical and physical frame deltas,
    the Heap (shallow and deep, with cleanup, marking, and promotion), Basin
    backups and recovery, KernelSpace backup nodes and their promotion, the
@@ -55,16 +60,9 @@ as a gap, and keep going.
    that order and record what remains in `STATUS.md`.
 4. **Model-based tests** with the `quint-connect` crate, replaying Quint traces
    against the Rust core and comparing state at every step.
-5. **Kani proofs** for the codecs (`cargo kani`): no panics on arbitrary input
-   up to a bound; round-trips (decode of encode returns the value, and encode
-   of a decoded canonical string returns that string); rejection of
-   noncanonical encodings. Pick bounds Kani can finish; record them.
-6. **`README.md`** explaining how to build, run, and test everything, and what
+5. **`README.md`** explaining how to build, run, and test everything, and what
    is incomplete.
-7. **The oracle CLI** described in `ORACLE-INTERFACE.md`, so independent checks
-   can drive your codecs and key layout. It defines only the interface, not
-   expected results; implement it from the documentation like everything else.
-8. **Server configuration** for running your server against any S3 endpoint:
+6. **Server configuration** for running your server against any S3 endpoint:
    document in `README.md` the environment variables for the endpoint, bucket,
    region, credentials, and listen address, so external test suites can start
    it.
@@ -82,9 +80,9 @@ blockers, commit, and stop rather than looping.
 Everything you start shares one memory cap, `$CLEANROOM_MEMORY_MAX`; exceeding
 it kills the largest process. Model checkers can consume all of it:
 
-- run one Kani or Apalache job at a time, never several in parallel or in
+- run one Apalache job at a time, never several in parallel or in
   background helpers;
-- wrap each in `timeout` (for example `timeout 900 cargo kani --harness NAME`),
+- wrap each in `timeout` (for example `timeout 900 quint verify ...`),
   start with small bounds (`--default-unwind`, `--max-steps`), and grow them
   only while runs stay well under the cap;
 - treat an out-of-memory kill or timeout as a reason to shrink the bound or
