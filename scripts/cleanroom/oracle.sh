@@ -67,16 +67,22 @@ PY
            CLEANROOM_SERVER_BIN="$bin" CLEANROOM_SERVER_ENV_MAP="$eval_dir/server-env"
          exec timeout --kill-after=30 "${CLEANROOM_SUITE_TIMEOUT:-900}" \
            srt --settings "$settings" bun "tests/clients/$suite.ts" ) > "$log" 2>&1 < /dev/null
-    then echo "PASS $suite"
-    else
-      code=$?; failed=1
-      if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
-        echo "HANG $suite: no result within ${CLEANROOM_SUITE_TIMEOUT:-900}s"; continue
-      fi
-      echo "FAIL $suite: $(grep -m1 -E 'Error|error:' "$log" | cut -c1-160)"
-      grep -m1 -E '^ +at .*tests/clients/' "$log" | sed 's/^ */     /' || true
+    then code=0; else code=$?; fi
+    passes=$(grep -c '^PASS \[' "$log" || true); fails=$(grep -c '^FAIL \[' "$log" || true)
+    if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then verdict="HANG after ${CLEANROOM_SUITE_TIMEOUT:-900}s"
+    elif [ "$code" -eq 0 ]; then verdict="ok"
+    else verdict="exit $code"; fi
+    printf '%-28s %3s pass %3s fail  %s\n' "$suite" "$passes" "$fails" "$verdict"
+    grep -E '^FAIL \[' "$log" | sed 's/^/    /' | cut -c1-150 || true
+    if [ "$code" -ne 0 ] && [ "$fails" -eq 0 ]; then
+      echo "    stopped outside a scenario: $(grep -m1 -E 'Error|error:' "$log" | cut -c1-140)"
     fi
   done | tee "$eval_dir/integration/report.txt"
+  # Scenario totals by tutorial tag, across suites.
+  cat "$eval_dir"/integration/*.log | grep -oE '^(PASS|FAIL) \[[^]]*\]' | sort | uniq -c |
+    awk '{tag=$3; for(i=4;i<=NF;i++) tag=tag" "$i; n[tag" "$2]=$1; tags[tag]=1}
+         END{for(t in tags) printf "  %-32s %3d pass %3d fail\n", t, n[t" PASS"], n[t" FAIL"]}' |
+    sort | tee -a "$eval_dir/integration/report.txt"
   exit 0
 fi
 cli=""

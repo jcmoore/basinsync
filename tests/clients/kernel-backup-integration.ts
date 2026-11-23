@@ -8,6 +8,7 @@ import {fromKey} from "./timeline";
 import {deltasAt,eventTuples,entriesAt,type WalDelta} from "./events";
 import {ingestWal} from "./wal";
 import { objectKeys } from "./object-keys";
+import { passed } from "./scenarios";
 
 type Node={id:string;revision:string;length:number;sha384:string};
 type Graph={version:string;milestone:string;coordinate:string;crc32c:string;parent:string;databases:Record<string,Node>};
@@ -109,5 +110,5 @@ try {
   const big=await f.server(large,{BASINSYNC_BACKUP_INTERVAL_MS:"30"},observing);
   const largeRoot=await eventually(()=>latest(large),Boolean);assert(largeRoot);assert(largeRoot.graph.databases["default.turso"].length>8*1024*1024);assert.equal(largePuts,1);assert.equal(posts,0);await f.stop(big.process);
   assert.equal((await f.recover(large,"sequential")).flows.large,"0");
-  console.log(`put of success: paired KernelSpace backup nodes, durable internal reservations, commitkernel, foreground progress, prefix-only eviction, and interrupted root repair; ${f.artifacts}`);
+  passed("0zg7 backup nodes", `paired KernelSpace backup nodes, durable internal reservations, commitkernel, foreground progress, prefix-only eviction, and interrupted root repair; ${f.artifacts}`);
 }finally{await f.close();}

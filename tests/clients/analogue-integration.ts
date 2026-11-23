@@ -8,6 +8,7 @@ import {rangesAt,trimRetryMargins} from "./events";
 import {at,concat,wrap,MARGIN} from "./envbuf";
 import {commit} from "./client";
 import { objectKeys } from "./object-keys";
+import { passed } from "./scenarios";
 
 const f=await fixture();
 try{
@@ -151,7 +152,7 @@ try{
     const singles=await f.recover(b,"bulk-parallel",undefined,false,{BASINSYNC_RECOVERY_BULK_CONCURRENCY:"1"});assert.equal(singles.sha384,baseline.sha384);assert.equal(singles.stats.peak_bulk_downloads,1);
     const none=await f.recover(b,"range-parallel",undefined,false,{BASINSYNC_RECOVERY_BULK_BUFFER_BYTES:"1"});assert.equal(none.sha384,baseline.sha384);assert.equal(none.stats.bulk_gets,0,"oversized orders fall back without blocking recovery");
   }
-  console.log("put of success: Rust/TS BulkOrder interoperability, overlapping and contained intervals, bounded recovery modes, exact images, range suffixes, corruption fallback, and nonblocking discovery");
+  passed("0zg4 bulk orders", "Rust/TS BulkOrder interoperability, overlapping and contained intervals, bounded recovery modes, exact images, range suffixes, corruption fallback, and nonblocking discovery");
 
   // Hold an archive PUT while later foreground commits fill/drop the byte handoff.
   {
@@ -194,5 +195,5 @@ try{
     const apps=await Promise.all([f.server(other,{BASINSYNC_BULK_MAX_AGE_MS:"10"}),f.server(other,{BASINSYNC_BULK_MAX_AGE_MS:"10"})]);await Promise.all(apps.map(app=>f.stop(app.process)));
     assert.equal((await f.s3.send(new ListObjectsV2Command({Bucket:other,Prefix:objectKeys.analogue}))).KeyCount,1);
   }
-  console.log(`put of success: byte/age/shutdown flushing, nonblocking bounded handoff, retry, restart, immutable races, and exact archived bytes. Artifacts: ${f.artifacts}`);
+  passed("0zg4 bulk orders", `byte/age/shutdown flushing, nonblocking bounded handoff, retry, restart, immutable races, and exact archived bytes. Artifacts: ${f.artifacts}`);
 }finally{await f.close();}

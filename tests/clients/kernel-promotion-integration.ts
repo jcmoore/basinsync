@@ -8,6 +8,7 @@ import {encode as lex} from "./lexidecimal";
 import {fromKey,key as timelineKey} from "./timeline";
 import {eventTuples} from "./events";
 import { objectKeys } from "./object-keys";
+import { passed } from "./scenarios";
 import { committedKeys } from "./listing";
 const f=await fixture("kernel-promotion");
 type Node={id:string;revision:string;length:number;sha384:string};
@@ -139,5 +140,5 @@ try{
     const app=await f.server(bucket,{BASINSYNC_BACKUP_INTERVAL_MS:"30"},proxy);assert.equal((await commit(app.url,"copy-drain",new Uint8Array([6]),0n)).status,201);await entered.promise;
     const stopped=f.stop(app.process);await Bun.sleep(60);assert.equal(app.process.exitCode,null);release.resolve();await stopped;assert(await exists(bucket,sign));await checkGraph(bucket,await root(bucket));
   }
-  console.log(`put of success: bounded KernelSpace marking, conditional COPY without relaying bytes, verified destinations, DELETE/reply/sign failures, restart, no backup feedback, and shutdown draining; ${f.artifacts}`);
+  passed("0zg7 backup nodes", `bounded KernelSpace marking, conditional COPY without relaying bytes, verified destinations, DELETE/reply/sign failures, restart, no backup feedback, and shutdown draining; ${f.artifacts}`);
 }finally{await f.close();}

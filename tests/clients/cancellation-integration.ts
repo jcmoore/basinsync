@@ -5,6 +5,7 @@ import {S3Client,CreateBucketCommand,HeadObjectCommand,ListObjectsV2Command} fro
 import {commit,reserveHeap,parseResponse,form,epilogueStatus,type HeapResponse} from "./client";
 import {s3Fixture} from "./s3-fixture";
 import { objectKeys } from "./object-keys";
+import { scenario, report } from "./scenarios";
 
 const root=new URL("../../",import.meta.url).pathname;
 const artifacts=mkdtempSync(`${root}.local/cancellation-probe-`);
@@ -35,6 +36,7 @@ try{
   await until(async()=>{await s3.send(new CreateBucketCommand({Bucket:"readiness"}));return true;},Boolean);
   // Shutdown awaits an in-flight COPY; rejection preserves its source and a lost reply is verified.
   for(const fault of ["rejected","reply-lost"]){
+    await scenario("0zg6 marker edges", `shutdown drains a ${fault} COPY without relaying bytes and restart completes promotion`, async () => {
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let copies=0,sourceReads=0;
     const p=proxy(async request=>{
       const u=new URL(request.url);
@@ -63,10 +65,11 @@ try{
     await until(async()=>{const r=await fetch(actions.read.url,{headers:actions.read.headers});const body=new Uint8Array(await r.arrayBuffer());return r.status===200&&body.length===data.length;},Boolean);
     const old=await fetch(actions.read.url,{headers:actions.read.headers});assert.deepEqual(new Uint8Array(await old.arrayBuffer()),data);
     await stop(restored.process);
-    console.log(`put of success: shutdown drains a ${fault} COPY without relaying bytes and restart completes promotion`);
+    });
   }
   // Disconnected requests still drain, including a prepared successor batch.
   for(const signal of (process.platform==="win32"?["SIGINT"]:["SIGINT","SIGTERM"]) as ("SIGINT"|"SIGTERM")[]){
+    await scenario("development shutdown", `${signal} drains disconnected and pipelined commits in order and recovery sees both`, async () => {
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let puts=0;
     const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)){if(++puts===1){entered.resolve();await release.promise;}}});
     const server=await app(b,p),abort=new AbortController();
@@ -77,10 +80,11 @@ try{
     server.process.kill(signal);await Bun.sleep(100);assert.equal(server.process.exitCode,null,"shutdown waits for admitted work");
     release.resolve();assert.equal((await successor).status,201);assert.equal(await deadline(server.process.exited),0);assert.equal(puts,2);
     const restored=await app(b,endpoint);assert.equal((await epilogueStatus(restored.url,"disconnect")).latest?.viewpoint,1n);await stop(restored.process);
-    console.log(`put of success: ${signal} drains disconnected and pipelined commits in order and recovery sees both`);
+    });
   }
   // Starting/stopping an idle replica must not advance the Timeline or create backups.
   for(const option of [undefined,"false"]){
+    await scenario("development shutdown", `shutdown with BASINSYNC_BACKUP_ON_SHUTDOWN=${option??"unset"} leaves Timeline/Epilogue state unchanged across replica restart`, async () => {
     const b=await bucket(),options:Record<string,string>={BASINSYNC_BACKUP_INTERVAL_MS:"3600000"};
     if(option!==undefined)options.BASINSYNC_BACKUP_ON_SHUTDOWN=option;
     let timelinePuts=0;
@@ -93,29 +97,30 @@ try{
     assert.deepEqual(await keys(objectKeys.timeline),before);assert.deepEqual(await keys(objectKeys.basinEpilogue),[]);assert.deepEqual(await keys(objectKeys.kernelHeap),[]);assert.equal(timelinePuts,1);
     const replica=await app(b,p,options);assert.equal((await epilogueStatus(replica.url,"no-final-backup")).latest!.viewpoint,0n);
     replica.process.kill("SIGINT");assert.equal(await deadline(replica.process.exited),0);assert.deepEqual(await keys(objectKeys.timeline),before);assert.equal(timelinePuts,1);
+    });
   }
-  console.log("put of success: default and explicit-false shutdowns leave Timeline/Epilogue state unchanged across replica restart");
   // An explicit opt-in wakes the worker for a final backup, even without a periodic schedule.
   for(const interval of ["3600000","0"]){
+    await scenario("0zg3 backup recovery", `opted-in shutdown awaits a final backup with periodic interval ${interval} ms`, async () => {
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let backups=0;
     const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${b}/${objectKeys.basinEpilogue}`)&&request.headers.has("x-amz-meta-milestone")){backups++;entered.resolve();await release.promise;}});
     const server=await app(b,p,{BASINSYNC_BACKUP_INTERVAL_MS:interval,BASINSYNC_BACKUP_ON_SHUTDOWN:"true"});
     assert.equal((await commit(server.url,"backup",bytes("marker"),0n)).status,201);assert.equal(backups,0);
     server.process.kill("SIGINT");await deadline(entered.promise);await Bun.sleep(50);assert.equal(server.process.exitCode,null);
     release.resolve();assert.equal(await deadline(server.process.exited),0);assert.equal(backups,1);
+    });
   }
-  console.log("put of success: opted-in shutdown awaits a final backup with a long or disabled periodic interval");
   // The drain deadline is explicit and exits unsuccessfully rather than claiming completion.
-  {
+  await scenario("development shutdown", "exhausted shutdown deadline reports failure with an uncertain in-flight outcome", async () => {
     const b=await bucket(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
     const p=proxy(async request=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.timeline}`)){entered.resolve();await release.promise;return new Response("not stored",{status:503});}});
     const server=await app(b,p,{BASINSYNC_SHUTDOWN_TIMEOUT_MS:"100"}),abort=new AbortController();
     const request=fetch(`${server.url}/api/v0/epilogue`,{method:"PUT",body:form("timeout",bytes("marker"),0n),signal:abort.signal}).catch(()=>null);
     await deadline(entered.promise);abort.abort();await request;server.process.kill("SIGINT");
     assert.equal(await deadline(server.process.exited),1);release.resolve();assert(readFileSync(server.path,"utf8").includes("shutdown drain timed out"));
-    console.log("put of success: exhausted shutdown deadline reports failure with an uncertain in-flight outcome");
-  }
+  });
   console.log(`Artifacts: ${artifacts}`);
+  if(!report())process.exitCode=1;
 }finally{
   await Promise.all(processes.map(stop));await Promise.all(proxies.map(p=>p.stop(true)));s3.destroy();
 }
