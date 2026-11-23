@@ -451,11 +451,13 @@ try {
   });
   // Flow Epilogue contents must never become a source of Basin state.
   await s3.send(new PutObjectCommand({Bucket:b,Key:`${objectKeys.userFlows}unrelated/epilogue/0`,Body:bytes("legacy, not a Timeline")}));
+  const flowA = "0x-first", flowB = "__proto__";
+  // The writer/observer pair and its stress history are shared by the next steps, so they run as one scenario.
+  await scenario("0zg1 timeline race", "Flow isolation, stress, and replay with a shared writer and observer", async () => {
   const trace: {method:string;url:URL}[] = [];
   const traced = relay((r,response)=>{ trace.push({method:r.method,url:new URL(r.url)}); return response; });
   let writer = await server(b,traced.url);
   const observer = await server(b,traced.url);
-  const flowA = "0x-first", flowB = "__proto__";
 
   await scenario("0zg1 timeline race", "Flow isolation, validation, prototype-safe ids, and live Timeline refresh", async () => {
     const name=await bucket(),app=await server(name,endpoint,{BASINSYNC_BACKUP_INTERVAL_MS:"10"});
@@ -612,6 +614,7 @@ try {
   await accepted(writer.url,flowA,bytes("after recovery"),2n);
   await stop(writer.process);await stop(observer.process);
   passed("0zg2 turso reservoir", "N markers across N gapless Milestones; independent TS WAL ingestion, full replay, and minimum-key latest discovery");
+  });
 
   for(let round=0;round<Number(process.env.RACE_ROUNDS??8);round++){
     const raceBucket=await bucket(); let armed=false,arrived=0;
@@ -812,6 +815,8 @@ try {
   }
 
   // Capture real Turso frames, then re-encode their event independently in JS.
+  // Decodes this repository's Turso frames, so other engines are expected to fail it.
+  await scenario("0zg2 turso reservoir", "JS-to-Rust replay, malformed-event rejection, and ambiguous Timeline PUT recovery without retries", async () => {
   const fixture=await bucket();
   const markers = {[flowA]:marker(a),[flowB]:marker(new Uint8Array())};
   const captured = spawn([`${root}/target/debug/examples/frame-fixture`], {cwd:root, stdin:"pipe", stdout:"pipe", stderr:"inherit"});
@@ -869,7 +874,7 @@ try {
   assert.deepEqual(await epilogueStatus(recovered.url,"f"),{latest:{viewpoint:0n}});
   await status(await commit(recovered.url,"f",a,1n),201);
   await stop(recovered.process);
-  passed("0zg2 turso reservoir", "JS-to-Rust replay, malformed-event rejection, and ambiguous Timeline PUT recovery without retries");
+  });
   // Paired database backup graphs, blocked image uploads, root interruption,
   // immutable prefix reconstruction, and graph-only recovery are exercised in
   // kernel-backup-integration.ts. UserSpace behavior below uses the same roots.
