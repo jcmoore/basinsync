@@ -27,7 +27,7 @@
 
 The *Basin's*[~][basin] shared *Timeline*[~][timeline] records state changes using the
 *Timeline object-key pattern*[~][object-keys]. *Milestones*[~][milestone] start at one and increase
-without gaps. Before writing, read the latest *Basin*[~][basin] *recovery anchor*[~][basin-backup]
+without gaps. To catch up, read the latest *Basin*[~][basin] *recovery anchor*[~][basin-backup]
 and ingest every subsequent *DifferentialEvent*[~][differential-event]. Its
 recorded *Milestone*[~][milestone] seeds exponential search for the tail.
 Encode complemented *Milestones*[~][milestone] as *Lexidecimal*[~][lexidecimal],
@@ -53,7 +53,7 @@ commitflow or `sts/0/databasin/commitkernel` tuples, one `sts/0/databasin/ingest
 *range manifest*[~][range-manifest]. Wrap that command feed in one nested
 *EnvBuf*[~][envbuf] (`100`), then append a separate *counter margin*[~][margin]. Each tuple is its own
 *FlexBuffers*[~][flexbuffers] document. The ingestion command's
-*state deltas*[~][turso-state] carry the engine-specific changes
+*state deltas*[~][turso-state] carry the Turso changes
 that materialize the recorded state; all requests wait for durable publication.
 
 `commitkernel` carries `{ viewpoint: string, graph }` for the server-driven
@@ -77,9 +77,11 @@ Mismatches use the *common response*[~][epilogue-protocol].
 `BASINSYNC_STATUS_PROBE_MAX_AGE_MS` defaults to 3000; zero probes on every status
 request. Reuse a successful probe or refresh across *Flows*[~][flow] within that
 window, without extending it on cache hits. Status still waits for pending local
-uploads; writes always refresh independently of this allowance: before
-preparing from a drained pipeline, ingest any newer events. A server that loses
+uploads; writes always probe independently of this allowance: before
+preparing from a drained pipeline, probe the next *Milestone*[~][milestone] and catch up
+only when it exists. Batches prepared behind an unpublished one need no probe;
+the conditional PUT is the race guard. A server that loses
 a *conditional write*[~][conditional-write] race fails its prepared batches and
 every queued request, then exits unsuccessfully; restarting recovers it from
-the *Timeline*[~][timeline]. A drained server refreshes first, so it loses only
-races that begin between that refresh and its PUT.
+the *Timeline*[~][timeline]. A drained server probes first, so it loses only
+races that begin between that probe and its PUT.

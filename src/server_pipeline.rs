@@ -256,7 +256,7 @@ impl Preparation {
         // Count freshness from before the IO, so a slow probe cannot extend it.
         let started = tokio::time::Instant::now();
         if before_write {
-            timeline::refresh(&self.bucket, &mut basin).await?;
+            timeline::refresh_if_advanced(&self.bucket, &mut basin).await?;
             self.last_probe = Some(started);
         } else if self
             .last_probe
