@@ -23,12 +23,13 @@ process.on("uncaughtException", stray("uncaught exception"));
 const only = Bun.env.BASINSYNC_SCENARIO === undefined ? undefined : Number(Bun.env.BASINSYNC_SCENARIO);
 const listing = Bun.env.BASINSYNC_SCENARIO_LIST === "1";
 let index = 0;
+let active = false;
 
 export async function scenario(tag: string, label: string, run: () => Promise<void>): Promise<void> {
   const n = index++;
   if (listing) { console.log(`SCENARIO ${n} [${tag}] ${label}`); return; }
   if (only !== undefined && n !== only) return;
-  current = label;
+  current = label; active = true;
   try {
     await run();
     outcomes.push({ tag, label, ok: true });
@@ -37,12 +38,13 @@ export async function scenario(tag: string, label: string, run: () => Promise<vo
     const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
     outcomes.push({ tag, label, ok: false, error: message.split("\n").slice(0, 3).join(" | ") });
     console.log(`FAIL [${tag}] ${label}\n  ${message.split("\n").slice(0, 6).join("\n  ")}`);
-  }
+  } finally { active = false; }
 }
 
 /** Record shared, unscoped setup that ran to completion as a passing scenario. */
 export function passed(tag: string, label: string): void {
-  if (listing) return;
+  // In single-scenario runs, only markers inside the selected scenario count.
+  if (listing || (only !== undefined && !active)) return;
   outcomes.push({ tag, label, ok: true });
   console.log(`PASS [${tag}] ${label}`);
 }
