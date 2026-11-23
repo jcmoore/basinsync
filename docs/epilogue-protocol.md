@@ -32,7 +32,10 @@ and a required `edges` array (`[]` for an empty graph), using the
 Store *context*[~][context] entries as `x-amz-meta-ctx-${key}` object metadata.
 Verify each referenced *node*[~][node] before accepting its edge. Require the expected
 *viewpoint*[~][viewpoint] and matching *digest*[~][sha384] before accepting a
-commit. Rejection must not advance the sequence.
+commit. Rejection must not advance the sequence. Check in this order: request
+structure (400), then content (*context*[~][context], edges, and *digest*[~][sha384];
+422) before queuing, and the *viewpoint*[~][viewpoint] (409) last, against the
+durable prefix.
 
 Responses use *JSON0*[~][json0] with bigint *viewpoints*[~][viewpoint].
 All `/api/v0` responses include `timelines.basin.milestone`, a bigint identifying

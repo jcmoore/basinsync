@@ -79,5 +79,7 @@ request. Reuse a successful probe or refresh across *Flows*[~][flow] within that
 window, without extending it on cache hits. Status still waits for pending local
 uploads; writes always refresh independently of this allowance: before
 preparing from a drained pipeline, ingest any newer events. A server that loses
-a *conditional write*[~][conditional-write] race while batches are in flight
-fails them and exits; restarting recovers it from the *Timeline*[~][timeline].
+a *conditional write*[~][conditional-write] race fails its prepared batches and
+every queued request, then exits unsuccessfully; restarting recovers it from
+the *Timeline*[~][timeline]. A drained server refreshes first, so it loses only
+races that begin between that refresh and its PUT.
