@@ -46,6 +46,10 @@ git -C "$repo/vendor/turso" archive "$turso" | tar -x -C "$run/workspace/vendor/
 
 cd "$run/workspace"
 git init -q -b cleanroom/rebuild
+# srt mounts empty placeholders over these to keep the agent from writing them;
+# hide them from git status rather than the agent's own .gitignore.
+printf '%s\n' /.bash_profile /.bashrc /.gitconfig /.gitmodules /.idea /.mcp.json \
+  /.profile /.ripgreprc /.vscode /.zprofile /.zshrc >> .git/info/exclude
 git add -A
 GIT_AUTHOR_NAME="basinsync clean room" GIT_AUTHOR_EMAIL=cleanroom@localhost \
 GIT_COMMITTER_NAME="basinsync clean room" GIT_COMMITTER_EMAIL=cleanroom@localhost \
