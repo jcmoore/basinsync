@@ -36,13 +36,17 @@ as a gap, and keep going.
    State invariants and witnesses (reachability checks). Check them with
    `quint typecheck`, `quint run --invariant=...`, and, where the state space
    allows, `quint verify` (Apalache, bounded).
-3. **A Rust implementation** of the core in a Cargo workspace: the codecs the
-   documentation defines (Lexidecimal, Diffuse16, EnvBuf, FlexBuffers
-   extensions, JSON0, CRC32C and SHA-384 handling), Epilogue commits, the
-   Basin Timeline, and the Heap, with the documented HTTP API and S3 object
-   layout, runnable against an S3-compatible endpoint such as VersityGW as
-   `docs/development.md` describes. Prefer finishing these well over covering
-   later tutorials; list what you skipped.
+3. **A Rust implementation** of every tutorial in a Cargo workspace, with the
+   documented HTTP API, S3 object layout, configuration, shutdown behavior, and
+   metrics, runnable against an S3-compatible endpoint such as VersityGW as
+   `docs/development.md` describes. That includes the codecs (Lexidecimal,
+   Diffuse16, EnvBuf, FlexBuffers extensions, JSON0, CRC32C and SHA-384
+   handling), Epilogue commits, the Basin Timeline, the materialized state,
+   the Heap (shallow and deep, with cleanup, marking, and promotion), Basin
+   backups and recovery, KernelSpace backup nodes and their promotion, the
+   Analogue BulkOrders and accelerated recovery, and observability. Earlier
+   rebuilds skipped backups and Analogue; do not. If time runs short, finish in
+   that order and record what remains in `STATUS.md`.
 4. **Model-based tests** with the `quint-connect` crate, replaying Quint traces
    against the Rust core and comparing state at every step.
 5. **Kani proofs** for the codecs (`cargo kani`): no panics on arbitrary input
