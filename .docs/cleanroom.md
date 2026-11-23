@@ -5,14 +5,14 @@
 # Clean-room rebuilds
 
 A clean-room rebuild gives an agent the *documentation*[~][docs] alone and asks
-it to rebuild basinsync: Quint specifications for the protocols, a Rust core,
-`quint-connect` model-based tests, and Kani proofs for the codecs. Its gap log
+it to rebuild basinsync: Quint specifications for the protocols, a Rust server,
+and `quint-connect` model-based tests, starting from the codec kit. Its gap log
 measures how complete and correct `docs/` is; comparing its build with this
 repository's measures the rest. Rebuilds are meant to be repeated, by different
 agents and against later documentation.
 
 ```sh
-scripts/cleanroom/setup.sh [--ref REF] NAME     # docs/ + brief at REF, fresh history
+scripts/cleanroom/setup.sh [--ref REF] [--brief full|codec] NAME  # docs/ + brief at REF
 scripts/cleanroom/run.sh --check NAME           # probe the sandbox only
 CLAUDE_CODE_OAUTH_TOKEN=... scripts/cleanroom/run.sh NAME   # starts unit cleanroom-NAME
 scripts/cleanroom/wait.sh NAME                  # block; repeat while it exits 3
@@ -21,6 +21,24 @@ scripts/cleanroom/run.sh --continue NAME        # resume an unfinished claude ru
 scripts/cleanroom/run.sh --agent codex NAME     # with OPENAI_API_KEY
 scripts/cleanroom/run.sh --command 'CMD' NAME   # any other agent
 scripts/cleanroom/collect.sh NAME               # fetch as orphan branch cleanroom/NAME
+```
+
+## Codec kit and codec-only rooms
+
+Full rebuilds (`--brief full`, the default) get `scripts/cleanroom/kit/codec`
+read-only in `vendor/basinsync-codec`: codecs, the oracle CLI, and Kani proofs
+from an earlier clean room (`KIT.md` records which). By round four every
+rebuild proved the same codec properties and Kani stopped finding anything, so
+re-deriving them cost 15–25% of a run for no new information. Run a codec-only
+room (`--brief codec`: codecs, Kani, oracle CLI, gaps; no server) when codec
+docs change. If its vectors oracle passes every case, `kit-import.sh NAME`
+replaces the kit; review the diff and `KANI.md`, then commit.
+
+```sh
+scripts/cleanroom/setup.sh --brief codec NAME
+CLAUDE_CODE_OAUTH_TOKEN=... scripts/cleanroom/run.sh NAME
+scripts/cleanroom/oracle.sh vectors --cli 'cargo run -q --release --bin basinsync-oracle' NAME
+scripts/cleanroom/kit-import.sh NAME
 ```
 
 An agent that starts a run must not end its turn while the run is in flight:

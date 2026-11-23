@@ -8,6 +8,7 @@ It passed all 164 vector cases, and 26 of its 27 Kani harnesses verify; see
 `crates/codec/KANI.md`.
 
 Changed since: JSON0 escapes every literal string beginning with `0`,
-including `"0"`, and rejects a lone `"0"` (docs round 5).
+including `"0"`, and rejects a lone `"0"` (docs round 5); `json0_literal_escape`
+re-verified afterward.
 
 Refresh it from a codec-only clean room with `scripts/cleanroom/kit-import.sh`.
