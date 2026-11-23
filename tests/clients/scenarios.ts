@@ -13,6 +13,9 @@ const stray = (kind: string) => (reason: unknown) => {
   const text = reason instanceof Error ? reason.message : String(reason);
   strays.push(`${current}: ${kind}: ${text}`);
   console.log(`STRAY [${current}] ${kind}: ${text.split("\n")[0]}`);
+  // Outside any scenario (suites that only report progress markers), a stray
+  // means the suite itself broke; without this it could still exit 0.
+  if (current === "(setup)" && outcomes.length === 0) process.exitCode = 1;
 };
 process.on("unhandledRejection", stray("unhandled rejection"));
 process.on("uncaughtException", stray("uncaught exception"));
