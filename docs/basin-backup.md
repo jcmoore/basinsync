@@ -73,7 +73,8 @@ then validate the root's Turso version and recovery prefix.
 Before publishing a *Basin*[~][basin] *CommitMarker*[~][commit-marker], replicate
 all *Flow*[~][flow] *markers*[~][commit-marker] through its
 *Milestone*[~][milestone] into their *Epilogues*[~][epilogue]. Use
-*conditional creation*[~][conditional-write]; preserve *context*[~][context] metadata and verify existing bytes and context on retry.
+*conditional creation*[~][conditional-write]; preserve *context*[~][context] metadata, add
+`x-amz-meta-sha384` with the blob's hexadecimal *SHA-384*[~][sha384], and verify existing bytes and context on retry.
 Competing backup workers adopt the winning *Viewpoint*[~][viewpoint], keeping
 backed-up *Milestones*[~][milestone] increasing.
 

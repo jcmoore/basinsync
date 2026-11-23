@@ -57,7 +57,8 @@ commitflow or `sts/0/databasin/commitkernel` tuples, one `sts/0/databasin/ingest
 that materialize the recorded state; all requests wait for durable publication.
 
 `commitkernel` carries `{ viewpoint: string, graph }` for the server-driven
-*Basin backup graph*[~][basin-backup]; reservations use only ingestion frames.
+*Basin backup graph*[~][basin-backup]; `graph` is that backup's root message itself,
+with the same fields. Reservations use only ingestion frames.
 
 Regardless of in-flight limits, durable publication must follow
 *Milestone*[~][milestone] order to preserve *causal consistency*[~][causal-consistency].
