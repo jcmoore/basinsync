@@ -19,7 +19,8 @@ function summarize(samples: number[]) {
 async function timed(url: string, flow: string, viewpoint: bigint): Promise<number> {
   const started = performance.now();
   const response = await commit(url, flow, blob, viewpoint);
-  assert.equal(response.status, 201, await response.text());
+  // Time any success; conformance (201) is the integration suites' job.
+  assert(response.ok, `${response.status} ${await response.text()}`);
   return performance.now() - started;
 }
 function peakRssMiB(pid: number): number | null {
