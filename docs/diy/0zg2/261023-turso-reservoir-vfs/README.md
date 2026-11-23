@@ -39,11 +39,9 @@ prerequisites:
 
 # Turso Reservoir VFS
 
-Materialize the *Basin's*[~][basin] *Timeline*[~][timeline] in an embedded SQL
-database. The tables below define the materialized state: any engine that
-reproduces exactly these rows from the *Timeline*[~][timeline] qualifies. (One
-implementation uses *Turso*[~][turso] with *MVCC*[~][mvcc] and portable logical
-changes.) Store the applied *Milestone*[~][milestone] and each *Flow's*[~][flow]
+Materialize the *Basin's*[~][basin] *Timeline*[~][timeline] in *Turso*[~][turso]
+with *MVCC*[~][mvcc] and portable logical changes, pinned and configured as the
+*state delta reference*[~][turso-state] describes. Store the applied *Milestone*[~][milestone] and each *Flow's*[~][flow]
 latest *Viewpoint*[~][viewpoint] as decimal text:
 
 ```sql
@@ -79,12 +77,12 @@ and *downstream*[~][downstream] *Viewpoints*[~][viewpoint] use positive
 *Lexidecimal*[~][lexidecimal] text. Preserve locations for intermediate
 *Viewpoints*[~][viewpoint] within a batch and verify indexed-location recovery.
 
-Capture each transaction's changes as an engine-specific delta that, applied
+Capture each transaction's logical and physical frames as a delta that, applied
 to the previous state, reproduces the new rows exactly.
 
 Give independent SQL readers pinned snapshots of a committed generation while
 the primary advances, without rebuilding a shadow, and release history when
-readers finish; with Turso, a file-backed copy-on-write
+readers finish; a file-backed copy-on-write
 *VFS*[~][virtual-file-system] does this. Use these views to derive prior/next
 rows for the *Z-set*[~][z-set] experiment; the
 *snapshot-reader measurements*[~][0003-snapshot-readers] record the procedure.
@@ -106,7 +104,7 @@ tuple. Append one frame-ingestion command before the final
 }]
 ```
 
-Follow the *delta contract*[~][turso-state]; `version` identifies the engine
+Follow the *delta contract*[~][turso-state]; `version` identifies the Turso
 build that wrote each delta.
 One *DifferentialEvent*[~][differential-event] occupies one
 *Milestone*[~][milestone], regardless of request count. Increasing in-flight
@@ -124,7 +122,7 @@ admission and the queue remain bounded, with room for two full batches
 (64 requests at the default size).
 
 Recover the complete history as in *Basin Timeline race*[~][diy/0zg1/261023-basin-timeline-race], applying
-each event's deltas instead of rerunning commit SQL. Check engine versions,
+each event's deltas instead of rerunning commit SQL. Check Turso versions,
 delta framing, initial-image identity, predecessor linkage, and cursors; verify
 affected rows. Earlier image-delta entries remain readable, and
 new events link to their actual encoded predecessor.

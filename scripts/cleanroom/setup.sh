@@ -4,7 +4,9 @@
 #   scripts/cleanroom/setup.sh [--ref REF] NAME
 #
 # The run lives in ${CLEANROOM_ROOT:-~/cleanroom}/NAME:
-#   workspace/  fresh git repository: docs/, AGENTS.md brief, CLAUDE.md pointer
+#   workspace/  fresh git repository: docs/, AGENTS.md brief, CLAUDE.md pointer,
+#               and vendor/turso, the pinned upstream Turso source (read-only,
+#               untracked); GitHub is unreachable from the sandbox
 #   agent/      per-agent config homes (filled by run.sh)
 #   tmp/        TMPDIR inside the sandbox
 #   logs/       agent transcripts; never visible inside the sandbox
@@ -33,7 +35,14 @@ git -C "$repo" archive "$commit" docs | tar -x -C "$run/workspace"
 git -C "$repo" show "$commit:scripts/cleanroom/brief.md" > "$run/workspace/AGENTS.md"
 git -C "$repo" show "$commit:scripts/cleanroom/oracle-interface.md" > "$run/workspace/ORACLE-INTERFACE.md"
 printf '@AGENTS.md\n' > "$run/workspace/CLAUDE.md"
-printf 'target/\nnode_modules/\n.cache/\n' > "$run/workspace/.gitignore"
+printf 'target/\nnode_modules/\n.cache/\nvendor/\n' > "$run/workspace/.gitignore"
+# The docs pin Turso to the revision this ref's submodule records.
+turso="$(git -C "$repo" ls-tree "$commit" vendor/turso | awk '$2 == "commit" {print $3}')"
+[ -n "$turso" ] || { echo "$commit has no vendor/turso submodule" >&2; exit 1; }
+mkdir -p "$run/workspace/vendor/turso"
+# Leave out Turso's own agent instructions and skills; they are not ours to give.
+git -C "$repo/vendor/turso" archive "$turso" | tar -x -C "$run/workspace/vendor/turso" \
+  --exclude=CLAUDE.md --exclude=AGENTS.md --exclude=.claude --exclude=.codex --exclude=.agents
 
 cd "$run/workspace"
 git init -q -b cleanroom/rebuild

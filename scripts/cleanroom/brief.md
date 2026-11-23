@@ -15,6 +15,11 @@ as a gap, and keep going.
   invalidate the experiment. Package registries and documentation for your
   tools (Rust, Quint, Kani, S3) are fine.
 - Do not edit `docs/`. Everything you write lives outside it.
+- `vendor/turso` is the upstream Turso source at the revision the
+  documentation pins, provided because GitHub is unreachable. It is a
+  third-party dependency, not basinsync code: depend on `vendor/turso/core` by
+  path, read it freely, and do not edit it. Materialize state in Turso as the
+  documentation requires; do not substitute another store.
 - Your build will later be checked against independent tests you cannot see.
   Follow the documentation exactly; do not invent behavior to make things
   "work" without logging the gap that forced it.
@@ -41,11 +46,12 @@ as a gap, and keep going.
    metrics, runnable against an S3-compatible endpoint such as VersityGW as
    `docs/development.md` describes. That includes the codecs (Lexidecimal,
    Diffuse16, EnvBuf, FlexBuffers extensions, JSON0, CRC32C and SHA-384
-   handling), Epilogue commits, the Basin Timeline, the materialized state,
+   handling), Epilogue commits, the Basin Timeline, the materialized state in
+   Turso with its logical and physical frame deltas,
    the Heap (shallow and deep, with cleanup, marking, and promotion), Basin
    backups and recovery, KernelSpace backup nodes and their promotion, the
    Analogue BulkOrders and accelerated recovery, and observability. Earlier
-   rebuilds skipped backups and Analogue; do not. If time runs short, finish in
+   rebuilds skipped backups and Analogue and replaced Turso; do not. If time runs short, finish in
    that order and record what remains in `STATUS.md`.
 4. **Model-based tests** with the `quint-connect` crate, replaying Quint traces
    against the Rust core and comparing state at every step.

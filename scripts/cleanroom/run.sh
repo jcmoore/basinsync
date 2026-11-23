@@ -88,7 +88,7 @@ print(json.dumps({
                      + [f"{home}/{path}" for path in toolchains],
         "allowWrite": [f"{run}/workspace", f"{run}/agent/{agent}", f"{run}/tmp", f"{run}/cache",
                        f"{run}/eval", f"{home}/.quint"],
-        "denyWrite": [],
+        "denyWrite": [f"{run}/workspace/vendor"],
     },
     "network": {
         "allowedDomains": domains + [

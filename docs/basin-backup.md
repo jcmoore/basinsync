@@ -37,7 +37,7 @@ A *Basin*[~][basin] root is a *FlexBuffers*[~][flexbuffers] message:
 
 ```ts
 {
-  version: string;             // engine release and revision
+  version: string;             // Turso release and revision
   milestone: string;           // covered decimal Milestone M
   coordinate: string;          // exclusive decimal coordinate
   crc32c: string;              // cumulative CRC32C, eight lowercase hex digits
@@ -63,12 +63,12 @@ x-amz-meta-coordinate: <exclusive Timeline byte coordinate, canonical decimal>
 x-amz-meta-crc32c: <cumulative coordinate-run CRC32C, eight lowercase hex digits>
 x-amz-meta-event-sha384: <digest of DifferentialEvent at that Milestone>
 x-amz-meta-sha384: <digest of CommitMarker bytes>
-x-amz-meta-turso-version: <engine release and revision>
+x-amz-meta-turso-version: <Turso release and revision>
 ```
 
 Retain the *CRC32C*[~][crc32c] as the recovered prefix's accumulator.
 Other digests are hexadecimal *SHA-384*[~][sha384]. Unwrap the raw *EnvBuf message*[~][envbuf], validate metadata and its checksum,
-then validate the root's engine version and recovery prefix.
+then validate the root's Turso version and recovery prefix.
 
 Before publishing a *Basin*[~][basin] *CommitMarker*[~][commit-marker], replicate
 all *Flow*[~][flow] *markers*[~][commit-marker] through its

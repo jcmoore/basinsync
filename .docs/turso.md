@@ -8,17 +8,11 @@
 
 # Turso materialization
 
-This repository materializes the Basin in *Turso*[~][turso]. The documentation
-treats the engine as an implementation choice and specifies only the tables
-and the *delta contract*[~][turso-state]; these are this implementation's
-engine notes.
+The documentation pins *Turso*[~][turso] and its configuration in the
+*delta reference*[~][turso-state]. This repository vendors that revision as the
+`vendor/turso` submodule; clean rooms get a read-only copy of the same source.
+`turso_core` 0.9.0-pre.6 on crates.io breaks five of the APIs used here.
 
-- Pin the vendored build: `0.9.0-pre.1+032f5bb2c7e74107f7ef9b66d576312379000a88`,
-  which deltas carry as their `version`. Use crate features `fs` and
-  `conn_raw_api`.
-- Open databases with `PRAGMA page_size = 16384` and
-  `PRAGMA journal_mode = mvcc`, and call
-  `connection.set_portable_logical_changes_enabled(true)`.
 - Implement *DurableStorage*[~][durable-storage] by delegating to the engine and
   observing `log_tx`'s serialization callback for
   *logical frames*[~][logical-frame].
