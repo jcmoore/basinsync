@@ -9,7 +9,7 @@ use num_bigint::BigUint;
 use serde::{Deserialize, Deserializer, Serializer, de::Error};
 
 pub fn serialize_text<S: Serializer>(value: &str, serializer: S) -> Result<S::Ok, S::Error> {
-    if value.starts_with('0') && value.len() > 1 {
+    if value.starts_with('0') {
         serializer.serialize_str(&format!("0{value}"))
     } else {
         serializer.serialize_str(value)
@@ -32,8 +32,9 @@ pub fn deserialize_text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<St
     if let Some(value) = wire.strip_prefix("00") {
         return Ok(format!("0{value}"));
     }
-    if wire.starts_with('0') && wire.len() > 1 {
-        return Err(D::Error::custom("flow must be a JSON0 string"));
+    // Any other leading `0`, including a lone "0", is a non-text encoding.
+    if wire.starts_with('0') {
+        return Err(D::Error::custom("expected a JSON0 literal string"));
     }
     Ok(wire)
 }
@@ -95,4 +96,29 @@ pub fn deserialize_bytes<'de, D: Deserializer<'de>>(deserializer: D) -> Result<V
     GeneralPurpose::new(alphabet, config)
         .decode(encoded)
         .map_err(D::Error::custom)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
+    struct Text(
+        #[serde(
+            serialize_with = "super::serialize_text",
+            deserialize_with = "super::deserialize_text"
+        )]
+        String,
+    );
+
+    #[test]
+    fn literal_zero_strings_gain_a_zero_and_a_lone_zero_is_rejected() {
+        for (value, wire) in [("0", "\"00\""), ("00", "\"000\""), ("0x1", "\"00x1\""), ("", "\"\""), ("a0", "\"a0\"")] {
+            assert_eq!(serde_json::to_string(&Text(value.into())).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<Text>(wire).unwrap(), Text(value.into()));
+        }
+        for invalid in ["\"0\"", "\"0x1\"", "\"0z\""] {
+            assert!(serde_json::from_str::<Text>(invalid).is_err(), "{invalid}");
+        }
+    }
 }

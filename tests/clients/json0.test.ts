@@ -10,6 +10,13 @@ describe("JSON0", () => {
     },
   );
 
+  test("escapes a literal \"0\" and rejects a lone 0 on the wire", () => {
+    expect(JSON.parse(stringify("0"))).toBe("00");
+    expect(parse<string>('"00"')).toBe("0");
+    expect(() => parse('"0"')).toThrow();
+    expect(parse<string>('""')).toBe("");
+  });
+
   test.each([
     [0n, "0x0"], [256n, "0x100"], [-1n, "0~0"], [-16n, "0~f"], [-257n, "0~100"],
   ] as const)("interoperates with the bigint %s as %s", (value, wire) => {

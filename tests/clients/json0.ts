@@ -28,7 +28,7 @@ export const replacer = function (
     }
 
     case "string": {
-      return value.length > 1 && value.codePointAt(0) === 0x30 // "0".codePointAt
+      return value.codePointAt(0) === 0x30 // "0".codePointAt
         ? `0${value}`
         : value;
     }
@@ -52,8 +52,9 @@ export const replacer = function (
 };
 
 export const reviver = (_key: string, value: unknown): unknown => {
-  if (typeof value !== "string" || value.length < 2) return value;
+  if (typeof value !== "string") return value;
   if (value.codePointAt(0) !== 0x30) return value; // "0".codePointAt
+  if (value.length < 2) throw new Error("Invalid string encoding: lone 0.");
   const point = value.codePointAt(1);
 
   switch (point) {

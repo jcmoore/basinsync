@@ -3,9 +3,9 @@
 
 # JSON0
 
-A JSON dialect interpreting value strings of two or more characters beginning
-with `0`. Literal strings of that form (i.e. strings already prefixed with `0`)
-gain another `0`; object keys are unchanged.
+A JSON dialect interpreting value strings beginning with `0`. Literal strings
+beginning with `0`, including `"0"` itself, gain another `0`; object keys are
+unchanged. A lone `"0"` is therefore invalid.
 
 | Prefix | Value |
 | --- | --- |
