@@ -169,11 +169,10 @@ async function badStartup(bucket: string) {
 }
 
 function isBasinPut(request:Request){const path=new URL(request.url).pathname;return request.method==="PUT"&&path.includes("/epilogue/0y")&&!path.includes(`/${objectKeys.userFlows}`);}
-// Black-box first: a Flow's revision is observable through its Epilogue keys,
-// userspace/flows/<flow>/<revision>/epilogue/..., once markers or signs land there.
-// Against this repository's own server (no BASINSYNC_SERVER override), white-box
-// scenarios may also read it from our materialized state before any object exists;
-// both sources must agree. Other implementations' state deltas are opaque.
+// A Flow's revision is observable through its Epilogue keys,
+// userspace/flows/<flow>/<revision>/epilogue/..., once markers or signs land there,
+// and from the documented Turso state deltas before any object exists; both
+// sources must agree.
 async function flowRevisions(b:string):Promise<Record<string,string>> {
   const revisions:Record<string,string>={};
   for(const key of await committedKeys(s3,b,objectKeys.userFlows)){
@@ -183,7 +182,6 @@ async function flowRevisions(b:string):Promise<Record<string,string>> {
     assert(!revisions[flow]||revisions[flow]===revision,`Flow ${flow} has more than one revision`);
     revisions[flow]=revision;
   }
-  if(Bun.env.BASINSYNC_SERVER)return revisions;
   const internal=await materializedRevisions(b);
   for(const [flow,revision] of Object.entries(revisions))assert.equal(internal[flow],revision,`Flow ${flow} keys disagree with materialized state`);
   return {...internal,...revisions};
