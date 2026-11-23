@@ -143,6 +143,15 @@ fi
 [ "$inside" -eq 1 ] || echo "sandbox probe passed"
 [ "$check_only" -eq 0 ] || exit 0
 
+# Check credentials before detaching, so a missing token fails here, not in the unit.
+CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN//[[:space:]]/}"
+case "$agent" in
+  claude) [ -n "${CLAUDE_CODE_OAUTH_TOKEN}${ANTHROPIC_API_KEY:-}" ] ||
+    { echo "set CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) or ANTHROPIC_API_KEY" >&2; exit 1; } ;;
+  codex) [ -n "${OPENAI_API_KEY:-}" ] || { echo "set OPENAI_API_KEY" >&2; exit 1; } ;;
+esac
+
 # Detach into a memory-capped systemd unit unless asked to stay in the foreground.
 unit="cleanroom-$name"
 if [ "$foreground" -eq 0 ]; then
