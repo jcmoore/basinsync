@@ -4,7 +4,31 @@
 type Outcome = { tag: string; label: string; ok: boolean; error?: string };
 const outcomes: Outcome[] = [];
 
+// A failed scenario can leave requests in flight; when its processes are torn
+// down they reject with nobody awaiting them, which would otherwise end the
+// whole suite. Record such strays against the scenario that was running.
+let current = "(setup)";
+const strays: string[] = [];
+const stray = (kind: string) => (reason: unknown) => {
+  const text = reason instanceof Error ? reason.message : String(reason);
+  strays.push(`${current}: ${kind}: ${text}`);
+  console.log(`STRAY [${current}] ${kind}: ${text.split("\n")[0]}`);
+};
+process.on("unhandledRejection", stray("unhandled rejection"));
+process.on("uncaughtException", stray("uncaught exception"));
+
+// BASINSYNC_SCENARIO_LIST=1 lists scenarios without running them;
+// BASINSYNC_SCENARIO=<n> runs only the nth, so callers can isolate each one in
+// its own process (a crash then costs exactly one scenario).
+const only = Bun.env.BASINSYNC_SCENARIO === undefined ? undefined : Number(Bun.env.BASINSYNC_SCENARIO);
+const listing = Bun.env.BASINSYNC_SCENARIO_LIST === "1";
+let index = 0;
+
 export async function scenario(tag: string, label: string, run: () => Promise<void>): Promise<void> {
+  const n = index++;
+  if (listing) { console.log(`SCENARIO ${n} [${tag}] ${label}`); return; }
+  if (only !== undefined && n !== only) return;
+  current = label;
   try {
     await run();
     outcomes.push({ tag, label, ok: true });
@@ -18,6 +42,7 @@ export async function scenario(tag: string, label: string, run: () => Promise<vo
 
 /** Record shared, unscoped setup that ran to completion as a passing scenario. */
 export function passed(tag: string, label: string): void {
+  if (listing) return;
   outcomes.push({ tag, label, ok: true });
   console.log(`PASS [${tag}] ${label}`);
 }
@@ -25,6 +50,6 @@ export function passed(tag: string, label: string): void {
 /** Print a machine-readable summary; returns false if any scenario failed. */
 export function report(): boolean {
   const failed = outcomes.filter((o) => !o.ok).length;
-  console.log(`SCENARIOS ${JSON.stringify({ passed: outcomes.length - failed, failed, outcomes })}`);
+  console.log(`SCENARIOS ${JSON.stringify({ passed: outcomes.length - failed, failed, strays: strays.length, outcomes })}`);
   return failed === 0;
 }

@@ -58,16 +58,36 @@ print(json.dumps({
 }, indent=2))
 PY
   failed=0
+  # One sandboxed bun process for a suite; extra NAME=VALUE arguments set env.
+  run_bun() {
+    local suite="$1" limit="$2"; shift 2
+    ( cd "$copy"
+      for variable in $(compgen -e); do unset "$variable" 2>/dev/null || true; done
+      export PATH="$HOME_SAVE/.local/bin:$HOME_SAVE/.bun/bin:/usr/bin:/bin" HOME="$HOME_SAVE" \
+        TMPDIR="$eval_dir/integration/tmp" BASINSYNC_SERVER="$here/oracles/server-adapter.sh" \
+        CLEANROOM_SERVER_BIN="$bin" CLEANROOM_SERVER_ENV_MAP="$eval_dir/server-env" "$@"
+      exec timeout --kill-after=30 "$limit" srt --settings "$settings" bun "tests/clients/$suite.ts" ) < /dev/null
+  }
   for suite in "${suites[@]}"; do
     log="$eval_dir/integration/$suite.log"
-    if ( cd "$copy"
-         for variable in $(compgen -e); do unset "$variable" 2>/dev/null || true; done
-         export PATH="$HOME_SAVE/.local/bin:$HOME_SAVE/.bun/bin:/usr/bin:/bin" HOME="$HOME_SAVE" \
-           TMPDIR="$eval_dir/integration/tmp" BASINSYNC_SERVER="$here/oracles/server-adapter.sh" \
-           CLEANROOM_SERVER_BIN="$bin" CLEANROOM_SERVER_ENV_MAP="$eval_dir/server-env"
-         exec timeout --kill-after=30 "${CLEANROOM_SUITE_TIMEOUT:-900}" \
-           srt --settings "$settings" bun "tests/clients/$suite.ts" ) > "$log" 2>&1 < /dev/null
-    then code=0; else code=$?; fi
+    if grep -q 'await scenario(' "$repo/tests/clients/$suite.ts"; then
+      # Scenario suites run each scenario in its own process, so a crash or
+      # hang costs exactly that scenario.
+      run_bun "$suite" 300 BASINSYNC_SCENARIO_LIST=1 > "$log.list" 2>&1 || true
+      : > "$log"; code=0
+      while read -r _ n rest; do
+        if run_bun "$suite" "${CLEANROOM_SCENARIO_TIMEOUT:-300}" BASINSYNC_SCENARIO="$n" > "$log.$n" 2>&1; then status=0; else status=$?; fi
+        if ! grep -qE '^(PASS|FAIL) \[' "$log.$n"; then
+          reason=$([ "$status" -eq 124 ] || [ "$status" -eq 137 ] && echo "timed out" || echo "exited $status")
+          printf 'FAIL %s (%s outside the scenario: %s)\n' "$rest" "$reason" \
+            "$(grep -m1 -E 'Error|error:' "$log.$n" | cut -c1-120)" >> "$log.$n"
+        fi
+        cat "$log.$n" >> "$log"
+      done < <(grep '^SCENARIO ' "$log.list")
+      grep -q '^FAIL \[' "$log" && code=1
+    else
+      if run_bun "$suite" "${CLEANROOM_SUITE_TIMEOUT:-900}" > "$log" 2>&1; then code=0; else code=$?; fi
+    fi
     passes=$(grep -c '^PASS \[' "$log" || true); fails=$(grep -c '^FAIL \[' "$log" || true)
     if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then verdict="HANG after ${CLEANROOM_SUITE_TIMEOUT:-900}s"
     elif [ "$code" -eq 0 ]; then verdict="ok"
