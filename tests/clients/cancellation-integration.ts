@@ -22,6 +22,11 @@ const endpoint=`http://127.0.0.1:${await port()}`;
 const s3=new S3Client({endpoint,region:"us-east-1",forcePathStyle:true,credentials,maxAttempts:1});
 let seq=0;
 async function bucket(){const Bucket=`audit-${++seq}`;await s3.send(new CreateBucketCommand({Bucket}));return Bucket;}
+// Prepared batches (finished, queued, or publishing), from the documented metrics.
+async function preparedBatches(url:string){
+  const text=await (await fetch(`${url}/metrics`,{signal:AbortSignal.timeout(5000)})).text();
+  return text.split("\n").filter(l=>/^basinsync_batches_(total|queued|publishing)[{ ]/.test(l)).reduce((n,l)=>n+Number(l.slice(l.lastIndexOf(" ")+1)),0);
+}
 async function app(Bucket:string,s3Endpoint:string,options:Record<string,string>={}){
   const address=`127.0.0.1:${await port()}`;
   const p=launch([Bun.env.BASINSYNC_SERVER??`${root}target/debug/basinsync`],{BASINSYNC_LOG_FORMAT:"json",S3_ENDPOINT:s3Endpoint,S3_BUCKET:Bucket,AWS_REGION:"us-east-1",AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,AWS_SESSION_TOKEN:"",BASINSYNC_LISTEN:address,BASINSYNC_CLEANUP_INTERVAL_MS:"0",BASINSYNC_BULK_MAX_AGE_MS:"0",BASINSYNC_BACKUP_INTERVAL_MS:"0",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug",...options});
@@ -76,7 +81,7 @@ try{
     const request=fetch(`${server.url}/api/v0/epilogue`,{method:"PUT",body:form("disconnect",bytes("marker"),0n),signal:abort.signal}).then(()=>"response",()=>"disconnected");
     await deadline(entered.promise);abort.abort();assert.equal(await request,"disconnected");
     const successor=commit(server.url,"disconnect",bytes("next marker"),1n);
-    await until(async()=>readFileSync(server.path,"utf8"),s=>s.split("\n").some(line=>{try{const e=JSON.parse(line);return e.fields?.message==="batch prepared"&&(e.fields?.milestone??e.span?.milestone)==="2";}catch{return false;}}));
+    await until(()=>preparedBatches(server.url),n=>n>=2);
     server.process.kill(signal);await Bun.sleep(100);assert.equal(server.process.exitCode,null,"shutdown waits for admitted work");
     release.resolve();assert.equal((await successor).status,201);assert.equal(await deadline(server.process.exited),0);assert.equal(puts,2);
     const restored=await app(b,endpoint);assert.equal((await epilogueStatus(restored.url,"disconnect")).latest?.viewpoint,1n);await stop(restored.process);
@@ -117,7 +122,8 @@ try{
     const server=await app(b,p,{BASINSYNC_SHUTDOWN_TIMEOUT_MS:"100"}),abort=new AbortController();
     const request=fetch(`${server.url}/api/v0/epilogue`,{method:"PUT",body:form("timeout",bytes("marker"),0n),signal:abort.signal}).catch(()=>null);
     await deadline(entered.promise);abort.abort();await request;server.process.kill("SIGINT");
-    assert.equal(await deadline(server.process.exited),1);release.resolve();assert(readFileSync(server.path,"utf8").includes("shutdown drain timed out"));
+    assert.equal(await deadline(server.process.exited),1,"an exhausted drain exits unsuccessfully");release.resolve();
+    assert.equal((await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.timeline}))).KeyCount??0,0,"the unfinished batch stays unpublished");
   });
   console.log(`Artifacts: ${artifacts}`);
   if(!report())process.exitCode=1;

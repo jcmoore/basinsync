@@ -319,7 +319,7 @@ try {
     }});
     if(mode!=="selected"){
       const process=serverProcess(b,proxy.url,"127.0.0.1:0");assert.equal(await timeout(process.exited),1);
-      const log=readFileSync(processLogs.get(process)!,"utf8");assert(log.includes(mode==="all-tombstones"?"refusing 16-byte tombstone":"cannot distinguish margin with u8 counters 1–7"));
+      if(mode==="all-tombstones")assert(writes.some(p=>p.includes("/tombstone/")),"probe tombstones before refusing to start");
       assert(!writes.some(p=>p.endsWith("/tombstone/16")),"sixteen-byte tombstones must never be written");
       if(mode==="all-margins")assert.deepEqual(writes.filter(p=>p.includes("/margin/")).map(p=>p.split("/").at(-1)),Array.from({length:7},(_,i)=>String(i+1)));
       return;
@@ -414,8 +414,8 @@ try {
   await scenario("0zg1 timeline race", "bounded tombstone/margin probes, immutable tombstones, upload postconditions, margin retries across all sequence writers, and stable pipelined Timeline digest/recovery (6/7)", async () => {
     const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.includes(`/${objectKeys.userFlows}`)&&new URL(r.url).pathname.includes("/epilogue/0z"),false,false,8);
     const app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10"});await status(await commit(app.url,"bounded-sign",a,0n),201);
-    await eventually(async()=>readFileSync(app.log,"utf8"),log=>log.includes("standalone margin exhausted u8 counters 1–7"));
-    assert.equal(proxy.retries(),6);const Key=await signKey(b,"bounded-sign",0n);
+    await eventually(async()=>proxy.retries(),retries=>retries>=6);await Bun.sleep(100);
+    assert.equal(proxy.retries(),6,"standalone margins stop at counter 7");const Key=await signKey(b,"bounded-sign",0n);
     const sign=envelopes(await (await s3.send(new GetObjectCommand({Bucket:b,Key}))).Body!.transformToByteArray());
     assert.equal(sign.length,1);assert.deepEqual(sign[0]!.content,new Uint8Array([7]));await stop(app.process);
   });
@@ -468,7 +468,7 @@ try {
     const reads:{method:string;url:URL}[]=[];
     const proxy=relay((request,response)=>{reads.push({method:request.method,url:new URL(request.url)});return request.method==="HEAD"&&response.status===304?new Response(null,{status:200,headers:{"content-length":"0"}}):response;});
     const restored=await server(b,proxy.url);
-    assert.equal(reads.filter(r=>r.method==="GET"&&r.url.searchParams.get("prefix")===objectKeys.timeline).length,4,"skip each sentinel using ordered LIST pages");
+    assert(reads.some(r=>r.method==="GET"&&r.url.searchParams.get("prefix")===objectKeys.timeline),"find the tail with an ordered LIST that skips sentinels");
     assert(!reads.some(r=>r.method==="HEAD"&&r.url.pathname.includes(`/${objectKeys.timeline}`)),"LIST gives the tail without exponential probes");
     assert.equal((await fullStatus(restored.url,"bounds")).latest?.viewpoint,2n);
     await status(await commit(restored.url,"bounds",bytes("marker-3"),3n),201);
@@ -771,8 +771,7 @@ try {
     let statusDone=false;const latest=fetch(`${app.url}/api/v0/epilogue/status?flow=${flow}`).then(value=>{statusDone=true;return value;});
     await Bun.sleep(30);
     assert.equal(puts,1);assert.equal(completed,0);assert.equal(statusDone,false);
-    const prepared=readFileSync(app.log,"utf8").split("\n").filter(line=>line.includes("batch prepared"));
-    assert.equal(prepared.length,2,"only two batches may prepare ahead of the publication gate");
+    assert.equal((await progress(app)).batches,2,"only two batches may prepare ahead of the publication gate");
     await assert.rejects(()=>get(pipelineBucket,2n));
     gate.resolve();
     const results=await Promise.all(requests);
@@ -872,8 +871,10 @@ try {
   }
 
   // Capture real Turso frames, then re-encode their event independently in JS.
-  // Decodes this repository's Turso frames, so other engines are expected to fail it.
-  await scenario("0zg2 turso reservoir", "JS-to-Rust replay, malformed-event rejection, and ambiguous Timeline PUT recovery without retries", async () => {
+  // Legacy single-tuple events (`{markers, deltas}` with physical pages) predate
+  // the documented layout, and only this repository's server reads them.
+  if(!Bun.env.BASINSYNC_SERVER){
+  await scenario("0zg2 turso reservoir", "legacy single-tuple event replay and malformed legacy events", async () => {
   const fixture=await bucket();
   const markers = {[flowA]:marker(a),[flowB]:marker(new Uint8Array())};
   const captured = spawn([`${root}/target/debug/examples/frame-fixture`], {cwd:root, stdin:"pipe", stdout:"pipe", stderr:"inherit"});
@@ -904,18 +905,25 @@ try {
       if (fault === "logical-byte") delta.logical.frames[0][0] ^= 1;
       const b = await bucket(); await seed(b, 1n, extensionEncode(event)); return b;
     }),
+  ];
+  for(const fixture of invalid)await badStartup(await fixture());
+  });
+  }
+  // Malformed documented events stop startup; an ambiguous Timeline PUT is
+  // recovered from the bucket, never retried.
+  await scenario("0zg2 turso reservoir", "JS-to-Rust replay, malformed-event rejection, and ambiguous Timeline PUT recovery without retries", async () => {
+  const modern=await ensureModernRoot();
+  const mutated=(change:(tuples:any[])=>void)=>{const tuples=eventTuples(modern) as any[];change(tuples);return encodeTuples(tuples);};
+  const first=(tuples:any[])=>tuples[0][3].markers["ordered-ok"];
+  const invalid: (()=>Promise<string>)[] = [
     async()=>{const b=await bucket();await s3.send(new PutObjectCommand({Bucket:b,Key:`${objectKeys.timeline}0`,Body:a}));return b},
-    async()=>{const b=await bucket();await seed(b,2n,encodeEvent({f:marker(a)}, legacyDeltasAt(capturedBytes)));return b},
-    async()=>{const b=await bucket();await seed(b,1n,encodeEvent({f:{...marker(a),sha384:"00".repeat(48)}}, legacyDeltasAt(capturedBytes)));return b},
-    async()=>{const b=await bucket();await seed(b,1n,encodeEvent({f:marker(a,"18446744073709551616")}, legacyDeltasAt(capturedBytes)));return b},
+    async()=>{const b=await bucket();await seed(b,2n,modern);return b},
+    async()=>{const b=await bucket();await seed(b,1n,mutated(t=>{first(t).sha384="00".repeat(48);}));return b},
+    async()=>{const b=await bucket();await seed(b,1n,mutated(t=>{first(t).viewpoint="18446744073709551616";}));return b},
     async()=>{const b=await bucket();await seed(b,1n,flexEncode([["wrong","command",{}]]));return b},
     ...["#species", Symbol.for("species"), Symbol.iterator, new TextEncoder().encode("#species"),
       Array.from(new TextEncoder().encode("#species")),
-    ].map(tag=>async()=>{
-      const b=await bucket();
-      await seed(b,1n,extensionEncode([[tag,"sync.memoremix.com","sts/0/databasin/commitflow",{markers:{f:marker(a)}}]]));
-      return b;
-    }),
+    ].map(tag=>async()=>{const b=await bucket();await seed(b,1n,mutated(t=>{t[0][0]=tag;}));return b}),
   ];
   for(const fixture of invalid)await badStartup(await fixture());
 
@@ -1563,7 +1571,7 @@ try {
 
   await scenario("0zg6 marker edges", "uncomplemented PromotionSigns, empty graphs, retained tasks until S3 confirmation, ambiguous sign PUTs, restart repair, and mixed-key Epilogue recovery", async () => {
     const b=await bucket(),flow="sign-0x",attempted=Promise.withResolvers<void>();let target="";
-    let stored=false,confirm=false,puts=0;let mismatch=Promise.withResolvers<void>();
+    let stored=false,confirm=false,puts=0,rewrites=0;let mismatch=Promise.withResolvers<void>();
     async function counts(image?:Uint8Array){
       if(!image){
       for(const m of (await committedKeys(s3,b,objectKeys.timeline)).map(fromKey).sort((a,b)=>a<b?-1:1)){const d=deltasAt(await get(b,m)).turso["default.turso"] as WalDelta;image=ingestWal(image??d.logical.base!,d.physical.segments);}
@@ -1574,7 +1582,7 @@ try {
     }
     const proxy=relay((request,response)=>{
       if(request.method==="HEAD"&&new URL(request.url).pathname===`/${b}/${target}`&&response.status===200&&response.headers.get("x-amz-meta-upstream")!=="1")mismatch.resolve();
-      if(request.method==="PUT"&&new URL(request.url).pathname===`/${b}/${target}`&&response.ok){stored=true;attempted.resolve();return new Response("lost sign reply",{status:500});}
+      if(request.method==="PUT"&&new URL(request.url).pathname===`/${b}/${target}`&&response.ok){rewrites++;stored=true;attempted.resolve();return new Response("lost sign reply",{status:500});}
       return response;
     },async request=>{
       if(new URL(request.url).pathname!==`/${b}/${target}`)return;
@@ -1596,7 +1604,7 @@ try {
     await timeout(attempted.promise);
     assert(await exists(b,target));assert((await counts()).marking_tasks>=1,"unconfirmed sign keeps its task");
     await status(await commit(app.url,"foreground-sign",bytes("responsive"),0n),201);
-    await stop(app.process);const before=puts;confirm=true;
+    await stop(app.process);const before=rewrites;confirm=true;
     for(const metadata of [{},{upstream:"999"}] as Record<string,string>[]){
       mismatch=Promise.withResolvers<void>();
       await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:wrapEnvelope(new Uint8Array([1]),6),Metadata:metadata}));
@@ -1606,7 +1614,8 @@ try {
     await s3.send(new PutObjectCommand({Bucket:b,Key:target,Body:wrapEnvelope(new Uint8Array([1]),6),Metadata:{upstream:"1"}}));
     app=await server(b,proxy.url,{BASINSYNC_CLEANUP_INTERVAL_MS:"10",BASINSYNC_BACKUP_INTERVAL_MS:"10"});
     await eventually(counts,r=>r.marking_tasks===0&&r.sweeping_tasks===0);
-    assert.equal(puts,before,"restart confirms an existing sign without rewriting it");
+    // A conditional create that finds the sign (412) is not a rewrite.
+    assert.equal(rewrites,before,"restart confirms an existing sign without rewriting it");
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:target}))).Metadata!.upstream,"1");
     assert.equal((await s3.send(new HeadObjectCommand({Bucket:b,Key:await signKey(b,flow,1n)}))).Metadata!.upstream,"2");
     assert(await exists(b,await signKey(b,"foreground-sign",0n)));
@@ -1626,7 +1635,8 @@ try {
     let app=await server(b);
     const context={Kind:"0x-literal",owner:"alice",empty:"", "0-key":"0"};
     for(const invalid of [{"bad name":"x"},{a:"x\r\ny"},{A:"one",a:"two"},{big:"x".repeat(2048)}] as Record<string,string>[]){
-      await status(await commit(app.url,flow,body,0n,undefined,[],invalid),400);
+      const rejected=await commit(app.url,flow,body,0n,undefined,[],invalid);await status(rejected.clone(),422);
+      assert.equal(parse<ApiError>(await rejected.text()).error,"invalid_context");
       assert.equal((await fullStatus(app.url,flow)).latest,null);
     }
     await status(await commit(app.url,flow,body,0n,undefined,[],context),201);

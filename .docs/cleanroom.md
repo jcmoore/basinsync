@@ -105,6 +105,11 @@ coordinates); compare a rebuild's counts with the reference run's.
 The cddl crate rejects one-element arrays such as `frames: [bstr]`, so the
 checker validates `[+ bstr]` and counts Turso frames itself.
 
+Suites must assert only what `docs/` requires: observable responses, bucket
+contents, and documented metrics, never log text or incidental request
+counts. Scenarios for behavior outside the docs, such as legacy single-tuple
+events, run only when `BASINSYNC_SERVER` is unset, so the oracle skips them.
+
 Agents never see these; apply them to a collected branch:
 
 1. its `GAPS.md`, reviewed against `docs/`;
