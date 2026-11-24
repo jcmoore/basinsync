@@ -38,7 +38,8 @@ so newer entries sort first. Without a *CommitMarker*[~][commit-marker], LIST th
 lowest published key, skipping zero-byte *sentinels*[~][empty-sentinel], and
 replay from the beginning through that *Milestone*[~][milestone].
 Treat trailing *empty sentinels*[~][empty-sentinel] as exclusive upper search
-bounds. Leading *tombstones*[~][tombstone] occupy retired positions, not replayable
+bounds. A nonempty object under the *Timeline*[~][timeline] prefix whose key is not a
+canonical complemented *Milestone*[~][milestone] is corruption; refuse to start. Leading *tombstones*[~][tombstone] occupy retired positions, not replayable
 entries; recovery needs a snapshot covering them. An empty *Timeline*[~][timeline] expects *Milestone*[~][milestone] one.
 Use *conditional reads*[~][conditional-read] for GETs and HEADs, including search probes.
 
