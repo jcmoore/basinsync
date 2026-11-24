@@ -105,23 +105,33 @@ function relay(after: (request: Request, response: Response) => Promise<Response
   relays.push(service);
   return {service,url:`http://127.0.0.1:${service.port}`};
 }
-function logged(log:string,event:string,fields:Record<string,string>){
-  return readFileSync(log,"utf8").split("\n").some(line=>{
-    try {const entry=JSON.parse(line);const values={...entry.span,...entry.fields};return values.message===event&&Object.entries(fields).every(([key,value])=>String(values[key])===value);}
-    catch {return false;} // A concurrent writer may leave a partial final line.
-  });
+// Ordering waits observe the documented metrics rather than log text:
+// admitted commits (finished plus in flight), prepared commits (admitted minus
+// those still queued for preparation), and prepared batches (finished, queued,
+// or publishing).
+type Progress={admitted:number;prepared:number;batches:number};
+async function progress(app:{url:string}):Promise<Progress>{
+  const text=await (await fetch(`${app.url}/metrics`,{signal:AbortSignal.timeout(5000)})).text();
+  const sum=(name:string,labels:Record<string,string>={})=>text.split("\n")
+    .filter(l=>(l.startsWith(name+"{")||l.startsWith(name+" "))&&Object.entries(labels).every(([k,v])=>l.includes(`${k}="${v}"`)))
+    .reduce((total,l)=>total+Number(l.slice(l.lastIndexOf(" ")+1)),0);
+  const commit={operation:"commit"};
+  const admitted=sum("basinsync_submissions_total",commit)+sum("basinsync_submissions_inflight",commit);
+  return {admitted,prepared:admitted-sum("basinsync_requests_queued",commit),
+    batches:sum("basinsync_batches_total")+sum("basinsync_batches_queued")+sum("basinsync_batches_publishing")};
 }
-async function queued(log:string,flow:string,viewpoint:number){
-  const deadline=Date.now()+15000;
-  while(!logged(log,"commit queued",{flow,viewpoint:String(viewpoint)})){
-    assert(Date.now()<deadline,`request never queued: ${flow}/${viewpoint}; ${log}`);await Bun.sleep(2);
+async function reach(app:{url:string},key:keyof Progress,count:number){
+  const deadline=Date.now()+15000;let last:Progress|undefined;
+  while(!(last=await progress(app).catch(()=>undefined))||last[key]<count){
+    assert(Date.now()<deadline,`${key} never reached ${count}: ${JSON.stringify(last)}`);await Bun.sleep(2);
   }
 }
-async function batchLogged(log:string,milestone:number,event="batch prepared"){
-  const deadline=Date.now()+15000;
-  while(!logged(log,event,{milestone:String(milestone)})){
-    assert(Date.now()<deadline,`batch ${milestone} never reached ${event}; ${log}`);await Bun.sleep(2);
-  }
+// Start a request and return once the server has admitted it, so successive
+// requests reach its queue in order. The pending result is boxed so awaiting
+// this helper does not await the request.
+async function admit<T>(app:{url:string},send:()=>Promise<T>):Promise<[Promise<T>]>{
+  const {admitted}=await progress(app);const pending=send();pending.catch(()=>{});
+  await reach(app,"admitted",admitted+1);return [pending];
 }
 const bytes = (s: string) => new TextEncoder().encode(s);
 async function status(r: Response, expected: number) {
@@ -375,7 +385,7 @@ try {
     const b=await bucket(),proxy=collisionProxy(b,r=>new URL(r.url).pathname.endsWith(`/${key(1n)}`),true,false,259);
     const app=await server(b,proxy.url,{BASINSYNC_BULK_MAX_AGE_MS:"10",BASINSYNC_BULK_TARGET_BYTES:"1",BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});let done=0;
     const first=fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("collision",a,0n),signal:AbortSignal.timeout(120000)}).then(r=>{done++;return r});await timeout(proxy.entered.promise);
-    const next=fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("collision",bytes("second"),1n),signal:AbortSignal.timeout(120000)}).then(r=>{done++;return r});await batchLogged(app.log,2);assert.equal(done,0);
+    const next=fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("collision",bytes("second"),1n),signal:AbortSignal.timeout(120000)}).then(r=>{done++;return r});await reach(app,"batches",2);assert.equal(done,0);
     proxy.release.resolve();await status(await first,201);await status(await next,201);assert.equal(proxy.retries(),259);
     const payload=await get(b,1n),original=proxy.originals.get(key(1n))!.body;assert.equal(entryDigest(payload),entryDigest(original));assert.notEqual(sha384(payload),sha384(original));
     const archives=await eventually(()=>s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.analogue})),r=>r.KeyCount===1);
@@ -675,8 +685,8 @@ try {
     const app=await server(rootBucket,undefined,{BASINSYNC_BATCH_MAX:"4",BASINSYNC_BATCH_WAIT_MS:"1000",RUST_LOG:"basinsync=debug"});
     const requests:Promise<Response>[]=[];
     for(let viewpoint=0;viewpoint<4;viewpoint++){
-      requests.push(commit(app.url,"ordered-ok",bytes(`marker-${viewpoint}`),BigInt(viewpoint)));
-      await queued(app.log,"ordered-ok",viewpoint);
+      const [pending]=await admit(app,()=>commit(app.url,"ordered-ok",bytes(`marker-${viewpoint}`),BigInt(viewpoint)));
+      requests.push(pending);
     }
     for(const response of await Promise.all(requests))await status(response,201);
     modernRoot=await get(rootBucket,1n);await stop(app.process);
@@ -696,14 +706,14 @@ try {
     const flow=`ordered-${fail?"lost":"ok"}`;let completed=0;
     const requests:Promise<Response>[]=[];
     for(let viewpoint=0;viewpoint<4;viewpoint++){
-      requests.push(commit(app.url,flow,bytes(`marker-${viewpoint}`),BigInt(viewpoint)).then(r=>{completed++;return r}));
-      await queued(app.log,flow,viewpoint);
+      const [pending]=await admit(app,()=>commit(app.url,flow,bytes(`marker-${viewpoint}`),BigInt(viewpoint)).then(r=>{completed++;return r}));
+      requests.push(pending);
     }
     await timeout(entered.promise);
     assert.equal(completed,0);
     await assert.rejects(()=>get(batchBucket,1n),"batch is not stored yet");
-    requests.push(commit(app.url,flow,bytes("marker-4"),4n).then(r=>{completed++;return r}));
-    await queued(app.log,flow,4);
+    const [fifth]=await admit(app,()=>commit(app.url,flow,bytes("marker-4"),4n).then(r=>{completed++;return r}));
+    requests.push(fifth);
     let statusFinished=false;
     const statusRequest=fetch(`${app.url}/api/v0/epilogue/status?flow=${flow}`).then(r=>{statusFinished=true;return r});
     await Bun.sleep(30);assert.equal(completed,0);assert.equal(statusFinished,false);
@@ -754,8 +764,8 @@ try {
     const flow=`pipeline-${fault}`;
     const requests=[commit(app.url,flow,a,0n).then(r=>{completed++;return r})];
     await timeout(entered.promise);
-    requests.push(commit(app.url,flow,a,1n).then(r=>{completed++;return r}));await batchLogged(app.log,2);
-    requests.push(commit(app.url,flow,a,2n).then(r=>{completed++;return r}));await queued(app.log,flow,2);
+    requests.push(commit(app.url,flow,a,1n).then(r=>{completed++;return r}));await reach(app,"batches",2);
+    const [third]=await admit(app,()=>commit(app.url,flow,a,2n).then(r=>{completed++;return r}));requests.push(third);
     let statusDone=false;const latest=fetch(`${app.url}/api/v0/epilogue/status?flow=${flow}`).then(value=>{statusDone=true;return value;});
     await Bun.sleep(30);
     assert.equal(puts,1);assert.equal(completed,0);assert.equal(statusDone,false);
@@ -795,7 +805,7 @@ try {
     await status(await commit(app.url,"deferred-mismatch",a,0n),201);
     const next=commit(app.url,"deferred-mismatch",a,1n);await timeout(entered.promise);
     let conflictDone=false;const conflict=commit(app.url,"deferred-mismatch",a,0n).then(r=>{conflictDone=true;return r});
-    await batchLogged(app.log,2,"batch rejected");
+    await reach(app,"prepared",3);
     let statusDone=false;const latest=fetch(`${app.url}/api/v0/epilogue/status?flow=deferred-mismatch`).then(r=>{statusDone=true;return r});
     await Bun.sleep(30);assert.equal(conflictDone,false);assert.equal(statusDone,false);
     second.resolve();await status(await next,fail?503:201);
@@ -809,7 +819,7 @@ try {
     const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"&&new URL(r.url).pathname.includes(`/${objectKeys.timeline}`)&&++puts===1){entered.resolve();await gate.promise;}});
     const app=await server(full,proxy.url,{BASINSYNC_BATCH_WAIT_MS:"1000",RUST_LOG:"basinsync=debug"});
     const first=Array.from({length:32},(_,n)=>commit(app.url,`full-${n}`,a,0n));await timeout(entered.promise);
-    const next=Array.from({length:32},(_,n)=>commit(app.url,`full-${n+32}`,a,0n));await batchLogged(app.log,2);
+    const next=Array.from({length:32},(_,n)=>commit(app.url,`full-${n+32}`,a,0n));await reach(app,"batches",2);
     assert.equal(puts,1);gate.resolve();for(const result of await Promise.all([...first,...next]))await status(result,201);
     assert.equal(entriesAt(await get(full,1n)).length,32);assert.equal(entriesAt(await get(full,2n)).length,32);
     await stop(app.process);await proxy.service.stop(true);
@@ -818,8 +828,8 @@ try {
   await scenario("0zg2 turso reservoir", "real-route ordered batches, durable status, count/byte bounds, slow bodies, disconnects, queued failure rejection, and WAL startup integrity (1/3)", async () => {
     const limited=await bucket();const app=await server(limited,endpoint,{BASINSYNC_BATCH_MAX:"32",BASINSYNC_BATCH_WAIT_MS:"1000",RUST_LOG:"basinsync=debug"});
     const large=new Uint8Array(5*1024*1024).fill(123);
-    const first=commit(app.url,"large-a",large,0n);await queued(app.log,"large-a",0);
-    const second=commit(app.url,"large-b",large,0n);await queued(app.log,"large-b",0);
+    const [first]=await admit(app,()=>commit(app.url,"large-a",large,0n));
+    const [second]=await admit(app,()=>commit(app.url,"large-b",large,0n));
     await status(await first,201);await status(await second,201);
     assert.equal(entriesAt(await get(limited,1n)).length,1);assert.equal(entriesAt(await get(limited,2n)).length,1);
     await stop(app.process);
@@ -839,8 +849,8 @@ try {
     const proxy=relay((_r,response)=>response,async r=>{if(r.method==="PUT"&&new URL(r.url).pathname.includes(`/${objectKeys.timeline}`)){entered.resolve();await gate.promise}});
     const app=await server(disconnected,proxy.url,{BASINSYNC_BATCH_MAX:"1",RUST_LOG:"basinsync=debug"});
     const abort=new AbortController();
-    const request=fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("disconnected",a,0n),signal:abort.signal});
-    await queued(app.log,"disconnected",0);await timeout(entered.promise);abort.abort();await assert.rejects(request);gate.resolve();
+    const [request]=await admit(app,()=>fetch(`${app.url}/api/v0/epilogue`,{method:"PUT",body:form("disconnected",a,0n),signal:abort.signal}));
+    await timeout(entered.promise);abort.abort();await assert.rejects(request);gate.resolve();
     assert.deepEqual(await epilogueStatus(app.url,"disconnected"),{latest:{viewpoint:0n}});
     await status(await commit(app.url,"disconnected",a,1n),201);await stop(app.process);await proxy.service.stop(true);
   });
@@ -930,7 +940,7 @@ try {
     const app=await server(b,endpoint,{BASINSYNC_BATCH_MAX:"4",BASINSYNC_BATCH_WAIT_MS:"1000",RUST_LOG:"basinsync=debug"});
     const target=new Uint8Array(65536);for(let n=0;n<target.length;n++)target[n]=n%251;
     const inputs:[string,Uint8Array,bigint][]=[["public",bytes("old public marker"),0n],["private",bytes("PRIVATE: must never escape through the public capability"),0n],["public",target,1n],["empty",new Uint8Array(),0n]];
-    const requests:Promise<Response>[]=[];for(const [flow,blob,vp] of inputs){requests.push(commit(app.url,flow,blob,vp));await queued(app.log,flow,Number(vp));}
+    const requests:Promise<Response>[]=[];for(const [flow,blob,vp] of inputs){const [pending]=await admit(app,()=>commit(app.url,flow,blob,vp));requests.push(pending);}
     for(const response of await Promise.all(requests))await status(response,201);
     const stored=await get(b,1n),ranges=rangesAt(stored),range=ranges.find(r=>r.flow==="public"&&r.marker.viewpoint==="1")!;
     await assertManifestRange(b,1n,stored);
@@ -1223,7 +1233,7 @@ try {
     const app=await server(b,proxy.url,{BASINSYNC_BATCH_MAX:"1",BASINSYNC_BATCH_WAIT_MS:"0",RUST_LOG:"basinsync=debug"});
     const input:HeapNode={auth:[0,0,bytes("pipeline-client-only-access-token")],length:0,edges:[]};
     const reservation=reserveHeap(app.url,"pipelined-heap",0n,[input]).then(r=>{done=true;return r});await timeout(entered.promise);
-    const following=commit(app.url,"pipelined-heap",bytes("root"),0n);await batchLogged(app.log,2);
+    const following=commit(app.url,"pipelined-heap",bytes("root"),0n);await reach(app,"batches",2);
     assert.equal(done,false,"do not release actions before reservation durability");assert.equal(puts,1,"prepared successor must not upload early");
     gate.resolve();const first=await reservation;
     if(fault==="none"){

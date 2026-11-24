@@ -184,9 +184,10 @@ try{
     const restored=await f.recover(b,"bulk");assert.equal(restored.flows.large,"63");
   }
   {
-    const b=await f.bucket();let fail=true;const proxy=f.relay(async(request,next)=>request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.analogue}`)&&fail?new Response(null,{status:500}):next());
+    const b=await f.bucket();let fail=true,refused=0;const proxy=f.relay(async(request,next)=>{if(request.method==="PUT"&&new URL(request.url).pathname.includes(`/${objectKeys.analogue}`)&&fail){refused++;return new Response(null,{status:500});}return next();});
     const app=await f.server(b,{BASINSYNC_BULK_MAX_AGE_MS:"20"},proxy);assert.equal((await commit(app.url,"age",new Uint8Array([1]),0n)).status,201);
-    await eventually(async()=>readFileSync(app.log,"utf8"),log=>log.includes("BulkOrder upload will retry"));fail=false;
+    // A second refused PUT shows the upload is retried, not abandoned.
+    await eventually(async()=>refused,n=>n>=2);fail=false;
     await eventually(()=>f.s3.send(new ListObjectsV2Command({Bucket:b,Prefix:objectKeys.analogue})),r=>r.KeyCount===1);
     await f.stop(app.process);
     const source=(await f.s3.send(new GetObjectCommand({Bucket:b,Key:timelineKey(1n)})));const event=await source.Body!.transformToByteArray();
