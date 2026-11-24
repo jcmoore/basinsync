@@ -36,4 +36,5 @@ Histograms expose `_bucket`, `_sum`, and `_count`. Queue wait runs from submissi
 to preparation; acknowledgement latency runs from submission to the durable
 result, excluding body parsing. HTTP latency includes the handler's earlier work.
 HTTP cancellation and durable completion are independent: disconnected clients'
-accepted work can still succeed. Dropped observations record abandonment.
+accepted work can still succeed, and its `outcome` still reports that durable
+result. `abandoned` counts only submissions dropped before any durable result.

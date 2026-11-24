@@ -65,3 +65,22 @@ Both *object-key patterns*[~][object-keys] share the stored UUIDv4
 *revision*[~][revision]. Send each action's headers. A nonempty stored *etag*[~][etag] makes `write` null; a valid
 *promotion*[~][node-promotion] timestamp makes `preview` null.
 
+Indexed error codes:
+
+| `code` | Meaning |
+| --- | --- |
+| `invalid_node` | Malformed node fields or authentication |
+| `invalid_context` | Invalid S3 *context*[~][context] metadata |
+| `invalid_length` | Content length beyond the database integer range |
+| `invalid_height` | An edge's *height*[~][node-height] is not below its parent's |
+| `unsupported_version` | Authentication version other than zero |
+| `height_limit`, `token_limit`, `degree_limit` | A configured service limit is exceeded |
+| `node_freed` | The *node*[~][node] awaits reclamation; retry afterward |
+| `length_collision`, `edges_collision`, `context_collision` | The existing *node*[~][node] differs |
+| `child_unknown` | A child has no reserved allocation |
+| `child_freed` | A child awaits reclamation |
+| `child_unverified` | A child's object is not verified in either generation |
+| `child_changed` | A child's allocation changed during verification; retry |
+
+Presigned URLs, here and in status responses, expire within minutes; request
+new ones rather than caching them.

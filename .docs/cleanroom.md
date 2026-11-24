@@ -102,6 +102,8 @@ The integration oracle ends by validating every stored message the suites left
 in S3 against the docs' CDDL schemas (`examples/schema-check`). Test fixtures
 contribute a few deliberate failures (corrupt roots, legacy events without
 coordinates); compare a rebuild's counts with the reference run's.
+The cddl crate rejects one-element arrays such as `frames: [bstr]`, so the
+checker validates `[+ bstr]` and counts Turso frames itself.
 
 Agents never see these; apply them to a collected branch:
 

@@ -7,7 +7,7 @@
 //! markers are decoded; every FlexBuffers command tuple is validated against
 //! `<path's last segment>-command`, every root marker against `basin-root`.
 //! Prints per-rule counts and the first failures; exits 1 on any failure.
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use basinsync::{envbuf, flexbuffer};
 use ciborium::value::Value;
 use flexbuffers::{FlexBufferType, Reader};
@@ -45,7 +45,46 @@ fn schema(docs: &Path) -> Result<String> {
         }
     }
     ensure!(!out.is_empty(), "no cddl blocks under {}", docs.display());
-    Ok(out)
+    // cddl 0.10.7 rejects every value against a one-element array such as
+    // `[bstr]`; validate `[+ bstr]` and check the count in `exactly_one_frame`.
+    ensure!(
+        out.contains(ONE_FRAME),
+        "docs no longer specify `{ONE_FRAME}`"
+    );
+    Ok(out.replace(ONE_FRAME, "frames: [+ bstr]"))
+}
+
+const ONE_FRAME: &str = "frames: [bstr]";
+
+fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    value
+        .as_map()?
+        .iter()
+        .find(|(k, _)| k.as_text() == Some(key))
+        .map(|(_, v)| v)
+}
+
+/// Each Turso delta holds exactly one logical frame (docs/turso-state.md).
+fn exactly_one_frame(command: &Value) -> Result<()> {
+    let deltas = command
+        .as_array()
+        .and_then(|a| a.get(3))
+        .and_then(|q| field(q, "turso"))
+        .and_then(Value::as_map);
+    for (database, delta) in deltas.into_iter().flatten() {
+        let frames = field(delta, "logical")
+            .and_then(|l| field(l, "frames"))
+            .and_then(Value::as_array);
+        if let Some(frames) = frames {
+            ensure!(
+                frames.len() == 1,
+                "{} delta holds {} logical frames, not one",
+                database.as_text().unwrap_or("?"),
+                frames.len()
+            );
+        }
+    }
+    Ok(())
 }
 
 /// FlexBuffers to CBOR's data model, per docs/message-schemas.md.
@@ -66,7 +105,9 @@ fn cbor(reader: Reader<&[u8]>) -> Result<Value> {
                 let (_, bytes) = magnitude.to_bytes_be();
                 Value::Tag(if negative { 3 } else { 2 }, Box::new(Value::Bytes(bytes)))
             }
-            flexbuffer::Extension::WellKnownSymbol(s) => Value::Tag(60000, Box::new(Value::Text(s))),
+            flexbuffer::Extension::WellKnownSymbol(s) => {
+                Value::Tag(60000, Box::new(Value::Text(s)))
+            }
             flexbuffer::Extension::GlobalSymbol(s) => Value::Tag(60001, Box::new(Value::Text(s))),
         },
         Map => {
@@ -97,8 +138,19 @@ impl Checker {
         let outcome = ciborium::into_writer(value, &mut bytes)
             .map_err(anyhow::Error::from)
             .and_then(|()| {
-                cddl::validate_cbor_from_slice(&format!("root = {rule}\n{}", self.schema), &bytes, None)
-                    .map_err(|e| anyhow::anyhow!("{e}"))
+                cddl::validate_cbor_from_slice(
+                    &format!("root = {rule}\n{}", self.schema),
+                    &bytes,
+                    None,
+                )
+                .map_err(|e| anyhow::anyhow!("{e}"))
+            })
+            .and_then(|()| {
+                if rule == "ingestturso-command" {
+                    exactly_one_frame(value)
+                } else {
+                    Ok(())
+                }
             });
         let entry = self.counts.entry(rule.to_owned()).or_default();
         match outcome {
@@ -106,21 +158,31 @@ impl Checker {
             Err(error) => {
                 entry.1 += 1;
                 if self.failures.len() < 20 {
-                    let first = error.to_string().lines().next().unwrap_or_default().chars().take(300).collect::<std::string::String>();
+                    let first = error
+                        .to_string()
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .chars()
+                        .take(300)
+                        .collect::<std::string::String>();
                     self.failures.push(format!("{rule} in {origin}: {first}"));
                 }
             }
         }
     }
     fn command(&mut self, flex: &[u8], origin: &str) {
-        let result = flexbuffer::root(flex).map_err(anyhow::Error::from).and_then(|r| {
+        let result = flexbuffer::root(flex).and_then(|r| {
             let value = cbor(r)?;
             let path = match &value {
                 Value::Array(items) if items.len() == 4 => items[2].as_text().map(str::to_owned),
                 _ => None,
             }
             .context("not a command tuple")?;
-            Ok((format!("{}-command", path.rsplit('/').next().unwrap_or(&path)), value))
+            Ok((
+                format!("{}-command", path.rsplit('/').next().unwrap_or(&path)),
+                value,
+            ))
         });
         match result {
             Ok((rule, value)) => self.check(&rule, &value, origin),
@@ -130,7 +192,8 @@ impl Checker {
     fn undecodable(&mut self, rule: &str, origin: &str, error: anyhow::Error) {
         self.counts.entry(rule.to_owned()).or_default().1 += 1;
         if self.failures.len() < 20 {
-            self.failures.push(format!("{rule} in {origin}: undecodable: {error:#}"));
+            self.failures
+                .push(format!("{rule} in {origin}: undecodable: {error:#}"));
         }
     }
     /// A feed of envelopes: nested events recurse, FlexBuffers are commands.
@@ -148,13 +211,15 @@ impl Checker {
         if bytes.is_empty() || !bytes.starts_with(b"enV") {
             return; // sentinels, tombstones, and probes carry no message
         }
-        let result = if key.starts_with("kernelspace/basin/timeline/") || key.starts_with("kernelspace/basin/analogue/") {
+        let result = if key.starts_with("kernelspace/basin/timeline/")
+            || key.starts_with("kernelspace/basin/analogue/")
+        {
             self.feed(bytes, origin)
         } else if let Some(position) = key.strip_prefix("kernelspace/basin/epilogue/") {
             if !position.starts_with("0y") {
                 return; // PromotionSigns use uncomplemented positions
             }
-            match envbuf::message(bytes).map_err(anyhow::Error::from).and_then(|m| Ok(cbor(flexbuffer::root(m)?)?)) {
+            match envbuf::message(bytes).and_then(|m| cbor(flexbuffer::root(m)?)) {
                 Ok(value) => {
                     self.check("basin-root", &value, origin);
                     Ok(())
@@ -187,14 +252,23 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 
 fn main() -> Result<()> {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    ensure!(args.len() >= 2, "usage: schema-check DOCS_DIR OBJECT_DIR...");
-    let mut checker = Checker { schema: schema(&args[0])?, counts: Default::default(), failures: vec![] };
+    ensure!(
+        args.len() >= 2,
+        "usage: schema-check DOCS_DIR OBJECT_DIR..."
+    );
+    let mut checker = Checker {
+        schema: schema(&args[0])?,
+        counts: Default::default(),
+        failures: vec![],
+    };
     for root in &args[1..] {
         let mut files = vec![];
         walk(root, &mut files)?;
         for file in files {
             let text = file.to_string_lossy();
-            let Some(at) = text.find("/kernelspace/") else { continue };
+            let Some(at) = text.find("/kernelspace/") else {
+                continue;
+            };
             let key = &text[at + 1..];
             let bytes = std::fs::read(&file)?;
             checker.object(key, &bytes, &text);

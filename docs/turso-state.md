@@ -35,7 +35,7 @@ Deltas carry these bindings in `physical`:
 ```cddl
 turso-delta = {
   version: tstr,
-  logical: { base: bstr / null, header: bstr .size 56, frames: [* bstr] },
+  logical: { base: bstr / null, header: bstr .size 56, frames: [bstr] },
   physical: {
     format: "sqlite-wal/1", base: decimal, milestone: decimal,
     parent: hex384 / null, base_sha384: hex384 / null, segments: [* bstr],
@@ -46,8 +46,10 @@ turso-delta = {
 Shared definitions such as `command` and `decimal` are in the *message schemas*[~][message-schemas].
 
 `logical.header` is the 56-byte native log header;
-`logical.frames` contains the *logical frames*[~][logical-frame], including portable changes,
-without that header. All byte payloads are binary blobs.
+`logical.frames` holds one entry: the transaction's complete *logical frame*[~][logical-frame],
+including portable changes, as the log stores it after that header. Each delta
+captures exactly one transaction; checkpoint before any other transaction on that
+database. All byte payloads are binary blobs.
 
 Each `physical.segments` entry is a complete *physical WAL*[~][wal] segment,
 including its header, *page frames*[~][physical-frame], and commit boundary. Validate native checksums,

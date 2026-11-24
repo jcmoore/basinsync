@@ -80,4 +80,5 @@ For `latest`, send the returned `headers` with its URL, including the signed
 and selects only the raw *EnvBuf message*[~][envbuf]. For zero length,
 omit `url` and `headers` and use empty bytes without fetching.
 
-With no committed *marker*[~][commit-marker], `latest` is `null`.
+With no committed *marker*[~][commit-marker], `latest` is `null`. A missing or
+invalid `flow` returns 400.
