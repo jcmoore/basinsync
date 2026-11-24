@@ -30,6 +30,9 @@ as a gap, and keep going.
 - Your build will later be checked against independent tests you cannot see.
   Follow the documentation exactly; do not invent behavior to make things
   "work" without logging the gap that forced it.
+- Stored message formats are specified in CDDL (`docs/message-schemas.md` and
+  the `cddl` blocks beside each message); check what your server writes against
+  them, for example with the `cddl` crate.
 - Commit to git often with clear messages. There is no remote; do not add one.
 
 ## Deliverables

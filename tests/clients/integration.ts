@@ -112,8 +112,10 @@ function relay(after: (request: Request, response: Response) => Promise<Response
 type Progress={admitted:number;prepared:number;batches:number};
 async function progress(app:{url:string}):Promise<Progress>{
   const text=await (await fetch(`${app.url}/metrics`,{signal:AbortSignal.timeout(5000)})).text();
+  // Series without a label also count, so these waits test ordering, not label
+  // conformance (the observability suite checks labels).
   const sum=(name:string,labels:Record<string,string>={})=>text.split("\n")
-    .filter(l=>(l.startsWith(name+"{")||l.startsWith(name+" "))&&Object.entries(labels).every(([k,v])=>l.includes(`${k}="${v}"`)))
+    .filter(l=>(l.startsWith(name+"{")||l.startsWith(name+" "))&&Object.entries(labels).every(([k,v])=>l.includes(`${k}="${v}"`)||!l.includes(`${k}="`)))
     .reduce((total,l)=>total+Number(l.slice(l.lastIndexOf(" ")+1)),0);
   const commit={operation:"commit"};
   const admitted=sum("basinsync_submissions_total",commit)+sum("basinsync_submissions_inflight",commit);
