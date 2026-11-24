@@ -9,6 +9,8 @@ It passed all 164 vector cases, and 26 of its 27 Kani harnesses verify; see
 
 Changed since: JSON0 escapes every literal string beginning with `0`,
 including `"0"`, and rejects a lone `"0"` (docs round 5); `json0_literal_escape`
-re-verified afterward.
+re-verified afterward. FlexBuffers decoding enforces the layout rule (a value
+ends at or before the slot that refers to it; docs round 5) in `layout.rs` and
+the extension core; the four `flex_ext_*` harnesses re-verified afterward.
 
 Refresh it from a codec-only clean room with `scripts/cleanroom/kit-import.sh`.

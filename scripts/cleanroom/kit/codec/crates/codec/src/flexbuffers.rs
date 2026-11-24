@@ -517,7 +517,12 @@ pub fn validate_extension(buf: &[u8]) -> Result<ExtensionView> {
         return err("flexbuffers: root is not a VT_VECTOR_UINT extension");
     }
     let target = deref(buf, pos, pw)?;
-    view_extension(buf, target, 1 << (packed & 3))
+    let v = view_extension(buf, target, 1 << (packed & 3))?;
+    // Layout rule: the vector ends at or before the root slot that refers to it.
+    match (v.payload_len + 1).checked_mul(v.width).and_then(|n| n.checked_add(target)) {
+        Some(end) if end <= pos => Ok(v),
+        _ => err("flexbuffers: value overlaps the slot that refers to it"),
+    }
 }
 
 fn read_extension(buf: &[u8], target: usize, w: usize) -> Result<(u8, Vec<u8>)> {
@@ -971,6 +976,7 @@ impl<'a> Reader<'a> {
 
 /// Decode a complete FlexBuffers buffer.
 pub fn decode(buf: &[u8]) -> Result<Value> {
+    crate::layout::check_layout(buf)?;
     let (pos, pw, packed) = root(buf)?;
     let mut r = Reader { buf, budget: buf.len().saturating_mul(64).saturating_add(4096) };
     r.value(pos, pw, packed, 0)
@@ -991,6 +997,7 @@ pub enum PathElem {
 /// of a `VT_BLOB` or `VT_STRING` (excluding the size prefix and the string's
 /// NUL terminator). Other target types are an error.
 pub fn locate(buf: &[u8], path: &[PathElem]) -> Result<Range<usize>> {
+    crate::layout::check_layout(buf)?;
     let (mut pos, mut pw, mut packed) = root(buf)?;
     for step in path {
         let ty = packed >> 2;

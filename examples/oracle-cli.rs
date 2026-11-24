@@ -65,7 +65,7 @@ fn answer(request: &Value) -> Result<Value> {
         }
         "flexbuffers.decodeExtension" => {
             let wire = bytes(request, "wire")?;
-            match flexbuffer::read(flexbuffers::Reader::get_root(wire.as_slice())?)? {
+            match flexbuffer::read(flexbuffer::root(wire.as_slice())?)? {
                 flexbuffer::Extension::BigInt(n) => json!({"bigint": n.to_string()}),
                 flexbuffer::Extension::WellKnownSymbol(name) => json!({"wellKnownSymbol": name}),
                 flexbuffer::Extension::GlobalSymbol(name) => json!({"globalSymbol": name}),

@@ -48,6 +48,8 @@ def cases(repo):
                {"op": "flexbuffers.decodeExtension", "wire": extension["wire"]}, ok({field: value}))
     for wire in v["invalid"]:
         yield "flexbuffers", f"reject {wire}", {"op": "flexbuffers.decodeExtension", "wire": wire}, error
+    for wire in v.get("overlappingLayouts", []):
+        yield "flexbuffers", f"reject overlapping {wire}", {"op": "flexbuffers.decodeExtension", "wire": wire}, error
     for name in v["unsupportedWellKnownSymbols"]:
         payload = list(b"#" + name.encode())
         wire = [len(payload), *payload, len(payload), 48, 1]

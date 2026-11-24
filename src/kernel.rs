@@ -134,6 +134,7 @@ impl Graph {
         Ok(flexbuffers::to_vec(self)?)
     }
     pub fn decode(bytes: &[u8]) -> Result<Self> {
+        crate::flexbuffer::check_layout(bytes)?;
         let graph: Self = flexbuffers::from_slice(bytes)?;
         graph.validate()?;
         Ok(graph)

@@ -85,3 +85,14 @@ fn reference_typed_uint_vector_is_an_extension_slot() {
     b.build_singleton(&[b'x' as u16, 1, 0, 0, 0][..]);
     assert_eq!(decode(b.view()).unwrap(), Value::BigInt(16777216.into()));
 }
+
+/// Docs round 5: a value must end at or before the slot that refers to it.
+#[test]
+fn overlapping_layouts_are_rejected() {
+    use basinsync_codec::flexbuffers::{decode, decode_extension};
+    for wire in [&[106u8, 2, 120, 1, 48, 1][..], &[0, 2, 120, 1, 48, 1], &[3, 120, 1, 48, 1]] {
+        assert!(decode_extension(wire).is_err(), "{wire:?}");
+        assert!(decode(wire).is_err(), "{wire:?}");
+    }
+    assert!(decode_extension(&[2, 120, 1, 2, 48, 1]).is_ok());
+}

@@ -15,6 +15,7 @@ pub mod diffuse16;
 pub mod envbuf;
 pub mod error;
 pub mod flexbuffers;
+pub mod layout;
 pub mod ids;
 pub mod json0;
 pub mod keys;
