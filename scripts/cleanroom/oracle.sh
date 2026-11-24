@@ -104,6 +104,12 @@ PY
     awk '{tag=$3; for(i=4;i<=NF;i++) tag=tag" "$i; n[tag" "$2]=$1; tags[tag]=1}
          END{for(t in tags) printf "  %-32s %3d pass %3d fail\n", t, n[t" PASS"], n[t" FAIL"]}' |
     sort | tee -a "$eval_dir/integration/report.txt"
+  # Every stored message the suites left behind, against the docs' CDDL schemas.
+  # Test fixtures add a few deliberate failures; compare with the reference.
+  cargo build -q --manifest-path "$repo/Cargo.toml" --example schema-check
+  { echo "--- stored messages vs docs/ CDDL schemas"
+    "$repo/target/debug/examples/schema-check" "$repo/docs" "$copy/.local" || true
+  } | tee -a "$eval_dir/integration/report.txt"
   exit 0
 fi
 cli=""

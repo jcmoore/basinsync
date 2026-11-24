@@ -11,6 +11,7 @@
 [kernelspace]: <glossary/kernelspace.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [marking-task]: <glossary/marking-task.md>
+[message-schemas]: <message-schemas.md>
 [milestone]: <glossary/milestone.md>
 [node]: <glossary/node.md>
 [node-promotion]: <glossary/node-promotion.md>
@@ -35,18 +36,19 @@ uncomplemented positions in those same namespaces. *Basin*[~][basin]
 *Viewpoints*[~][viewpoint] count backups independently of *Milestones*[~][milestone].
 A *Basin*[~][basin] root is a *FlexBuffers*[~][flexbuffers] message:
 
-```ts
-{
-  version: string;             // Turso release and revision
-  milestone: string;           // covered decimal Milestone M
-  coordinate: string;          // exclusive decimal coordinate
-  crc32c: string;              // cumulative CRC32C, eight lowercase hex digits
-  parent: string;              // event SHA-384 at M
-  databases: Record<"default.turso" | "kernel.turso", {
-    id: string; revision: string; length: number; sha384: string;
-  }>;
+```cddl
+basin-root = {
+  version: tstr,           ; Turso release and revision
+  milestone: decimal,      ; covered Milestone M
+  coordinate: decimal,     ; exclusive coordinate
+  crc32c: hex-crc32c,      ; cumulative CRC32C
+  parent: hex384,          ; event SHA-384 at M
+  databases: { "default.turso": backup-node, "kernel.turso": backup-node },
 }
+backup-node = { id: tstr, revision: tstr, length: uint, sha384: hex384 }
 ```
+
+Shared definitions such as `command` and `decimal` are in the *message schemas*[~][message-schemas].
 
 Both database images are height-zero *KernelSpace*[~][kernelspace] *nodes*[~][node]
 at the same prefix. Verify their lengths, checksums, and recorded

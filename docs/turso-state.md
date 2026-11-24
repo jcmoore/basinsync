@@ -1,5 +1,6 @@
 [differential-event]: <glossary/differential-event.md>
 [logical-frame]: <glossary/logical-frame.md>
+[message-schemas]: <message-schemas.md>
 [milestone]: <glossary/milestone.md>
 [physical-frame]: <glossary/physical-frame.md>
 [sha384]: <glossary/sha384.md>
@@ -31,24 +32,18 @@ keyed by database id, including `default.turso` and `kernel.turso`. Every delta 
 
 Deltas carry these bindings in `physical`:
 
-```ts
-{
-  version: string;
-  logical: {
-    base: Uint8Array | null;
-    header: Uint8Array;
-    frames: Uint8Array[];
-  };
+```cddl
+turso-delta = {
+  version: tstr,
+  logical: { base: bstr / null, header: bstr .size 56, frames: [* bstr] },
   physical: {
-    format: "sqlite-wal/1";
-    base: string;
-    milestone: string;
-    parent: string | null;
-    base_sha384: string | null;
-    segments: Uint8Array[];
-  };
+    format: "sqlite-wal/1", base: decimal, milestone: decimal,
+    parent: hex384 / null, base_sha384: hex384 / null, segments: [* bstr],
+  },
 }
 ```
+
+Shared definitions such as `command` and `decimal` are in the *message schemas*[~][message-schemas].
 
 `logical.header` is the 56-byte native log header;
 `logical.frames` contains the *logical frames*[~][logical-frame], including portable changes,

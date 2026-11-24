@@ -1,3 +1,4 @@
+[message-schemas]: <../../../message-schemas.md>
 ---
 prerequisites:
   - 0zg1/261023-basin-timeline-race
@@ -97,12 +98,14 @@ transaction. Preserve every *CommitMarker*[~][commit-marker] in ordered
 tuple. Append one frame-ingestion command before the final
 *range manifest*[~][range-manifest]:
 
-```ts
-// Each tuple has its own EnvBuf; append after the commitflow chunks.
-[Symbol.species, "sync.memoremix.com", "sts/0/databasin/ingestturso", {
-  turso: { "default.turso": { version, logical, physical } }
-}]
+```cddl
+; Each tuple has its own EnvBuf; append after the commitflow chunks.
+ingestturso-command = command<"sts/0/databasin/ingestturso", {
+  turso: { * tstr => turso-delta }
+}>
 ```
+
+Shared definitions such as `command` and `decimal` are in the *message schemas*[~][message-schemas].
 
 Follow the *delta contract*[~][turso-state]; `version` identifies the Turso
 build that wrote each delta.

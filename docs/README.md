@@ -10,6 +10,7 @@
 [diy/0zg7/261118-shallow-basin-backup-nodes]: <diy/0zg7/261118-shallow-basin-backup-nodes/README.md>
 [diy/0zg8/261119-observability]: <diy/0zg8/261119-observability/README.md>
 [lexidecimal]: <glossary/lexidecimal.md>
+[message-schemas]: <message-schemas.md>
 [object-keys]: <object-keys.md>
 
 # basinsync
@@ -49,4 +50,5 @@ Back up paired database graphs with
 Inspect request publication and background progress with
 *Observability*[~][diy/0zg8/261119-observability].
 
-Audit storage layouts in the *object-key reference*[~][object-keys].
+Audit storage layouts in the *object-key reference*[~][object-keys], and stored
+messages against the *message schemas*[~][message-schemas].

@@ -13,6 +13,7 @@
 [flow]: <glossary/flow.md>
 [lexidecimal]: <glossary/lexidecimal.md>
 [margin]: <glossary/margin.md>
+[message-schemas]: <message-schemas.md>
 [milestone]: <glossary/milestone.md>
 [node]: <glossary/node.md>
 [object-keys]: <object-keys.md>
@@ -56,9 +57,16 @@ commitflow or `sts/0/databasin/commitkernel` tuples, one `sts/0/databasin/ingest
 *state deltas*[~][turso-state] carry the Turso changes
 that materialize the recorded state; all requests wait for durable publication.
 
-`commitkernel` carries `{ viewpoint: string, graph }` for the server-driven
-*Basin backup graph*[~][basin-backup]; `graph` is that backup's root message itself,
-with the same fields. Reservations use only ingestion frames.
+`commitkernel` carries the server-driven *Basin backup graph*[~][basin-backup];
+`graph` is that backup's root message itself. Reservations use only ingestion frames.
+
+```cddl
+commitkernel-command = command<"sts/0/databasin/commitkernel", {
+  viewpoint: decimal, graph: basin-root,
+}>
+```
+
+Shared definitions such as `command` and `decimal` are in the *message schemas*[~][message-schemas].
 
 Regardless of in-flight limits, durable publication must follow
 *Milestone*[~][milestone] order to preserve *causal consistency*[~][causal-consistency].

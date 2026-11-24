@@ -4,6 +4,7 @@
 [envbuf]: <envbuf.md>
 [flexbuffers]: <flexbuffers.md>
 [margin]: <margin.md>
+[message-schemas]: <../message-schemas.md>
 [milestone]: <milestone.md>
 [object-keys]: <../object-keys.md>
 
@@ -12,13 +13,13 @@
 A format `101` *EnvBuf*[~][envbuf] indexing complete, trimmed
 *DifferentialEvents*[~][differential-event] in a *BulkOrder*[~][bulk-order]:
 
-```ts
-[Symbol.species, "sync.memoremix.com", "sts/0/databasin/bulkmanifest", {
-  lowest: 42n,
-  coordinate: 65536n,
-  ends: [488, 1360, 1976]
-}]
+```cddl
+bulkmanifest-command = command<"sts/0/databasin/bulkmanifest", {
+  lowest: big, coordinate: big, ends: [+ uint],
+}>
 ```
+
+Shared definitions such as `command` and `decimal` are in the *message schemas*[~][message-schemas].
 
 `lowest` is the first inclusive *Milestone*[~][milestone]; `coordinate` is its
 starting *byte coordinate*[~][byte-coordinate]. Each `ends` entry is one
