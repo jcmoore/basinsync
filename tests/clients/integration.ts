@@ -460,14 +460,15 @@ try {
     const restored=await server(b);assert.equal((await fullStatus(restored.url,"sentinel")).latest?.viewpoint,0n);await stop(restored.process);
   });
   await scenario("0zg1 timeline race", "bucket-derived empty sentinel validators, atomic conditional replacement, metadata-only ETag caveat, exclusive search bounds, wrapped empty markers, margin signs, and snapshot recovery (2/3)", async () => {
-    const b=await bucket(),writer=await server(b);
+    const b=await bucket(),unanchored={BASINSYNC_BACKUP_INTERVAL_MS:"0"},writer=await server(b,endpoint,unanchored);
     for(let n=0;n<3;n++)await status(await commit(writer.url,"bounds",bytes(`marker-${n}`),BigInt(n)),201);
     await stop(writer.process);
     for(const n of [4n,16n,1n<<64n])await s3.send(new PutObjectCommand({Bucket:b,Key:key(n),Body:new Uint8Array()}));
     // Empty sentinels sort before published entries. Ignore conditional reads to exercise length-based detection too.
+    // Without a recovery anchor, LIST is the documented way to find the tail.
     const reads:{method:string;url:URL}[]=[];
     const proxy=relay((request,response)=>{reads.push({method:request.method,url:new URL(request.url)});return request.method==="HEAD"&&response.status===304?new Response(null,{status:200,headers:{"content-length":"0"}}):response;});
-    const restored=await server(b,proxy.url);
+    const restored=await server(b,proxy.url,unanchored);
     assert(reads.some(r=>r.method==="GET"&&r.url.searchParams.get("prefix")===objectKeys.timeline),"find the tail with an ordered LIST that skips sentinels");
     assert(!reads.some(r=>r.method==="HEAD"&&r.url.pathname.includes(`/${objectKeys.timeline}`)),"LIST gives the tail without exponential probes");
     assert.equal((await fullStatus(restored.url,"bounds")).latest?.viewpoint,2n);
