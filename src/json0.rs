@@ -85,17 +85,16 @@ pub fn deserialize_bytes<'de, D: Deserializer<'de>>(deserializer: D) -> Result<V
         Some("0%") => &STANDARD,
         _ => return Err(D::Error::custom("sha384 must be JSON0 bytes")),
     };
-    let config = GeneralPurposeConfig::new()
-        .with_decode_padding_mode(DecodePaddingMode::Indifferent)
-        .with_decode_allow_trailing_bits(true);
-    let encoded: Vec<u8> = wire.as_bytes()[2..]
-        .iter()
-        .copied()
-        .filter(|b| !matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0c))
-        .collect();
-    GeneralPurpose::new(alphabet, config)
-        .decode(encoded)
-        .map_err(D::Error::custom)
+    decode_base64(&wire[2..], alphabet).map_err(D::Error::custom)
+}
+
+/// JSON0 base64: `=` padding is optional but, when present, exact; whitespace
+/// and nonzero unused bits are rejected.
+fn decode_base64(payload: &str, alphabet: &base64::alphabet::Alphabet) -> anyhow::Result<Vec<u8>> {
+    use base64::Engine;
+    anyhow::ensure!(!payload.contains('=') || payload.len() % 4 == 0, "inexact base64 padding");
+    let config = GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent);
+    Ok(GeneralPurpose::new(alphabet, config).decode(payload)?)
 }
 
 /// One JSON0 string value, decoded (the oracle's view; decimal reals aside).
@@ -142,11 +141,8 @@ pub fn decode_scalar(wire: &str) -> anyhow::Result<Scalar> {
         '0' => Scalar::Text(rest.to_owned()),
         'x' => Scalar::BigInt(hex(payload)?),
         '~' => Scalar::BigInt(-hex(payload)? - 1),
-        '*' | '%' => {
-            let alphabet = if prefix == '*' { &URL_SAFE } else { &STANDARD };
-            let config = GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent);
-            Scalar::Bytes(GeneralPurpose::new(alphabet, config).decode(payload)?)
-        }
+        '*' => Scalar::Bytes(decode_base64(payload, &URL_SAFE)?),
+        '%' => Scalar::Bytes(decode_base64(payload, &STANDARD)?),
         '#' => {
             ensure!(WELL_KNOWN.contains(&payload), "unsupported well-known symbol");
             Scalar::WellKnownSymbol(payload.to_owned())
@@ -199,6 +195,12 @@ mod tests {
                 assert_eq!(encode_scalar(&make(&value)).unwrap(), wire);
                 assert_eq!(decode_scalar(&wire).unwrap(), make(&value), "{wire}");
             }
+        }
+        for case in v["decodeOnly"].as_array().unwrap() {
+            let (wire, want) = (case[0].as_str().unwrap(), &case[1]);
+            let got = decode_scalar(wire).unwrap();
+            let expected = if let Some(n) = want["bigint"].as_str() { Scalar::BigInt(n.parse().unwrap()) } else { Scalar::Bytes(serde_json::from_value(want["bytes"].clone()).unwrap()) };
+            assert_eq!(got, expected, "{wire}");
         }
         for wire in v["invalid"].as_array().unwrap() {
             assert!(decode_scalar(wire.as_str().unwrap()).is_err(), "{wire}");

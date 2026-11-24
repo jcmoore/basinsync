@@ -37,6 +37,8 @@ def cases(repo):
         for value, wire in v[field]:
             yield "json0", f"encode {field} {value!r}", {"op": "json0.encode", field: value}, ok(wire)
             yield "json0", f"decode {wire!r}", {"op": "json0.decode", "wire": wire}, ok({field: value})
+    for wire, value in v.get("decodeOnly", []):
+        yield "json0", f"decode lenient {wire!r}", {"op": "json0.decode", "wire": wire}, ok(value)
     for wire in v["invalid"]:
         yield "json0", f"reject {wire!r}", {"op": "json0.decode", "wire": wire}, error
     for name in v["unsupportedWellKnownSymbols"]:
@@ -58,6 +60,8 @@ def cases(repo):
                {"op": "flexbuffers.decodeExtension", "wire": extension["wire"]}, ok({field: value}))
     for wire in v["invalid"]:
         yield "flexbuffers", f"reject {wire}", {"op": "flexbuffers.decodeExtension", "wire": wire}, error
+    for wire in v.get("fixedLengthVectors", []):
+        yield "flexbuffers", f"reject fixed-length {wire}", {"op": "flexbuffers.decodeExtension", "wire": wire}, error
     for wire in v.get("overlappingLayouts", []):
         yield "flexbuffers", f"reject overlapping {wire}", {"op": "flexbuffers.decodeExtension", "wire": wire}, error
     for name in v["unsupportedWellKnownSymbols"]:

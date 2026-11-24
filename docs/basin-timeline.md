@@ -29,7 +29,7 @@
 
 The *Basin's*[~][basin] shared *Timeline*[~][timeline] records state changes using the
 *Timeline object-key pattern*[~][object-keys]. *Milestones*[~][milestone] start at one and increase
-without gaps. To catch up, read the latest *Basin*[~][basin] *recovery anchor*[~][basin-backup]
+without gaps; *Milestone*[~][milestone] zero has no *Timeline*[~][timeline] key. To catch up, read the latest *Basin*[~][basin] *recovery anchor*[~][basin-backup]
 and ingest every subsequent *DifferentialEvent*[~][differential-event]. Its
 recorded *Milestone*[~][milestone] seeds exponential search for the tail.
 Encode complemented *Milestones*[~][milestone] as *Lexidecimal*[~][lexidecimal],

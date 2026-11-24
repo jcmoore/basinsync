@@ -277,6 +277,7 @@ mod tests {
         extensions: Vec<serde_json::Map<String, serde_json::Value>>,
         invalid: Vec<Vec<u8>>,
         overlapping_layouts: Vec<Vec<u8>>,
+        fixed_length_vectors: Vec<Vec<u8>>,
         unsupported_well_known_symbols: Vec<String>,
     }
 
@@ -325,7 +326,7 @@ mod tests {
             assert_eq!(encode(&extension).unwrap(), wire);
             assert_eq!(decoded(&wire), Some(extension));
         }
-        for wire in &vectors.invalid {
+        for wire in vectors.invalid.iter().chain(&vectors.fixed_length_vectors) {
             assert_eq!(decoded(wire), None, "{wire:?}");
         }
         for name in &vectors.unsupported_well_known_symbols {

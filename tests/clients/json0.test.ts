@@ -75,7 +75,8 @@ describe("JSON0", () => {
   test("matches the shared JSON0 vectors", () => {
     type Pairs<T> = [T, string][];
     const v = vectors<{ text: Pairs<string>; bigint: Pairs<string>; bytes: Pairs<number[]>; wellKnownSymbol: Pairs<string>;
-      globalSymbol: Pairs<string>; invalid: string[] }>("json0");
+      globalSymbol: Pairs<string>; invalid: string[];
+      decodeOnly: [string, { bigint?: string; bytes?: number[] }][] }>("json0");
     const check = (value: unknown, wire: string) => {
       expect(JSON.parse(stringify(value))).toBe(wire);
       expect(parse(JSON.stringify(wire))).toEqual(value);
@@ -85,6 +86,8 @@ describe("JSON0", () => {
     for (const [bytes, wire] of v.bytes) check(new Uint8Array(bytes), wire);
     for (const [name, wire] of v.wellKnownSymbol) check(WELL_KNOWN_BY_NAME[name], wire);
     for (const [name, wire] of v.globalSymbol) check(Symbol.for(name), wire);
+    for (const [wire, want] of v.decodeOnly)
+      expect(parse(JSON.stringify(wire))).toEqual("bigint" in want ? BigInt(want.bigint!) : new Uint8Array(want.bytes!));
     for (const wire of v.invalid) expect(() => parse(JSON.stringify(wire))).toThrow();
   });
 });

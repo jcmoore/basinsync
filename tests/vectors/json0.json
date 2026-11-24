@@ -18,9 +18,15 @@
   "globalSymbol": [
     ["app.sym", "0$app.sym"], ["", "0$"]
   ],
+  "decodeOnly": [
+    ["0xFF", {"bigint": "255"}], ["0x00ff", {"bigint": "255"}], ["0~F", {"bigint": "-16"}],
+    ["0*AA==", {"bytes": [0]}], ["0%AA==", {"bytes": [0]}], ["0%AA", {"bytes": [0]}],
+    ["0%+/8", {"bytes": [251, 255]}]
+  ],
   "invalid": [
     "0", "0w0z", "0yvf", "0zg0", "0A", "0Z1", "0_custom", "0!", "0a", "01",
-    "0x", "0xg", "0~", "0~z", "0#foo", "0#Symbol.species"
+    "0x", "0xg", "0~", "0~z", "0#foo", "0#Symbol.species",
+    "0*AA=", "0*AB", "0* AA", "0*+/8", "0%-_8"
   ],
   "unsupportedWellKnownSymbols": ["dispose", "match"]
 }

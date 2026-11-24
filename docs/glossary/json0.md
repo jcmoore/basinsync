@@ -22,6 +22,12 @@ unchanged. A lone `"0"` is therefore invalid.
 | `0[A-Z]` | All uppercase letters reserved to avoid case-insensitive filesystem clashes |
 | `0_` | Application-specific extensions/interpretations |
 
+The `0.` payload is the text after the prefix, a JSON number
+(`-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`). `0x` and `0~` payloads need at
+least one hexadecimal digit; readers accept either case and leading zeros, and
+writers emit minimal lowercase. Writers omit `0*` padding; readers accept exact
+optional `=` padding in both alphabets and reject whitespace, characters from the
+other alphabet, and nonzero unused bits. `0$` names may be empty.
 Other `0` prefixes are invalid/reserved. Reject reserved or unsupported encodings;
 `0_` interpretations require application agreement. Decode decimal reals without
 rounding through binary floating point. Other JSON values retain their usual meaning.

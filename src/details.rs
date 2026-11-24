@@ -119,7 +119,7 @@ mod tests {
             (BigUint::from(1u8) << 128usize).to_string()
         );
         assert_eq!(details.sha384, [0, 255]);
-        for wire in ["0*AP8", "0*AP8=", "0%AP8=", "0%AP8", "0* A\tP8\n"] {
+        for wire in ["0*AP8", "0*AP8=", "0%AP8=", "0%AP8"] {
             let details: CommitDetails = serde_json::from_value(serde_json::json!({
                 "flow": "00", "viewpoint": "0x0", "edges":[],"sha384": wire,
             }))
@@ -134,6 +134,8 @@ mod tests {
             r#"{"flow":"f","viewpoint":0,"edges":[],"sha384":"0*"}"#,
             r#"{"flow":"f","viewpoint":"0x0","edges":[],"sha384":"00*"}"#,
             r#"{"flow":"f","viewpoint":"0x0","edges":[],"sha384":"0*?"}"#,
+            r#"{"flow":"f","viewpoint":"0x0","edges":[],"sha384":"0* AP8"}"#,
+            r#"{"flow":"f","viewpoint":"0x0","edges":[],"sha384":"0*AP9"}"#,
             r#"{"flow":"f","flow":"g","viewpoint":"0x0","edges":[],"sha384":"0*"}"#,
             r#"{"flow":"f","viewpoint":"0x0","edges":[],"sha384":"0*","extra":0}"#,
         ] {
