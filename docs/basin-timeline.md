@@ -29,7 +29,8 @@
 
 The *Basin's*[~][basin] shared *Timeline*[~][timeline] records state changes using the
 *Timeline object-key pattern*[~][object-keys]. *Milestones*[~][milestone] start at one and increase
-without gaps; *Milestone*[~][milestone] zero has no *Timeline*[~][timeline] key. To catch up, read the latest *Basin*[~][basin] *recovery anchor*[~][basin-backup]
+without gaps; *Milestone*[~][milestone] zero has no *Timeline*[~][timeline] key. To catch up, including after
+a positive write or status probe, first discover the latest *Basin*[~][basin] *recovery anchor*[~][basin-backup]
 and ingest every subsequent *DifferentialEvent*[~][differential-event]. Its
 recorded *Milestone*[~][milestone] seeds exponential search for the tail.
 Encode complemented *Milestones*[~][milestone] as *Lexidecimal*[~][lexidecimal],
@@ -99,7 +100,8 @@ preparing from a drained pipeline, probe the next *Milestone*[~][milestone] and 
 only when it exists. Batches prepared behind an unpublished one need no probe;
 the conditional PUT is the race guard. A server that loses
 a *conditional write*[~][conditional-write] race fails its unpublished batches and
-every queued request, then exits unsuccessfully; batches already durable keep
+every queued request, including 409s still awaiting their prefix, with 503
+`stopped`, answers them, then exits unsuccessfully; batches already durable keep
 their success; restarting recovers it from
 the *Timeline*[~][timeline]. A drained server probes first, so it loses only
 races that begin between that probe and its PUT.

@@ -77,9 +77,10 @@ recovery, large and delayed uploads, concurrent backup workers, interrupted copi
 replies, and corrupt backups. Run the *development checks*[~][development] and
 compare *background backup overhead*[~][0004-backup-overhead].
 
-`BASINSYNC_DATA_DIR` defaults to `.local/state`; each writer uses its own
-reconstructed on-disk cache. `BASINSYNC_BACKUP_INTERVAL_MS` defaults to 1000;
-zero disables background backups for comparisons. Export with bounded buffers
+`BASINSYNC_DATA_DIR` defaults to `.local/state`; writers may share it, each
+keeping its own reconstructed on-disk cache in a private subdirectory.
+`BASINSYNC_BACKUP_INTERVAL_MS` defaults to 1000, and the first periodic backup
+waits one interval; zero disables background backups for comparisons. Export with bounded buffers
 and stream uploads. *Epilogue compaction*[~][epilogue-compaction],
 *Timeline eviction*[~][timeline-eviction], and
 *Prologue vacuuming*[~][prologue-vacuuming] remain for later tutorials.

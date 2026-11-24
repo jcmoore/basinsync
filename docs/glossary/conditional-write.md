@@ -10,7 +10,8 @@ S3 `PutObject` with `If-None-Match: *` creates an object only when its key is
 absent. A zero-byte *sentinel*[~][empty-sentinel] can instead be replaced using
 its observed *ETag*[~][etag] in `If-Match`: try `If-None-Match: *` first, and on
 412 read the key; if it holds the empty sentinel, retry with `If-Match` on that
-validator, otherwise another writer won. Competing writers cannot replace a
+validator, otherwise another writer won. If that `If-Match` also fails, another
+writer won. Competing writers cannot replace a
 nonempty first writer's bytes, including *tombstones*[~][tombstone]. The one
 exception is *Epilogue compaction*[~][epilogue-compaction], which replaces a
 retired *CommitMarker*[~][commit-marker] with a *tombstone*[~][tombstone] using

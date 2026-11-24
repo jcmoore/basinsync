@@ -69,7 +69,7 @@ Indexed error codes:
 
 | `code` | Meaning |
 | --- | --- |
-| `invalid_node` | Malformed node fields or authentication |
+| `invalid_node` | Malformed node fields, edges, or authentication |
 | `invalid_context` | Invalid S3 *context*[~][context] metadata |
 | `invalid_length` | Content length beyond the database integer range |
 | `invalid_height` | An edge's *height*[~][node-height] is not below its parent's |
@@ -79,8 +79,13 @@ Indexed error codes:
 | `length_collision`, `edges_collision`, `context_collision` | The existing *node*[~][node] differs |
 | `child_unknown` | A child has no reserved allocation |
 | `child_freed` | A child awaits reclamation |
-| `child_unverified` | A child's object is not verified in either generation |
+| `child_missing` | A child's object is absent from both generations |
+| `child_length_mismatch` | A child's object length differs from its reservation |
+| `child_unavailable` | A child's object could not be verified, such as on a denied or failed read |
+| `child_unverified` | A child's allocation has not been verified yet |
 | `child_changed` | A child's allocation changed during verification; retry |
+
+Commit edges that fail the same checks return 422 with these `child_*` codes.
 
 Presigned URLs, here and in status responses, expire within minutes; request
 new ones rather than caching them.

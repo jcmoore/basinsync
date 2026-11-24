@@ -36,7 +36,9 @@ commit. Rejection must not advance the sequence. Check in this order: request
 structure (400), then content (*context*[~][context], edges, and *digest*[~][sha384];
 422) before queuing, and the *viewpoint*[~][viewpoint] (409) last, when the
 request is prepared, against the prefix that includes earlier prepared batches.
-Reply only once that prefix is durable.
+Reply only once that prefix is durable. Rejected requests never enter a
+*DifferentialEvent*[~][differential-event]; a batch with none accepted publishes
+nothing, and its 409s still wait for every earlier batch.
 
 Responses use *JSON0*[~][json0] with bigint *viewpoints*[~][viewpoint].
 All `/api/v0` responses include `timelines.basin.milestone`, a bigint identifying
@@ -53,9 +55,10 @@ A successful commit returns HTTP 201 with its committed *Viewpoint*[~][viewpoint
 
 Other failures return `{"error": code, "message": text, "timelines": …}`: 400
 for a malformed request or multipart body, 422 for content that fails
-validation (such as `digest_mismatch`, or invalid *context*[~][context] or edges),
-503 `stopped` while shutting down (the outcome may be unknown), and 500 when
-publication fails. An invalid *Flow*[~][flow] id is a malformed request (400)
+validation (such as `digest_mismatch` or a `sha384` of the wrong length, or
+invalid *context*[~][context] or edges), 503 `stopped` when the server stops
+before the request's batch is durable, including after a failed publication or
+lost race (the outcome may be unknown), and 500 when a transaction fails to prepare. An invalid *Flow*[~][flow] id is a malformed request (400)
 on every endpoint. Clients act on the status; `error` codes beyond those named
 in these pages are informative and may change. Status and reservation requests
 return 200.

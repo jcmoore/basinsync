@@ -47,9 +47,10 @@ Shared definitions such as `command` and `decimal` are in the *message schemas*[
 
 `logical.header` is the 56-byte native log header;
 `logical.frames` holds one entry: the transaction's complete *logical frame*[~][logical-frame],
-including portable changes, as the log stores it after that header. Each delta
-captures exactly one transaction; checkpoint before any other transaction on that
-database. All byte payloads are binary blobs.
+including portable changes, as the log stores it after that header. A delta
+covers one database's single transaction for one *Timeline event*[~][differential-event]:
+batched requests share that transaction, and each database's delta joins the
+same command, so the group applies together. All byte payloads are binary blobs.
 
 Each `physical.segments` entry is a complete *physical WAL*[~][wal] segment,
 including its header, *page frames*[~][physical-frame], and commit boundary. Validate native checksums,
