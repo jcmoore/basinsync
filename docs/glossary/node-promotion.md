@@ -1,6 +1,7 @@
 [conditional-read]: <conditional-read.md>
 [conditional-write]: <conditional-write.md>
 [context]: <context.md>
+[dusting]: <dusting.md>
 [etag]: <etag.md>
 [kernelspace]: <kernelspace.md>
 [node]: <node.md>
@@ -19,7 +20,8 @@ retry failures without relaying bytes through the server.
 Promote children before their parent. Verify an existing destination by *conditional HEAD*[~][conditional-read], or
 *conditionally create*[~][conditional-write] it from the young object.
 Verify its length and original *ETag*[~][etag] before deleting young; record
-`promoted` afterward. Copy with `x-amz-metadata-directive: REPLACE`, preserving
+`promoted` afterward without rechecking young. An old write URL may recreate
+the young object later; that copy is an orphan for *dusting*[~][dusting]. Copy with `x-amz-metadata-directive: REPLACE`, preserving
 *context*[~][context] metadata and recording the original *ETag*[~][etag] as
 `x-amz-meta-basinsync-source-etag`; *KernelSpace*[~][kernelspace] copies also keep `x-amz-meta-sha384`.
 The `(promoted, marked)` index queues work with `promoted = '' AND marked > ''`;

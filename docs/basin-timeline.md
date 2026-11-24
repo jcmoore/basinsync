@@ -6,6 +6,7 @@
 [conditional-write]: <glossary/conditional-write.md>
 [context]: <glossary/context.md>
 [differential-event]: <glossary/differential-event.md>
+[diy/0zg2/261023-turso-reservoir-vfs]: <diy/0zg2/261023-turso-reservoir-vfs/README.md>
 [empty-sentinel]: <glossary/empty-sentinel.md>
 [envbuf]: <glossary/envbuf.md>
 [epilogue-protocol]: <epilogue-protocol.md>
@@ -68,6 +69,11 @@ commitkernel-command = command<"sts/0/databasin/commitkernel", {
 
 Shared definitions such as `command` and `decimal` are in the *message schemas*[~][message-schemas].
 
+At most two batches sit between preparation and durable publication. A batch
+closes at `BASINSYNC_BATCH_MAX` requests, 8 MiB of request data, or the
+`BASINSYNC_BATCH_WAIT_MS` window, and its requests share one
+*DifferentialEvent*[~][differential-event]; admission holds at most two more full
+batches. *Turso Reservoir VFS*[~][diy/0zg2/261023-turso-reservoir-vfs] gives the defaults.
 Regardless of in-flight limits, durable publication must follow
 *Milestone*[~][milestone] order to preserve *causal consistency*[~][causal-consistency].
 Complete one *conditional PUT*[~][conditional-write] before starting the next;
@@ -86,11 +92,14 @@ Mismatches use the *common response*[~][epilogue-protocol].
 `BASINSYNC_STATUS_PROBE_MAX_AGE_MS` defaults to 3000; zero probes on every status
 request. Reuse a successful probe or refresh across *Flows*[~][flow] within that
 window, without extending it on cache hits. Status still waits for pending local
-uploads; writes always probe independently of this allowance: before
+uploads: it waits until every batch prepared before it is durable. Servers
+ingest other writers' events only from a drained pipeline. Writes always probe
+independently of this allowance: before
 preparing from a drained pipeline, probe the next *Milestone*[~][milestone] and catch up
 only when it exists. Batches prepared behind an unpublished one need no probe;
 the conditional PUT is the race guard. A server that loses
-a *conditional write*[~][conditional-write] race fails its prepared batches and
-every queued request, then exits unsuccessfully; restarting recovers it from
+a *conditional write*[~][conditional-write] race fails its unpublished batches and
+every queued request, then exits unsuccessfully; batches already durable keep
+their success; restarting recovers it from
 the *Timeline*[~][timeline]. A drained server probes first, so it loses only
 races that begin between that probe and its PUT.

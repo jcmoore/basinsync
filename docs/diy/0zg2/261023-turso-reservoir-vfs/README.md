@@ -1,4 +1,3 @@
-[message-schemas]: <../../../message-schemas.md>
 ---
 prerequisites:
   - 0zg1/261023-basin-timeline-race
@@ -25,6 +24,7 @@ prerequisites:
 [leader]: <../../../glossary/leader.md>
 [lexidecimal]: <../../../glossary/lexidecimal.md>
 [logical-frame]: <../../../glossary/logical-frame.md>
+[message-schemas]: <../../../message-schemas.md>
 [milestone]: <../../../glossary/milestone.md>
 [mvcc]: <../../../glossary/mvcc.md>
 [object-keys]: <../../../object-keys.md>

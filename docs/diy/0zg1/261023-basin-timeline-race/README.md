@@ -1,4 +1,3 @@
-[message-schemas]: <../../../message-schemas.md>
 ---
 prerequisites:
   - 0zg0/261022-shallow-epilogue-commits
@@ -21,6 +20,7 @@ prerequisites:
 [flow]: <../../../glossary/flow.md>
 [lexidecimal]: <../../../glossary/lexidecimal.md>
 [margin]: <../../../glossary/margin.md>
+[message-schemas]: <../../../message-schemas.md>
 [milestone]: <../../../glossary/milestone.md>
 [range-get]: <../../../glossary/range-get.md>
 [range-manifest]: <../../../glossary/range-manifest.md>
