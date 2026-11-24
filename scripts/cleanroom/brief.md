@@ -25,7 +25,8 @@ as a gap, and keep going.
   JSON0, CRC32C, SHA-384 hex, object keys, Flow ids, and the oracle CLI, with
   Kani proofs already checked (`crates/codec/KANI.md`). Depend on
   `vendor/basinsync-codec/crates/codec` by path instead of rewriting codecs,
-  and do not edit it. Where it disagrees with the docs, the docs win: record
+  and do not edit it. It decodes only FlexBuffers extensions: read whole
+  documents with a FlexBuffers library after `layout::check_layout`. Where it disagrees with the docs, the docs win: record
   a gap and wrap or work around the kit.
 - Your build will later be checked against independent tests you cannot see.
   Follow the documentation exactly; do not invent behavior to make things
