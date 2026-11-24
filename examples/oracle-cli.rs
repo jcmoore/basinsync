@@ -76,6 +76,31 @@ fn answer(request: &Value) -> Result<Value> {
         )?),
         "timeline.milestone" => json!(timeline::from_key(text(request, "key")?)?.to_string()),
         "flow.normalize" => json!(event::normalize_flow(text(request, "id")?)?),
+        "json0.encode" => {
+            use basinsync::json0::Scalar;
+            let value = if let Some(t) = request["text"].as_str() {
+                Scalar::Text(t.into())
+            } else if let Some(n) = request["bigint"].as_str() {
+                Scalar::BigInt(n.parse()?)
+            } else if request.get("bytes").is_some() {
+                Scalar::Bytes(bytes(request, "bytes")?)
+            } else if let Some(name) = request["wellKnownSymbol"].as_str() {
+                Scalar::WellKnownSymbol(name.into())
+            } else {
+                Scalar::GlobalSymbol(text(request, "globalSymbol")?.into())
+            };
+            json!(basinsync::json0::encode_scalar(&value)?)
+        }
+        "json0.decode" => {
+            use basinsync::json0::Scalar;
+            match basinsync::json0::decode_scalar(text(request, "wire")?)? {
+                Scalar::Text(t) => json!({"text": t}),
+                Scalar::BigInt(n) => json!({"bigint": n.to_string()}),
+                Scalar::Bytes(b) => json!({"bytes": b}),
+                Scalar::WellKnownSymbol(s) => json!({"wellKnownSymbol": s}),
+                Scalar::GlobalSymbol(s) => json!({"globalSymbol": s}),
+            }
+        }
         "keys.prefixes" => {
             let flows = epilogue::flow_prefix("x", &uuid::Uuid::nil());
             json!({

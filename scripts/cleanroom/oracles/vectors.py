@@ -32,6 +32,16 @@ def cases(repo):
     for bad in v["invalid"]:
         yield "diffuse16", f"reject {bad!r}", {"op": "diffuse16.decode", "text": bad}, error
 
+    v = vectors("json0")
+    for field in ("text", "bigint", "bytes", "wellKnownSymbol", "globalSymbol"):
+        for value, wire in v[field]:
+            yield "json0", f"encode {field} {value!r}", {"op": "json0.encode", field: value}, ok(wire)
+            yield "json0", f"decode {wire!r}", {"op": "json0.decode", "wire": wire}, ok({field: value})
+    for wire in v["invalid"]:
+        yield "json0", f"reject {wire!r}", {"op": "json0.decode", "wire": wire}, error
+    for name in v["unsupportedWellKnownSymbols"]:
+        yield "json0", f"refuse to encode #{name}", {"op": "json0.encode", "wellKnownSymbol": name}, error
+
     v = vectors("timeline")
     for m, key in v["keys"]:
         yield "timeline", f"key {m}", {"op": "timeline.key", "milestone": m}, ok(key)

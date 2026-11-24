@@ -22,6 +22,8 @@ arrays of numbers 0–255.
 | `envbuf.decode` | `wire` (bytes: one envelope) | `{"format", "content"}` |
 | `flexbuffers.encodeExtension` | exactly one of `bigint`, `wellKnownSymbol`, `globalSymbol` | FlexBuffers bytes |
 | `flexbuffers.decodeExtension` | `wire` (bytes) | object with the one matching field |
+| `json0.encode` | exactly one of `text` (string), `bigint`, `bytes`, `wellKnownSymbol`, `globalSymbol` | the JSON0 string value |
+| `json0.decode` | `wire` (a JSON0 string value) | object with the one matching field |
 | `timeline.key` | `milestone` | object key |
 | `timeline.milestone` | `key` | decimal string |
 | `flow.normalize` | `id` | canonical Flow ID |
