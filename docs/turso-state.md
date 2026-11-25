@@ -14,7 +14,7 @@ Materialize state in *Turso*[~][turso] at upstream *revision 032f5bb*[~][turso-s
 (crate `turso_core`, release 0.9.0-pre.1), with default features off and `fs`
 and `conn_raw_api` enabled. Open each database with `PRAGMA page_size = 16384`
 and `PRAGMA journal_mode = mvcc`, and enable portable logical changes on its
-connection. Disable automatic checkpoints; checkpoint explicitly after each
+connection (`connection.set_portable_logical_changes_enabled(true)`). Disable automatic checkpoints; checkpoint explicitly after each
 transaction, capturing its *physical WAL*[~][wal] writes before the checkpoint
 truncates them.
 

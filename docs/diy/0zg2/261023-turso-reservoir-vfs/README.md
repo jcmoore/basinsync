@@ -17,6 +17,7 @@ prerequisites:
 [differential-event]: <../../../glossary/differential-event.md>
 [diy/0zg1/261023-basin-timeline-race]: <../../0zg1/261023-basin-timeline-race/README.md>
 [downstream]: <../../../glossary/downstream.md>
+[durable-storage]: <../../../glossary/durable-storage.md>
 [envbuf]: <../../../glossary/envbuf.md>
 [epilogue]: <../../../glossary/epilogue.md>
 [flexbuffers]: <../../../glossary/flexbuffers.md>
@@ -36,16 +37,19 @@ prerequisites:
 [upstream]: <../../../glossary/upstream.md>
 [viewpoint]: <../../../glossary/viewpoint.md>
 [virtual-file-system]: <../../../glossary/virtual-file-system.md>
+[wal]: <../../../glossary/wal.md>
 [z-set]: <../../../glossary/z-set.md>
 
 # Turso Reservoir VFS
 
 Materialize the *Basin's*[~][basin] *Timeline*[~][timeline] in *Turso*[~][turso]
-with *MVCC*[~][mvcc] and portable logical changes, pinned and configured as the
-*state delta reference*[~][turso-state] describes. Store the applied *Milestone*[~][milestone] and each *Flow's*[~][flow]
+with 16 KiB pages, *MVCC*[~][mvcc], and portable logical changes, pinned and
+configured as the *state delta reference*[~][turso-state] describes. Store the applied *Milestone*[~][milestone] and each *Flow's*[~][flow]
 latest *Viewpoint*[~][viewpoint] as decimal text:
 
 ```sql
+PRAGMA page_size = 16384;
+PRAGMA journal_mode = mvcc;
 CREATE TABLE basin (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   milestone TEXT NOT NULL
@@ -79,12 +83,18 @@ and *downstream*[~][downstream] *Viewpoints*[~][viewpoint] use positive
 *Viewpoints*[~][viewpoint] within a batch and verify indexed-location recovery.
 
 Capture each transaction's logical and physical frames as a delta that, applied
-to the previous state, reproduces the new rows exactly.
+to the previous state, reproduces the new rows exactly. Use crate features `fs`
+and `conn_raw_api` and call `connection.set_portable_logical_changes_enabled(true)`.
+Implement *DurableStorage*[~][durable-storage] by delegating to the engine and
+observing `log_tx`'s serialization callback for *logical frames*[~][logical-frame].
+Disable automatic checkpointing; intercept *physical WAL*[~][wal] writes before
+each explicit checkpoint truncates them.
 
-Give independent SQL readers pinned snapshots of a committed generation while
-the primary advances, without rebuilding a shadow, and release history when
-readers finish; a file-backed copy-on-write
-*VFS*[~][virtual-file-system] does this. Use these views to derive prior/next
+Add a file-backed copy-on-write *VFS*[~][virtual-file-system]. Pin a checkpointed
+generation before the next transaction; retain overwritten pages on disk and
+seal the next generation after its checkpoint. Independent SQL readers query
+the pinned views while the primary advances, without rebuilding a shadow.
+Release page history when readers finish. Use these views to derive prior/next
 rows for the *Z-set*[~][z-set] experiment; the
 *snapshot-reader measurements*[~][0003-snapshot-readers] record the procedure.
 

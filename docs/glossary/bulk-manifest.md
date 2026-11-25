@@ -31,6 +31,10 @@ the footer's start. Derive the exclusive upper *Milestone*[~][milestone] as
 Trimmed events have no trailing retry *margins*[~][margin], so logical and
 physical offsets coincide throughout the event prefix.
 
+For example, `lowest: 42`, `coordinate: 65536`, `ends: [488, 1360, 1976]`
+indexes *Milestones*[~][milestone] 42 through 44 (exclusive upper 45), with
+global ends 66024, 66896, and 67512.
+
 Encode `lowest` and `coordinate` with the *bigint extension*[~][flexbuffers],
 and `ends` as an ordinary signed-integer vector, keeping `VT_VECTOR_UINT`
 reserved for extensions. Verify indexed framing, lengths, and coordinates.
