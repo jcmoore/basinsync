@@ -5,7 +5,8 @@
 //! OBJECT_DIRs are S3-compatible bucket directories (or any parents of them),
 //! such as VersityGW POSIX backends. Timeline events, BulkOrders, and Basin root
 //! markers are decoded; every FlexBuffers command tuple is validated against
-//! `<path's last segment>-command`, every root marker against `basin-root`.
+//! `<path's last segment>-command`, every root marker and commitkernel blob
+//! against `basin-root`.
 //! Prints per-rule counts and the first failures; exits 1 on any failure.
 use anyhow::{Context, Result, bail, ensure};
 use basinsync::{envbuf, flexbuffer};
@@ -185,8 +186,31 @@ impl Checker {
             ))
         });
         match result {
-            Ok((rule, value)) => self.check(&rule, &value, origin),
+            Ok((rule, value)) => {
+                self.check(&rule, &value, origin);
+                if rule == "commitkernel-command" {
+                    self.kernel_root(&value, origin);
+                }
+            }
             Err(error) => self.undecodable("command", origin, error),
+        }
+    }
+    /// A commitkernel's blob is a root message in its own right.
+    fn kernel_root(&mut self, command: &Value, origin: &str) {
+        let blob = match command {
+            Value::Array(items) => items[3].as_map().and_then(|m| {
+                m.iter()
+                    .find(|(k, _)| k.as_text() == Some("blob"))
+                    .and_then(|(_, v)| v.as_bytes())
+            }),
+            _ => None,
+        };
+        let Some(blob) = blob else {
+            return; // the command schema already reports a missing blob
+        };
+        match flexbuffer::root(blob).and_then(cbor) {
+            Ok(value) => self.check("basin-root", &value, origin),
+            Err(error) => self.undecodable("basin-root", origin, error),
         }
     }
     fn undecodable(&mut self, rule: &str, origin: &str, error: anyhow::Error) {

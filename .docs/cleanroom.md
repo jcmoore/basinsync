@@ -23,6 +23,15 @@ scripts/cleanroom/run.sh --command 'CMD' NAME   # any other agent
 scripts/cleanroom/collect.sh NAME               # fetch as orphan branch cleanroom/NAME
 ```
 
+Finished runs are archived as branches of the private
+[basinsync-cleanrooms](https://github.com/memoremix-ing/basinsync-cleanrooms)
+repository, one per run: the rebuild's history plus `cleanroom-run/` with its
+logs, oracle results and full transcript. Its `main` README lists the scores.
+
+```sh
+scripts/cleanroom/archive.sh git@github.com:memoremix-ing/basinsync-cleanrooms.git NAME...
+```
+
 ## Codec kit and codec-only rooms
 
 Full rebuilds (`--brief full`, the default) get `scripts/cleanroom/kit/codec`

@@ -17,10 +17,11 @@ Moving a marked *node's*[~][node] immutable *revision*[~][revision] from the
 Use *S3 COPY*[~][s3-copy] so payload bytes stay within object storage;
 retry failures without relaying bytes through the server.
 
-Promote children before their parent. Verify an existing destination by *conditional HEAD*[~][conditional-read], or
-*conditionally create*[~][conditional-write] it from the young object.
-Verify its length, and that its own *ETag*[~][etag] or recorded source *ETag*[~][etag]
-equals the original, before deleting young; record
+Promote children before their parent. Before deleting young, observe the
+destination: find it present by *conditional HEAD*[~][conditional-read], or
+*conditionally create*[~][conditional-write] it from the young object. Presence is
+enough; the *ETag*[~][etag] confirmed at allocation already proves the upload, so
+neither the copy's length nor its *ETag*[~][etag] need match. Record
 `promoted` afterward without rechecking young. An old write URL may recreate
 the young object later; that copy is an orphan for *dusting*[~][dusting]. Copy with `x-amz-metadata-directive: REPLACE`, preserving
 *context*[~][context] metadata and recording the original *ETag*[~][etag] as

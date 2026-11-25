@@ -1425,10 +1425,7 @@ mod group_tests {
         )?;
         let (reserved, vp) =
             stager.prepare_kernel(crate::kernel::Operation::Reserve(graph.clone()))?;
-        let command = crate::kernel::Commit {
-            viewpoint: vp.decimal(),
-            graph: graph.clone(),
-        };
+        let command = crate::kernel::Commit::new(vp.decimal(), graph.clone())?;
         let before = stager.prefix();
         assert!(
             stager

@@ -62,12 +62,16 @@ commitflow or `sts/0/databasin/commitkernel` tuples, one `sts/0/databasin/ingest
 *state deltas*[~][turso-state] carry the Turso changes
 that materialize the recorded state; all requests wait for durable publication.
 
-`commitkernel` carries the server-driven *Basin backup graph*[~][basin-backup];
-`graph` is that backup's root message itself. Reservations use only ingestion frames.
+`commitkernel` carries the server-driven *Basin backup graph*[~][basin-backup]
+as a *CommitMarker*[~][commit-marker] does: `blob` is that backup's root message,
+byte for byte as its *Basin*[~][basin] *marker*[~][commit-marker] wraps it, and
+`sha384` is its hexadecimal *SHA-384*[~][sha384]. Digest and compare those bytes;
+never re-encode a decoded root, since *FlexBuffers*[~][flexbuffers] allows more
+than one layout of the same map. Reservations use only ingestion frames.
 
 ```cddl
 commitkernel-command = command<"sts/0/databasin/commitkernel", {
-  viewpoint: decimal, graph: basin-root,
+  viewpoint: decimal, sha384: hex384, blob: bstr,  ; blob: a basin-root message
 }>
 ```
 
