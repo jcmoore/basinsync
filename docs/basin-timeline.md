@@ -42,6 +42,8 @@ bounds. A nonempty object under the *Timeline*[~][timeline] prefix whose key is 
 canonical complemented *Milestone*[~][milestone] is corruption; refuse to start. Leading *tombstones*[~][tombstone] occupy retired positions, not replayable
 entries; recovery needs a snapshot covering them. An empty *Timeline*[~][timeline] expects *Milestone*[~][milestone] one.
 Use *conditional reads*[~][conditional-read] for GETs and HEADs, including search probes.
+A probe or catch-up read that fails, rather than finding the position absent,
+stops the server like a lost race.
 
 Commitflow tuples begin with `Symbol.species`, using the
 *FlexBuffers*[~][flexbuffers] extension encoding, and carry a `markers` map
@@ -101,8 +103,8 @@ preparing from a drained pipeline, probe the next *Milestone*[~][milestone] and 
 only when it exists. Batches prepared behind an unpublished one need no probe;
 the conditional PUT is the race guard. A server that loses
 a *conditional write*[~][conditional-write] race fails its unpublished batches and
-every queued request, including 409s still awaiting their prefix, with 503
-`stopped`, answers them, then exits unsuccessfully; batches already durable keep
+every queued request, including 409s and status requests still awaiting their
+prefix, with 503 `stopped`, answers them, then exits unsuccessfully; batches already durable keep
 their success; restarting recovers it from
 the *Timeline*[~][timeline]. A drained server probes first, so it loses only
 races that begin between that probe and its PUT.

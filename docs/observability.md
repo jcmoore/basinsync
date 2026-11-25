@@ -28,6 +28,10 @@ resampled from recovered state, approximately once per second.
 | `basinsync_analogue_buffer_bytes` | none | Archive buffering |
 | `basinsync_last_success_timestamp_seconds` | `operation` | Last local Timeline, backup, or archive publication |
 
+Stages include `admission`, `prepare`, `publish` (operation `timeline`, once per
+Timeline PUT), and `acknowledgement`, which times each submission from admission
+to its durable result.
+
 `operation` names the request or batch kind, such as `commit`, `reserve`,
 `status`, `kernel`, `promotion`, or `cleanup`; `outcome` uses the
 durable-result values above.

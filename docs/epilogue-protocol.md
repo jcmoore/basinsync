@@ -28,7 +28,9 @@
 `blob` (raw bytes). `details` contains `viewpoint: bigint` and
 `sha384: Uint8Array`, optional `context: Record<string, string>` (default `{}`),
 and a required `edges` array (`[]` for an empty graph), using the
-*reservation API's*[~][heap-protocol] authenticated child descriptors.
+*reservation API's*[~][heap-protocol] authenticated child descriptors. Unknown
+`details` fields, and a `context` or `edges` of the wrong JSON type, are malformed.
+Accept request bodies up to 8 MiB.
 Store *context*[~][context] entries as `x-amz-meta-ctx-${key}` object metadata.
 Verify each referenced *node*[~][node] before accepting its edge. Require the expected
 *viewpoint*[~][viewpoint] and matching *digest*[~][sha384] before accepting a
